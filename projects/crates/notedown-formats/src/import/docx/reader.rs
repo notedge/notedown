@@ -38,11 +38,15 @@ pub fn import_docx_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
 
     let package = OpcPackage::open(label.to_string(), bytes.to_vec()).map_err(map_opc_error)?;
     let budget = ParseBudget::default();
+    let document_part = package
+        .main_document_part_path(&budget)
+        .map_err(map_opc_error)?
+        .unwrap_or_else(|| DOCUMENT_XML.to_string());
     let xml = package
-        .read_part(DOCUMENT_XML, &budget)
+        .read_part(&document_part, &budget)
         .map_err(map_opc_error)?;
 
-    let rels = read_document_relationships(&package, &budget)?;
+    let rels = read_document_relationships(&package, &document_part, &budget)?;
     let numbering = read_numbering_catalog(&package, &budget);
     let footnotes = read_footnote_catalog(&package, &budget);
     let mut graph = xml::new_graph(label);

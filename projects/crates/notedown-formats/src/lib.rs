@@ -13,6 +13,11 @@ pub use error::FormatError;
 pub fn capabilities() -> Vec<FormatCapability> {
     vec![
         FormatCapability {
+            id: "notedown",
+            direction: FormatDirection::Import,
+            status: FormatStatus::Partial,
+        },
+        FormatCapability {
             id: "markdown",
             direction: FormatDirection::Import,
             status: FormatStatus::Ready,

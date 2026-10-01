@@ -12,6 +12,7 @@ edition = "2021"
 notedown-ir = { path = "../notedown-ir" }
 oak-core = { workspace = true, optional = true }
 oak-markdown = { workspace = true, optional = true }
+oak-notedown = { workspace = true, optional = true }
 acorn-core = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
@@ -19,8 +20,9 @@ oak-html = { workspace = true, optional = true }
 quick-xml = { version = "0.37.5", optional = true }
 
 [features]
-default = ["markdown", "docx", "epub"]
+default = ["markdown", "notedown", "docx", "epub"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
+notedown = ["dep:oak-core", "dep:oak-notedown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:quick-xml"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 

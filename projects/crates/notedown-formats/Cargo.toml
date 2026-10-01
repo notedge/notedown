@@ -10,10 +10,12 @@ edition = "2021"
 
 [dependencies]
 notedown-ir = { path = "../notedown-ir" }
+oak-core = { workspace = true, optional = true }
+oak-markdown = { workspace = true, optional = true }
 
 [features]
-default = []
-markdown = []
+default = ["markdown"]
+markdown = ["dep:oak-core", "dep:oak-markdown"]
 docx = []
 epub = []
 

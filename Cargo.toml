@@ -19,6 +19,8 @@ text-utils = { git = "https://github.com/notedge/notedown.git", branch = "dev", 
 notedown-rt = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown-rt" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats" }
+oak-core = { git = "https://github.com/yggdrasil-language/oaks.git", branch = "dev" }
+oak-markdown = { git = "https://github.com/yggdrasil-language/oaks.git", branch = "dev", default-features = false, features = ["serde"] }
 
 [profile.release]
 lto = true

@@ -15,12 +15,12 @@ pub fn capabilities() -> Vec<FormatCapability> {
         FormatCapability {
             id: "markdown",
             direction: FormatDirection::Import,
-            status: FormatStatus::Planned,
+            status: FormatStatus::Ready,
         },
         FormatCapability {
             id: "markdown",
             direction: FormatDirection::Export,
-            status: FormatStatus::Planned,
+            status: FormatStatus::Ready,
         },
         FormatCapability {
             id: "docx",

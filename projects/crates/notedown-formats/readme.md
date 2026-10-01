@@ -1,7 +1,23 @@
 # notedown-formats
 
-Notedown document semantic import and export modules. Composes Oak text parsers and Acorn binary views into `notedown-ir`.
+Document import and export around `notedown-ir`. Format parsing and semantic lowering live here, not in Panduck.
 
-Panduck orchestrates these contracts. This crate does not depend on Panduck.
+## Modules
 
-Format dependencies are feature-gated. Skeleton modules return `FormatError::NotImplemented` until Oak/Acorn wiring lands in `R-7.3+`.
+| Format | Import | Export |
+|--------|--------|--------|
+| `markdown` | `oak-markdown` → IR | IR → Markdown |
+| `docx` | planned | planned |
+| `epub` | planned | planned |
+
+## Usage
+
+```rust
+use notedown_formats::import::markdown::import_markdown_bytes;
+use notedown_formats::export::markdown::export_markdown;
+
+let graph = import_markdown_bytes("note.md", "# Title\n\nBody.")?;
+let markdown = export_markdown(&graph)?;
+```
+
+Panduck calls these modules through `panduck-convert` orchestration only.

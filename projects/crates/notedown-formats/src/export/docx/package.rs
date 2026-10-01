@@ -79,17 +79,17 @@ const ROOT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"#;
 
-const DOCUMENT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-</Relationships>"#;
-
 /// Package a WordprocessingML body into a minimal OPC DOCX archive.
-pub fn build_minimal_opc_package(document_xml: &str, include_numbering: bool) -> Vec<u8> {
+pub fn build_minimal_opc_package(
+    document_xml: &str,
+    include_numbering: bool,
+    document_rels_xml: &str,
+) -> Vec<u8> {
     let content_types = content_types_xml(include_numbering);
     let mut entries = vec![
         ("[Content_Types].xml", content_types.as_bytes()),
         ("_rels/.rels", ROOT_RELS_XML.as_bytes()),
-        ("word/_rels/document.xml.rels", DOCUMENT_RELS_XML.as_bytes()),
+        ("word/_rels/document.xml.rels", document_rels_xml.as_bytes()),
         ("word/document.xml", document_xml.as_bytes()),
     ];
     if include_numbering {

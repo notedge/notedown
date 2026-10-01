@@ -150,3 +150,35 @@ fn docx_export_round_trips_tables() {
     assert!(markdown.contains("| H1 | H2 |"));
     assert!(markdown.contains("| A | B |"));
 }
+
+#[test]
+fn docx_export_round_trips_hyperlinks() {
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:hyperlink r:id="rId1">
+        <w:r><w:t>Example</w:t></w:r>
+      </w:hyperlink>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    Target="https://example.com" TargetMode="External"/>
+</Relationships>"#;
+    let zip = stored_zip(&[
+        ("word/document.xml", document_xml),
+        ("word/_rels/document.xml.rels", rels_xml),
+    ]);
+    let graph = import_docx_bytes("links.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let payload = String::from_utf8_lossy(&exported);
+    assert!(payload.contains("https://example.com"));
+    let round = import_docx_bytes("round.docx", &exported).expect("re-import docx");
+    let markdown = export_markdown(&round).expect("export markdown");
+    assert!(markdown.contains("[Example](https://example.com)"));
+}

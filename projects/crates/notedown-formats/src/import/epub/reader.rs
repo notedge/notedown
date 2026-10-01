@@ -72,11 +72,14 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
                 precision: SemanticStatus::Partial,
             });
         }
+        for loss in super::xhtml::losses_from_xhtml(&xhtml)? {
+            graph.push_loss(loss);
+        }
     }
 
     graph.push_loss(LossMarker {
         code: "import.epub.partial_coverage".into(),
-        message: "EPUB import currently maps OPF metadata and basic XHTML headings/paragraphs without oak-html lowering".into(),
+        message: "EPUB import maps OPF metadata and spine XHTML via oak-html. Navigation, assets and CSS/SVG remain pending".into(),
         status: SemanticStatus::Partial,
     });
     Ok(graph)

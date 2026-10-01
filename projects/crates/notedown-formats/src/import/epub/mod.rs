@@ -1,4 +1,4 @@
-//! EPUB import via Acorn OCF and thin XHTML projection.
+//! EPUB import via Acorn OCF and `oak-html` XHTML lowering.
 
 mod reader;
 mod xhtml;

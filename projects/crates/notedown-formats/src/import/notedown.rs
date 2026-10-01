@@ -68,6 +68,12 @@ fn lower_root_blocks(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Bl
     for child in node.children() {
         if let RedTree::Node(child_node) = child {
             match child_node.element_type() {
+                NoteElementType::Heading => {
+                    flush_list(&mut blocks, &mut pending_list);
+                    if let Some(block) = lower_block_node(child_node, source, NoteElementType::Heading) {
+                        blocks.push(block);
+                    }
+                }
                 NoteElementType::ListItem => {
                     let ordered = list_marker_ordered(child_node.text(source).as_ref());
                     let item = ListItem {
@@ -339,7 +345,7 @@ fn collect_inlines(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Inli
             }
             RedTree::Leaf(_) => {
                 let text = child.text(source);
-                if !text.trim().is_empty() {
+                if should_keep_inline_text(text.as_ref()) {
                     push_inline(&mut inlines, Inline::Text { text: text.into_owned() });
                 }
             }
@@ -390,10 +396,17 @@ fn lower_inline_node(
                 style: "italic".into(),
                 children: collect_inlines(node, source),
             }),
+            NoteTokenType::Whitespace => Some(Inline::Text {
+                text: node.text(source).into_owned(),
+            }),
             _ => None,
         },
         _ => None,
     }
+}
+
+fn should_keep_inline_text(text: &str) -> bool {
+    !text.is_empty() && text != "\n" && text != "\r"
 }
 
 fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {

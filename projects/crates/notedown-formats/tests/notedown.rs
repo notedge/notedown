@@ -8,7 +8,7 @@ fn notedown_import_lowers_heading_and_paragraph() {
     assert!(graph.blocks.len() >= 2);
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("# Title"));
-    assert!(markdown.contains("Hello world") || markdown.contains("Helloworld"));
+    assert!(markdown.contains("Hello world"));
 }
 
 #[test]
@@ -18,6 +18,15 @@ fn notedown_import_lowers_list_items() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("- Alpha"));
     assert!(markdown.contains("- Beta"));
+}
+
+#[test]
+fn notedown_import_lowers_fenced_code_block() {
+    let source = "```rust\nfn main() {}\n```\n";
+    let graph = import_notedown_bytes("code.nd", source).expect("import notedown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("```rust"));
+    assert!(markdown.contains("fn main() {}"));
 }
 
 #[test]

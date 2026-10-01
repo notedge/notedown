@@ -44,3 +44,17 @@ fn notedown_import_lowers_links() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("[home](https://example.com)"));
 }
+
+#[test]
+fn notedown_import_lowers_pipe_tables() {
+    let source = "| Name | Value |\n|------|-------|\n| Alpha | 1 |\n| Beta | 2 |\n";
+    let graph = import_notedown_bytes("table.nd", source).expect("import notedown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("| Name | Value |"));
+    assert!(markdown.contains("| Alpha | 1 |"));
+    assert!(markdown.contains("| Beta | 2 |"));
+    assert!(
+        !markdown.contains("| ------ |"),
+        "GFM separator row should not round-trip as data: {markdown}"
+    );
+}

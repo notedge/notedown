@@ -323,15 +323,59 @@ fn extract_table_rows(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<T
             let mut cells = Vec::new();
             for cell_child in row_node.children() {
                 if let RedTree::Node(cell_node) = cell_child {
-                    cells.push(collect_inlines(cell_node, source));
+                    let cell = trim_cell_inlines(collect_inlines(cell_node, source));
+                    if !cell.is_empty() {
+                        cells.push(cell);
+                    }
                 }
             }
-            if !cells.is_empty() {
-                rows.push(TableRow { cells });
+            if cells.is_empty() || is_gfm_table_separator_row(&cells) {
+                continue;
             }
+            rows.push(TableRow { cells });
         }
     }
     rows
+}
+
+fn is_gfm_table_separator_row(cells: &[Vec<Inline>]) -> bool {
+    cells.iter().all(|cell| {
+        let text = table_cell_plain_text(cell);
+        let trimmed = text.trim();
+        !trimmed.is_empty()
+            && trimmed.contains('-')
+            && trimmed
+                .chars()
+                .all(|ch| ch == '-' || ch == ':' || ch.is_whitespace())
+    })
+}
+
+fn trim_cell_inlines(inlines: Vec<Inline>) -> Vec<Inline> {
+    let mut trimmed = Vec::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text { text } => {
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    trimmed.push(Inline::Text { text });
+                }
+            }
+            other => trimmed.push(other),
+        }
+    }
+    trimmed
+}
+
+fn table_cell_plain_text(cell: &[Inline]) -> String {
+    cell.iter()
+        .map(|inline| match inline {
+            Inline::Text { text } => text.clone(),
+            Inline::InlineCode { text } => text.clone(),
+            Inline::Styled { children, .. } => table_cell_plain_text(children),
+            Inline::InlineMath { content, .. } => content.clone(),
+            Inline::Reference { display, .. } => display.clone(),
+        })
+        .collect::<String>()
 }
 
 fn collect_inlines(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Inline> {

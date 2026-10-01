@@ -19,6 +19,11 @@ fn capabilities_mark_ready_modules() {
             && cap.status == FormatStatus::Ready
     }));
     assert!(caps.iter().any(|cap| {
+        cap.id == "docx"
+            && cap.direction == FormatDirection::Export
+            && cap.status == FormatStatus::Partial
+    }));
+    assert!(caps.iter().any(|cap| {
         cap.id == "epub"
             && cap.direction == FormatDirection::Import
             && cap.status == FormatStatus::Partial

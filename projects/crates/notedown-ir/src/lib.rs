@@ -12,6 +12,8 @@ mod inline;
 mod relation;
 mod source;
 mod status;
+mod validate;
+mod wire;
 
 pub use asset::{Asset, AssetKind};
 pub use block::{Block, BlockNode, ListItem, TableRow};
@@ -21,3 +23,5 @@ pub use inline::Inline;
 pub use relation::{Relation, RelationEndpoint, RelationKind};
 pub use source::{CoverageReport, SourceKind, SourceRef};
 pub use status::{LossMarker, SemanticStatus};
+pub use validate::{ValidationIssue, ValidationReport};
+pub use wire::{DocumentEnvelope, WireError, SCHEMA_VERSION};

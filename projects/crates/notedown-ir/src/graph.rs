@@ -16,16 +16,19 @@ pub struct DocumentMetadata {
     pub tags: Vec<String>,
 }
 
-/// Semantic document graph — Panduck readers construct this, writers consume it.
+/// Semantic document graph — import layers construct this, export layers consume it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DocumentGraph {
     pub id: DocumentId,
+    pub revision: u64,
     pub metadata: DocumentMetadata,
     pub blocks: Vec<BlockNode>,
     pub relations: Vec<Relation>,
     pub assets: Vec<Asset>,
     pub sources: Vec<SourceRef>,
     pub coverage: CoverageReport,
+    #[serde(default)]
+    next_node: u64,
 }
 
 impl DocumentGraph {
@@ -33,6 +36,7 @@ impl DocumentGraph {
     pub fn new(id: DocumentId) -> Self {
         Self {
             id,
+            revision: 0,
             metadata: DocumentMetadata {
                 title: None,
                 language: None,
@@ -47,14 +51,35 @@ impl DocumentGraph {
                 complete: true,
                 loss: Vec::new(),
             },
+            next_node: 0,
         }
+    }
+
+    /// Bump the document revision after a semantic edit.
+    pub fn bump_revision(&mut self) {
+        self.revision += 1;
+    }
+
+    /// Replace display metadata without changing document identity.
+    pub fn set_metadata(&mut self, metadata: DocumentMetadata) {
+        self.metadata = metadata;
+        self.bump_revision();
     }
 
     /// Append a block and return its semantic node id.
     pub fn push_block(&mut self, block: Block) -> NodeId {
-        let id = NodeId(self.blocks.len() as u64 + 1);
+        self.next_node += 1;
+        let id = NodeId(self.next_node);
         self.blocks.push(BlockNode { id, block });
         id
+    }
+
+    /// Append a block with an explicit id (import adapters with stable foreign ids).
+    pub fn push_block_with_id(&mut self, id: NodeId, block: Block) {
+        if id.0 > self.next_node {
+            self.next_node = id.0;
+        }
+        self.blocks.push(BlockNode { id, block });
     }
 
     /// Record import/export loss without mutating content.
@@ -73,6 +98,16 @@ impl DocumentGraph {
         let id = asset.id;
         self.assets.push(asset);
         id
+    }
+
+    /// Update asset storage location while preserving logical identity.
+    pub fn set_asset_source(&mut self, id: AssetId, source: Option<String>) -> bool {
+        let Some(asset) = self.assets.iter_mut().find(|asset| asset.id == id) else {
+            return false;
+        };
+        asset.source = source;
+        self.bump_revision();
+        true
     }
 
     /// Attach provenance to a semantic node.

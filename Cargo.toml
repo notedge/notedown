@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["projects/crates/*"]
+members = ["projects/crates/*", "projects/packages/*"]
 default-members = [
     "projects/crates/notedown-error",
 ]

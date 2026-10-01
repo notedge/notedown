@@ -460,6 +460,51 @@ fn epub_import_lowers_container_blockquote_code_and_hr() {
     assert!(markdown.contains("---"));
 }
 
+#[test]
+fn epub_import_lowers_multiline_blockquote() {
+    let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+    let opf = br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Quote Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+    let zip = stored_zip(&[
+        ("mimetype", b"application/epub+zip"),
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        (
+            "OEBPS/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <blockquote>
+      <p>First line</p>
+      <p>Second line</p>
+    </blockquote>
+  </body>
+</html>"#,
+        ),
+    ]);
+    let graph = import_epub_bytes("quote.epub", &zip).expect("import epub");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("First line"));
+    assert!(markdown.contains("Second line"));
+    assert!(markdown.contains('>'));
+}
+
 fn epub_with_figure_zip() -> Vec<u8> {
     let container = br#"<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">

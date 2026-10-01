@@ -30,6 +30,14 @@ fn notedown_import_lowers_fenced_code_block() {
 }
 
 #[test]
+fn notedown_import_lowers_blockquote() {
+    let source = "> Quoted line\n";
+    let graph = import_notedown_bytes("quote.nd", source).expect("import notedown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("> Quoted line"));
+}
+
+#[test]
 fn notedown_import_lowers_links() {
     let source = "Visit [home](https://example.com) today.\n";
     let graph = import_notedown_bytes("link.nd", source).expect("import notedown");

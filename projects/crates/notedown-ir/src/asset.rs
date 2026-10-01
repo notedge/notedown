@@ -22,4 +22,7 @@ pub struct Asset {
     pub source: Option<String>,
     pub media_type: Option<String>,
     pub status: SemanticStatus,
+    /// Embedded payload when the import layer materialized bytes (e.g. OPC part body).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<Vec<u8>>,
 }

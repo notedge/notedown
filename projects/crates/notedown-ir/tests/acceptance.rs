@@ -29,6 +29,7 @@ fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
         source: Some("media/photo.png".to_string()),
         media_type: Some("image/png".to_string()),
         status: SemanticStatus::Resolved,
+        bytes: None,
     });
 
     let link_id = ids.link_id();
@@ -216,6 +217,7 @@ fn metadata_and_asset_path_changes_preserve_link_identity() {
         source: Some("media/old.png".to_string()),
         media_type: Some("image/png".to_string()),
         status: SemanticStatus::Resolved,
+        bytes: None,
     });
 
     let link_id = ids.link_id();

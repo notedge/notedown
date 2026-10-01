@@ -59,8 +59,9 @@ fn validation_catches_duplicate_asset_ids() {
             content_identity: None,
             source: None,
             media_type: None,
-            status: SemanticStatus::Resolved,
-        });
+        status: SemanticStatus::Resolved,
+        bytes: None,
+    });
     }
 
     let report = graph.validate();

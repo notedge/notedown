@@ -98,11 +98,18 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
                 "block type is not supported by the IR markdown exporter yet",
             ));
         }
-        Block::Opaque { kind, .. } => {
-            return Err(FormatError::unsupported(
-                "markdown",
-                format!("opaque block kind `{kind}` is not supported by the IR markdown exporter yet"),
-            ));
+        Block::Opaque { kind, payload_hint, .. } => {
+            if kind == "thematic_break" {
+                out.push_str(payload_hint);
+                out.push_str("\n\n");
+            } else {
+                return Err(FormatError::unsupported(
+                    "markdown",
+                    format!(
+                        "opaque block kind `{kind}` is not supported by the IR markdown exporter yet"
+                    ),
+                ));
+            }
         }
     }
     Ok(())

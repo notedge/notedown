@@ -1,13 +1,24 @@
-use notedown_ir::{Block, Inline, ListItem, LossMarker, SemanticStatus};
+use notedown_ir::{Block, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus};
 use oak_core::parser::session::ParseSession;
 use oak_core::{Parser, RedNode, RedTree, SourceText};
 use oak_html::parser::element_type::HtmlElementType;
 use oak_html::{HtmlLanguage, HtmlParser};
 
+use super::assets::{image_inline, register_image_from_src};
 use crate::FormatError;
 
 /// Lower XHTML spine content into `notedown-ir` blocks via `oak-html`.
 pub fn blocks_from_xhtml(xml: &[u8]) -> Result<Vec<Block>, FormatError> {
+    let mut scratch = DocumentGraph::new(notedown_ir::DocumentId(0));
+    blocks_from_xhtml_with_context(xml, &mut scratch, None)
+}
+
+/// Lower XHTML spine content and optionally register embedded image assets.
+pub fn blocks_from_xhtml_with_context(
+    xml: &[u8],
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Result<Vec<Block>, FormatError> {
     let text = prepare_xhtml_for_oak_html(&String::from_utf8_lossy(xml));
     let language = HtmlLanguage::default();
     let source = SourceText::new(text.as_str());
@@ -22,9 +33,9 @@ pub fn blocks_from_xhtml(xml: &[u8]) -> Result<Vec<Block>, FormatError> {
     let scope = find_body_or_document(root, &source);
     let mut blocks = Vec::new();
     let mut losses = Vec::new();
-    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses);
+    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, graph, member_path);
 
-    let scraped = scraper_blocks_from_xhtml(text.as_str())?;
+    let scraped = scraper_blocks_from_xhtml(text.as_str(), graph, member_path)?;
     if scraped.len() > blocks.len() {
         blocks = scraped;
     } else if blocks.is_empty() {
@@ -44,7 +55,7 @@ pub fn blocks_from_xhtml(xml: &[u8]) -> Result<Vec<Block>, FormatError> {
     Ok(blocks)
 }
 
-/// Loss markers discovered while lowering XHTML (navigation/assets still pending).
+/// Loss markers discovered while lowering XHTML (CSS/SVG still pending).
 pub fn losses_from_xhtml(xml: &[u8]) -> Result<Vec<LossMarker>, FormatError> {
     let text = prepare_xhtml_for_oak_html(&String::from_utf8_lossy(xml));
     let language = HtmlLanguage::default();
@@ -60,7 +71,8 @@ pub fn losses_from_xhtml(xml: &[u8]) -> Result<Vec<LossMarker>, FormatError> {
     let scope = find_body_or_document(root, &source);
     let mut blocks = Vec::new();
     let mut losses = Vec::new();
-    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses);
+    let mut scratch = DocumentGraph::new(notedown_ir::DocumentId(0));
+    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, &mut scratch, None);
     Ok(losses)
 }
 
@@ -99,10 +111,12 @@ fn collect_semantic_blocks<'a>(
     source: &SourceText,
     blocks: &mut Vec<Block>,
     losses: &mut Vec<LossMarker>,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
 ) {
     if node.element_type() == HtmlElementType::Element {
         if let Some(tag) = element_tag_name(node, source) {
-            if let Some(block) = lower_semantic_block(node, source, &tag, losses) {
+            if let Some(block) = lower_semantic_block(node, source, &tag, losses, graph, member_path) {
                 blocks.push(block);
                 return;
             }
@@ -111,7 +125,7 @@ fn collect_semantic_blocks<'a>(
 
     for child in node.children() {
         if let RedTree::Node(child_node) = child {
-            collect_semantic_blocks(child_node, source, blocks, losses);
+            collect_semantic_blocks(child_node, source, blocks, losses, graph, member_path);
         }
     }
 }
@@ -121,13 +135,15 @@ fn lower_semantic_block<'a>(
     source: &SourceText,
     tag: &str,
     losses: &mut Vec<LossMarker>,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
 ) -> Option<Block> {
     match tag {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let level = tag[1..].parse::<u8>().unwrap_or(1);
             let plain = element_inner_plain_text(node, source);
             let title = if plain.is_empty() {
-                collect_inlines_from_element(node, source)
+                collect_inlines_from_element(node, source, graph, member_path)
             } else {
                 vec![Inline::Text { text: plain }]
             };
@@ -138,7 +154,7 @@ fn lower_semantic_block<'a>(
             })
         }
         "p" => {
-            let content = non_empty_inlines(collect_inlines_from_element(node, source)).or_else(|| {
+            let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path)).or_else(|| {
                 let plain = element_inner_plain_text(node, source);
                 if plain.is_empty() {
                     None
@@ -149,7 +165,7 @@ fn lower_semantic_block<'a>(
             Some(Block::Paragraph { content })
         }
         "ul" | "ol" => {
-            let items = collect_list_items(node, source);
+            let items = collect_list_items(node, source, graph, member_path);
             if items.is_empty() {
                 None
             } else {
@@ -160,7 +176,7 @@ fn lower_semantic_block<'a>(
             }
         }
         "blockquote" => Some(Block::Quote {
-            content: non_empty_inlines(collect_inlines_from_element(node, source))
+            content: non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path))
                 .unwrap_or_else(|| vec![Inline::Text {
                     text: element_inner_plain_text(node, source),
                 }]),
@@ -177,8 +193,15 @@ fn lower_semantic_block<'a>(
             }
         }
         "script" | "style" | "head" | "meta" | "link" | "title" | "html" | "body" | "section"
-        | "article" | "main" | "div" | "nav" => None,
-        "table" | "img" | "figure" | "svg" => {
+        | "article" | "main" | "div" | "nav" | "figure" => None,
+        "img" => {
+            let src = attribute_value(node, source, "src").unwrap_or_default();
+            let alt = attribute_value(node, source, "alt").unwrap_or_default();
+            register_and_image_inline(&src, &alt, graph, member_path).map(|inline| Block::Paragraph {
+                content: vec![inline],
+            })
+        }
+        "table" | "svg" => {
             losses.push(LossMarker {
                 code: "import.epub.unsupported_xhtml_block".into(),
                 message: format!("unsupported xhtml block element `<{tag}>`"),
@@ -220,6 +243,8 @@ fn element_inner_plain_text(node: RedNode<HtmlLanguage>, source: &SourceText) ->
 fn collect_list_items<'a>(
     node: RedNode<'a, HtmlLanguage>,
     source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
 ) -> Vec<ListItem> {
     let mut items = Vec::new();
     for child in element_body_children(node, source) {
@@ -230,7 +255,7 @@ fn collect_list_items<'a>(
             continue;
         }
         items.push(ListItem {
-            content: collect_inlines_from_element(child, source),
+            content: collect_inlines_from_element(child, source, graph, member_path),
             children: Vec::new(),
         });
     }
@@ -240,6 +265,8 @@ fn collect_list_items<'a>(
 fn collect_inlines_from_element<'a>(
     node: RedNode<'a, HtmlLanguage>,
     source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
 ) -> Vec<Inline> {
     let mut inlines = Vec::new();
     let mut past_opening_tag = false;
@@ -257,7 +284,7 @@ fn collect_inlines_from_element<'a>(
                     continue;
                 }
                 if kind == HtmlElementType::Element {
-                    if let Some(inline) = lower_inline_element(child_node, source) {
+                    if let Some(inline) = lower_inline_element(child_node, source, graph, member_path) {
                         push_inline(&mut inlines, inline);
                     }
                 } else if kind == HtmlElementType::Text {
@@ -289,22 +316,29 @@ fn collect_inlines_from_element<'a>(
 fn lower_inline_element<'a>(
     node: RedNode<'a, HtmlLanguage>,
     source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
 ) -> Option<Inline> {
     let tag = element_tag_name(node, source)?;
     match tag.as_str() {
+        "img" => {
+            let src = attribute_value(node, source, "src").unwrap_or_default();
+            let alt = attribute_value(node, source, "alt").unwrap_or_default();
+            register_and_image_inline(&src, &alt, graph, member_path)
+        }
         "strong" | "b" => Some(Inline::Styled {
             style: "bold".into(),
-            children: collect_inlines_from_element(node, source),
+            children: collect_inlines_from_element(node, source, graph, member_path),
         }),
         "em" | "i" => Some(Inline::Styled {
             style: "italic".into(),
-            children: collect_inlines_from_element(node, source),
+            children: collect_inlines_from_element(node, source, graph, member_path),
         }),
         "code" => Some(Inline::InlineCode {
             text: collect_plain_text(node, source),
         }),
         "a" => {
-            let children = collect_inlines_from_element(node, source);
+            let children = collect_inlines_from_element(node, source, graph, member_path);
             let href = attribute_value(node, source, "href").unwrap_or_default();
             if href.is_empty() {
                 return children.first().cloned();
@@ -321,7 +355,7 @@ fn lower_inline_element<'a>(
             })
         }
         "span" | "sup" | "sub" => {
-            let children = collect_inlines_from_element(node, source);
+            let children = collect_inlines_from_element(node, source, graph, member_path);
             if children.is_empty() {
                 None
             } else if children.len() == 1 {
@@ -484,7 +518,11 @@ fn prepare_xhtml_for_oak_html(xml: &str) -> String {
 }
 
 /// Fallback block extraction when `oak-html` tree shape is still lossy.
-fn scraper_blocks_from_xhtml(text: &str) -> Result<Vec<Block>, FormatError> {
+fn scraper_blocks_from_xhtml(
+    text: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Result<Vec<Block>, FormatError> {
     let mut blocks = Vec::new();
     let mut cursor = 0usize;
 
@@ -495,9 +533,22 @@ fn scraper_blocks_from_xhtml(text: &str) -> Result<Vec<Block>, FormatError> {
         let close_index = rest
             .find('>')
             .ok_or_else(|| FormatError::parse("epub", "malformed xhtml tag"))?;
+        let tag_source = &text[absolute..absolute + 1 + close_index + 1];
         let inner_start = absolute + 1 + close_index + 1;
 
         if is_close {
+            cursor = inner_start;
+            continue;
+        }
+
+        if tag == "img" {
+            let src = scrape_attribute(tag_source, "src").unwrap_or_default();
+            let alt = scrape_attribute(tag_source, "alt").unwrap_or_default();
+            if let Some(inline) = register_and_image_inline(&src, &alt, graph, member_path) {
+                blocks.push(Block::Paragraph {
+                    content: vec![inline],
+                });
+            }
             cursor = inner_start;
             continue;
         }
@@ -518,7 +569,7 @@ fn scraper_blocks_from_xhtml(text: &str) -> Result<Vec<Block>, FormatError> {
 
         if tag == "p" {
             let (content, next) = slice_until_close(text, inner_start, "p")?;
-            let inlines = inlines_from_html_fragment(content);
+            let inlines = inlines_from_html_fragment(content, graph, member_path);
             if !inlines.is_empty() {
                 blocks.push(Block::Paragraph { content: inlines });
             }
@@ -532,7 +583,25 @@ fn scraper_blocks_from_xhtml(text: &str) -> Result<Vec<Block>, FormatError> {
     Ok(blocks)
 }
 
-fn inlines_from_html_fragment(content: &str) -> Vec<Inline> {
+fn scrape_attribute(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{name}=");
+    let start = lower.find(&needle)?;
+    let value_start = start + needle.len();
+    let quote = tag[value_start..].chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &tag[value_start + 1..];
+    let end = rest.find(quote)?;
+    Some(rest[..end].to_string())
+}
+
+fn inlines_from_html_fragment(
+    content: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Vec<Inline> {
     let mut inlines = Vec::new();
     let mut cursor = 0usize;
     while let Some(start) = content[cursor..].find('<') {
@@ -545,6 +614,16 @@ fn inlines_from_html_fragment(content: &str) -> Vec<Inline> {
         let (tag, _) = parse_tag_name(rest).unwrap_or((String::new(), false));
         let close_index = rest.find('>').unwrap_or(0);
         let inner_start = absolute + 1 + close_index + 1;
+        if tag == "img" {
+            let tag_source = &content[absolute..inner_start];
+            let src = scrape_attribute(tag_source, "src").unwrap_or_default();
+            let alt = scrape_attribute(tag_source, "alt").unwrap_or_default();
+            if let Some(inline) = register_and_image_inline(&src, &alt, graph, member_path) {
+                push_inline(&mut inlines, inline);
+            }
+            cursor = inner_start;
+            continue;
+        }
         if matches!(tag.as_str(), "strong" | "b" | "em" | "i") {
             let (inner, next) = slice_until_close(content, inner_start, &tag)
                 .unwrap_or((&content[inner_start..], content.len()));
@@ -619,6 +698,18 @@ fn strip_tags(text: &str) -> String {
         }
     }
     normalize_whitespace(output.trim())
+}
+
+fn register_and_image_inline(
+    src: &str,
+    alt: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Option<Inline> {
+    if let Some(member_path) = member_path {
+        register_image_from_src(graph, member_path, src);
+    }
+    image_inline(src, alt)
 }
 
 fn unquote(value: &str) -> String {

@@ -7,10 +7,13 @@ use notedown_ir::{
 };
 
 use super::map_ocf_error;
+use super::assets::{
+    find_cover_manifest_item, hydrate_image_assets, register_cover_asset,
+};
 use super::navigation::{
     find_nav_manifest_item, navigation_list_block, parse_nav_toc,
 };
-use super::xhtml::blocks_from_xhtml;
+use super::xhtml::blocks_from_xhtml_with_context;
 use crate::FormatError;
 
 /// Import an EPUB file from disk into `notedown-ir`.
@@ -43,6 +46,10 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
     };
 
     let nav_manifest_id = find_nav_manifest_item(&opf).map(|item| item.id.clone());
+    if let Some(cover_item) = find_cover_manifest_item(&opf) {
+        let member_path = OcfPackage::resolve_href(package.root_opf_path(), &cover_item.href);
+        register_cover_asset(&mut graph, &member_path, &cover_item.href);
+    }
     if let Some(nav_item) = find_nav_manifest_item(&opf) {
         let member_path = OcfPackage::resolve_href(package.root_opf_path(), &nav_item.href);
         match package.read_member(&member_path, &budget) {
@@ -100,7 +107,11 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
 
         let member_path = OcfPackage::resolve_href(package.root_opf_path(), &manifest.href);
         let xhtml = package.read_member(&member_path, &budget).map_err(map_ocf_error)?;
-        let blocks = blocks_from_xhtml(&xhtml)?;
+        let blocks = blocks_from_xhtml_with_context(
+            &xhtml,
+            &mut graph,
+            Some(member_path.as_str()),
+        )?;
         for block in blocks {
             let node = graph.push_block(block);
             graph.attach_source(SourceRef {
@@ -114,9 +125,11 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         }
     }
 
+    hydrate_image_assets(&mut graph, &package, &budget);
+
     graph.push_loss(LossMarker {
         code: "import.epub.partial_coverage".into(),
-        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC when declared, and spine XHTML via oak-html. Assets and CSS/SVG remain pending".into(),
+        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC, spine XHTML via oak-html, and embedded image assets. CSS/SVG remain pending".into(),
         status: SemanticStatus::Partial,
     });
     Ok(graph)

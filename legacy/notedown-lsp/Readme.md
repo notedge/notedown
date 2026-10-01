@@ -1,1 +1,0 @@
-# Notedown LSP Client

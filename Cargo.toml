@@ -1,22 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["projects/crates/*", "projects/packages/*"]
-default-members = [
-    "projects/crates/notedown-error",
+members = [
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
 ]
-exclude = [
-
+default-members = [
+    "projects/crates/notedown-ir",
+    "projects/crates/notedown-formats",
 ]
+exclude = []
 
 [workspace.dependencies]
-# Git `branch = "dev"` for CI and published consumers. Local path overlay: `.cargo/config.toml`.
-notedown-error = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown-error" }
-notedown_parser = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown_parser" }
-notedown_ast = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown_ast" }
-text-utils = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "text-utils" }
-notedown-rt = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown-rt" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats" }
 oak-core = { git = "https://github.com/yggdrasil-language/oaks.git", branch = "dev" }

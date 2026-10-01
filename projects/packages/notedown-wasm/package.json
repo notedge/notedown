@@ -1,8 +1,0 @@
-{
-    "private": true,
-    "scripts": {
-        "u": "cargo upgrade",
-        "t": "cargo test --target wasm32-unknown-unknown",
-        "p": "cargo publish --allow-dirty"
-    }
-}

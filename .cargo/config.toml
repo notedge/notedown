@@ -18,3 +18,4 @@ oak-markdown = { path = "../oaks/examples/oak-markdown" }
 [patch."https://github.com/yggdrasil-language/acorn.rs.git"]
 acorn-core = { path = "../acorn.rs/projects/acorn-core" }
 acorn-docx = { path = "../acorn.rs/examples/acorn-docx" }
+acorn-epub = { path = "../acorn.rs/examples/acorn-epub" }

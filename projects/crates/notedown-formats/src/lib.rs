@@ -30,7 +30,7 @@ pub fn capabilities() -> Vec<FormatCapability> {
         FormatCapability {
             id: "epub",
             direction: FormatDirection::Import,
-            status: FormatStatus::Planned,
+            status: FormatStatus::Partial,
         },
     ]
 }

@@ -18,5 +18,9 @@ fn capabilities_mark_ready_modules() {
             && cap.direction == FormatDirection::Import
             && cap.status == FormatStatus::Ready
     }));
-    assert!(caps.iter().any(|cap| cap.id == "epub" && cap.status == FormatStatus::Planned));
+    assert!(caps.iter().any(|cap| {
+        cap.id == "epub"
+            && cap.direction == FormatDirection::Import
+            && cap.status == FormatStatus::Partial
+    }));
 }

@@ -14,13 +14,14 @@ oak-core = { workspace = true, optional = true }
 oak-markdown = { workspace = true, optional = true }
 acorn-core = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
+acorn-epub = { workspace = true, optional = true }
 quick-xml = { version = "0.37.5", optional = true }
 
 [features]
-default = ["markdown", "docx"]
+default = ["markdown", "docx", "epub"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:quick-xml"]
-epub = []
+epub = ["dep:acorn-core", "dep:acorn-epub"]
 
 [dev-dependencies]
 serde_json = "1.0"

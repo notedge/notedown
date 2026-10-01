@@ -16,12 +16,12 @@ url = "2.2.2"
 
 [dependencies.notedown_ast]
 version = "0.16"
-path = "../../projects/notedown-ast"
+path = "../../projects/packages/notedown-ast"
 features = []
 
 [dependencies.notedown-rt]
 version = "0.3"
-path = "../../projects/notedown-runtime"
+path = "../../projects/packages/notedown-runtime"
 features = []
 
 [dev-dependencies]

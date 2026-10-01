@@ -8,6 +8,7 @@ pub struct DocumentRelsRegistry {
 enum RelEntry {
     Hyperlink { url: String },
     Image { target: String, bytes: Vec<u8> },
+    Footnotes,
 }
 
 impl DocumentRelsRegistry {
@@ -44,6 +45,18 @@ impl DocumentRelsRegistry {
         format!("rId{}", self.entries.len())
     }
 
+    /// Registers the footnotes part relationship when footnote bodies are exported.
+    pub fn ensure_footnotes_rel(&mut self) {
+        if self
+            .entries
+            .iter()
+            .any(|entry| matches!(entry, RelEntry::Footnotes))
+        {
+            return;
+        }
+        self.entries.push(RelEntry::Footnotes);
+    }
+
     /// Whether any relationships were collected.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -55,7 +68,7 @@ impl DocumentRelsRegistry {
             .iter()
             .filter_map(|entry| match entry {
                 RelEntry::Image { target, bytes } => Some((format!("word/{target}"), bytes.clone())),
-                RelEntry::Hyperlink { .. } => None,
+                RelEntry::Hyperlink { .. } | RelEntry::Footnotes => None,
             })
             .collect()
     }
@@ -107,6 +120,11 @@ impl DocumentRelsRegistry {
                     );
                     xml.push_str(&escape_xml_attr(target));
                     xml.push_str("\"/>");
+                }
+                RelEntry::Footnotes => {
+                    xml.push_str(
+                        "Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes\" Target=\"footnotes.xml\"/>",
+                    );
                 }
             }
         }

@@ -1,5 +1,6 @@
 //! Conservative DOCX export from `notedown-ir`.
 
+mod footnotes;
 mod package;
 mod numbering;
 mod rels;
@@ -18,6 +19,7 @@ pub fn export_docx_bytes(graph: &DocumentGraph) -> Result<Vec<u8>, FormatError> 
         &rendered.document_rels_xml,
         &rendered.media_parts,
         &rendered.image_extensions,
+        rendered.footnotes_xml.as_deref(),
     ))
 }
 

@@ -184,6 +184,45 @@ fn docx_export_round_trips_hyperlinks() {
 }
 
 #[test]
+fn docx_export_round_trips_footnotes() {
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>See</w:t></w:r>
+      <w:r><w:footnoteReference w:id="1"/></w:r>
+      <w:r><w:t> for details.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let footnotes_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:footnote w:id="1">
+    <w:p><w:r><w:t>Footnote body.</w:t></w:r></w:p>
+  </w:footnote>
+</w:footnotes>"#;
+    let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+    Target="footnotes.xml"/>
+</Relationships>"#;
+    let zip = stored_zip(&[
+        ("word/document.xml", document_xml),
+        ("word/_rels/document.xml.rels", rels_xml),
+        ("word/footnotes.xml", footnotes_xml),
+    ]);
+    let graph = import_docx_bytes("footnotes.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let payload = String::from_utf8_lossy(&exported);
+    assert!(payload.contains("word/footnotes.xml"));
+    let round = import_docx_bytes("round.docx", &exported).expect("re-import docx");
+    let markdown = export_markdown(&round).expect("export markdown");
+    assert!(markdown.contains("See[^1] for details."));
+    assert!(markdown.contains("[^1]: Footnote body."));
+}
+
+#[test]
 fn docx_export_round_trips_embedded_images() {
     let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"

@@ -71,8 +71,9 @@ pub fn build_minimal_opc_package(
     document_rels_xml: &str,
     media_parts: &[(String, Vec<u8>)],
     image_extensions: &[String],
+    footnotes_xml: Option<&str>,
 ) -> Vec<u8> {
-    let content_types = content_types_xml(include_numbering, image_extensions);
+    let content_types = content_types_xml(include_numbering, image_extensions, footnotes_xml.is_some());
     let mut entries = vec![
         ("[Content_Types].xml", content_types.as_bytes()),
         ("_rels/.rels", ROOT_RELS_XML.as_bytes()),
@@ -85,13 +86,16 @@ pub fn build_minimal_opc_package(
             ("word/numbering.xml", super::numbering::NUMBERING_XML.as_bytes()),
         );
     }
+    if let Some(footnotes_xml) = footnotes_xml {
+        entries.push(("word/footnotes.xml", footnotes_xml.as_bytes()));
+    }
     for (path, bytes) in media_parts {
         entries.push((path.as_str(), bytes.as_slice()));
     }
     stored_zip(&entries)
 }
 
-fn content_types_xml(include_numbering: bool, image_extensions: &[String]) -> String {
+fn content_types_xml(include_numbering: bool, image_extensions: &[String], include_footnotes: bool) -> String {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -101,6 +105,9 @@ fn content_types_xml(include_numbering: bool, image_extensions: &[String]) -> St
     );
     if include_numbering {
         xml.push_str("\n  <Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>");
+    }
+    if include_footnotes {
+        xml.push_str("\n  <Override PartName=\"/word/footnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/>");
     }
     for extension in image_extensions {
         let content_type = image_content_type(extension);

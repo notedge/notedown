@@ -4,6 +4,7 @@ use notedown_ir::{AssetKind, Block, DocumentGraph, Inline, ListItem, TableRow};
 
 use crate::FormatError;
 
+use super::footnotes::{collect_footnote_catalog, parse_footnote_reference_token, render_footnotes_xml};
 use super::numbering::{ORDERED_NUM_ID, UNORDERED_NUM_ID};
 use super::rels::DocumentRelsRegistry;
 
@@ -19,19 +20,37 @@ pub struct DocxRenderOutput {
     pub document_rels_xml: String,
     pub media_parts: Vec<(String, Vec<u8>)>,
     pub image_extensions: Vec<String>,
+    pub footnotes_xml: Option<String>,
 }
 
 pub fn render_document_xml(graph: &DocumentGraph) -> Result<DocxRenderOutput, FormatError> {
+    let footnotes = collect_footnote_catalog(graph);
     let mut body = String::new();
     let mut uses_numbering = false;
     let mut rels = DocumentRelsRegistry::default();
     for node in &graph.blocks {
+        if let Block::Opaque {
+            kind,
+            ..
+        } = &node.block
+        {
+            if kind == "footnote_definition" {
+                continue;
+            }
+        }
         if matches!(node.block, Block::List { .. }) {
             uses_numbering = true;
         }
         write_block(&mut body, &node.block, graph, &mut rels)?;
     }
     body.push_str("<w:sectPr/>");
+
+    let footnotes_xml = if footnotes.is_empty() {
+        None
+    } else {
+        rels.ensure_footnotes_rel();
+        Some(render_footnotes_xml(&footnotes)?)
+    };
 
     Ok(DocxRenderOutput {
         document_xml: format!(
@@ -46,6 +65,7 @@ pub fn render_document_xml(graph: &DocumentGraph) -> Result<DocxRenderOutput, Fo
         document_rels_xml: rels.render_document_rels_xml(),
         media_parts: rels.media_parts(),
         image_extensions: rels.image_extensions(),
+        footnotes_xml,
     })
 }
 
@@ -84,10 +104,16 @@ fn write_block(
         Block::Table { rows } => {
             write_table(out, rows, graph, rels)?;
         }
-        Block::Math { .. } | Block::Opaque { .. } => {
+        Block::Math { .. } => {
             return Err(FormatError::unsupported(
                 "docx",
                 "block type is not supported by the conservative DOCX exporter yet",
+            ));
+        }
+        Block::Opaque { kind, .. } => {
+            return Err(FormatError::unsupported(
+                "docx",
+                format!("opaque block kind `{kind}` is not supported by the conservative DOCX exporter yet"),
             ));
         }
     }
@@ -154,9 +180,7 @@ fn write_inline(
 ) -> Result<(), FormatError> {
     match inline {
         Inline::Text { text } => {
-            out.push_str("<w:r><w:t>");
-            write_xml_text(out, text)?;
-            out.push_str("</w:t></w:r>");
+            write_text_with_footnotes(out, text)?;
         }
         Inline::Styled { style, children } => match style.as_str() {
             "bold" => {
@@ -264,6 +288,51 @@ fn image_bytes_for_target(graph: &DocumentGraph, target: &str) -> Result<Vec<u8>
                 format!("embedded image `{target}` has no materialized bytes for export"),
             )
         })
+}
+
+fn write_text_with_footnotes(out: &mut String, text: &str) -> Result<(), FormatError> {
+    if let Some(id) = parse_footnote_reference_token(text) {
+        return write_footnote_reference(out, id);
+    }
+
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(start) = rest.find("[^") {
+            if start > 0 {
+                write_run_text(out, &rest[..start])?;
+            }
+            let token_start = &rest[start..];
+            if let Some(end) = token_start.find(']') {
+                let token = &token_start[..=end];
+                if let Some(id) = parse_footnote_reference_token(token) {
+                    write_footnote_reference(out, id)?;
+                    rest = &token_start[end + 1..];
+                    continue;
+                }
+            }
+            write_run_text(out, rest)?;
+            break;
+        } else {
+            write_run_text(out, rest)?;
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn write_run_text(out: &mut String, text: &str) -> Result<(), FormatError> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    out.push_str("<w:r><w:t>");
+    write_xml_text(out, text)?;
+    out.push_str("</w:t></w:r>");
+    Ok(())
+}
+
+fn write_footnote_reference(out: &mut String, id: u32) -> Result<(), FormatError> {
+    write!(out, "<w:r><w:footnoteReference w:id=\"{id}\"/></w:r>").map_err(map_fmt_error)?;
+    Ok(())
 }
 
 fn write_xml_text(out: &mut String, text: &str) -> Result<(), FormatError> {

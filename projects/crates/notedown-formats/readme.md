@@ -7,7 +7,7 @@ Document import and export around `notedown-ir`. Format parsing and semantic low
 | Format | Import | Export |
 |--------|--------|--------|
 | `markdown` | `oak-markdown` → IR | IR → Markdown |
-| `docx` | planned | planned |
+| `docx` | `acorn-docx` + WordprocessingML → IR | planned |
 | `epub` | planned | planned |
 
 ## Usage

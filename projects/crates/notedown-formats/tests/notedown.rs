@@ -48,6 +48,16 @@ fn notedown_import_lowers_multiline_blockquote() {
 }
 
 #[test]
+fn notedown_import_lowers_horizontal_rule() {
+    let source = "Before\n\n---\n\nAfter\n";
+    let graph = import_notedown_bytes("hr.nd", source).expect("import notedown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("Before"));
+    assert!(markdown.contains("---"));
+    assert!(markdown.contains("After"));
+}
+
+#[test]
 fn notedown_import_lowers_links() {
     let source = "Visit [home](https://example.com) today.\n";
     let graph = import_notedown_bytes("link.nd", source).expect("import notedown");

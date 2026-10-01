@@ -124,3 +124,29 @@ fn docx_export_includes_minimal_opc_parts() {
     assert!(members.contains("word/_rels/document.xml.rels"));
     assert!(members.contains("word/document.xml"));
 }
+
+#[test]
+fn docx_export_round_trips_tables() {
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>H1</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>H2</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"#;
+    let zip = stored_zip(&[("word/document.xml", document_xml)]);
+    let graph = import_docx_bytes("table.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let round = import_docx_bytes("round.docx", &exported).expect("re-import docx");
+    let markdown = export_markdown(&round).expect("export markdown");
+    assert!(markdown.contains("| H1 | H2 |"));
+    assert!(markdown.contains("| A | B |"));
+}

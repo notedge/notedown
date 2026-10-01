@@ -4,13 +4,16 @@ use notedown_ir::{
     Asset, AssetId, AssetKind, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker,
     SemanticStatus,
 };
+use oak_xml::ast::{XmlElement, XmlValue};
+
 use super::footnotes::FootnoteCatalog;
 use super::numbering::NumberingCatalog;
+use super::oak_xml_util::{
+    attribute_value, bool_from_element, child_element, document_root, element_is, element_text,
+    elements_by_local_name, parse_xml_bytes, u32_attribute,
+};
 use super::table::{append_cell_paragraph, push_table_block, TableState};
 use crate::FormatError;
-use quick_xml::events::Event;
-use quick_xml::name::LocalName;
-use quick_xml::Reader;
 
 /// Parses `word/document.xml` body content into a flat `DocumentGraph`.
 pub fn parse_document_xml(
@@ -20,199 +23,39 @@ pub fn parse_document_xml(
     footnotes: &FootnoteCatalog,
     graph: &mut DocumentGraph,
 ) -> Result<HashSet<u32>, FormatError> {
+    let value = parse_xml_bytes(xml)?;
+    let root = document_root(&value)?;
+    let body = child_element(root, "body").ok_or_else(|| {
+        FormatError::parse("docx", "word/document.xml is missing w:body")
+    })?;
+
     let mut referenced_footnotes = HashSet::new();
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(false);
+    let mut body_state = BodyState::default();
 
-    let mut buf = Vec::new();
-    let mut in_body = false;
-    let mut in_paragraph = false;
-    let mut paragraph = ParagraphState::default();
-    let mut hyperlink: Option<HyperlinkState> = None;
-    let mut in_run = false;
-    let mut run = RunState::default();
-    let mut in_p_pr = false;
-    let mut in_num_pr = false;
-    let mut in_r_pr = false;
-    let mut body = BodyState::default();
-    let mut in_table = false;
-    let mut in_cell = false;
-    let mut table = None::<TableState>;
-
-    while let Ok(event) = reader.read_event_into(&mut buf) {
-        match event {
-            Event::Start(tag) => {
-                let local = tag.local_name();
-                if is_local(local, b"body") {
-                    in_body = true;
-                } else if in_body && is_local(local, b"tbl") {
-                    flush_pending_list(graph, &mut body, numbering);
-                    in_table = true;
-                    table = Some(TableState::default());
-                } else if in_table && is_local(local, b"tr") {
-                    if let Some(table) = table.as_mut() {
-                        table.current_row = Vec::new();
-                    }
-                } else if in_table && is_local(local, b"tc") {
-                    in_cell = true;
-                    if let Some(table) = table.as_mut() {
-                        table.current_cell = Vec::new();
-                    }
-                } else if in_body && is_local(local, b"p") {
-                    in_paragraph = true;
-                    paragraph = ParagraphState::default();
-                } else if in_paragraph && is_local(local, b"pPr") {
-                    in_p_pr = true;
-                } else if in_p_pr && is_local(local, b"pStyle") {
-                    paragraph.style = style_attribute(&tag);
-                } else if in_p_pr && is_local(local, b"numPr") {
-                    paragraph.is_list_item = true;
-                    in_num_pr = true;
-                } else if in_num_pr && is_local(local, b"numId") {
-                    paragraph.num_id = u32_attribute(&tag, b"val");
-                } else if in_num_pr && is_local(local, b"ilvl") {
-                    paragraph.ilvl = u32_attribute(&tag, b"val");
-                } else if in_paragraph && is_local(local, b"hyperlink") {
-                    hyperlink = Some(HyperlinkState {
-                        rel_id: relationship_id(&tag),
-                        inlines: Vec::new(),
-                    });
-                } else if in_paragraph && is_local(local, b"r") {
-                    in_run = true;
-                    run = RunState::default();
-                } else if in_run && is_local(local, b"rPr") {
-                    in_r_pr = true;
-                } else if in_r_pr && is_local(local, b"b") {
-                    run.bold = bool_attribute(&tag, true);
-                } else if in_r_pr && is_local(local, b"i") {
-                    run.italic = bool_attribute(&tag, true);
-                } else if in_run && is_local(local, b"tab") {
-                    run.text.push('\t');
-                } else if in_run && is_local(local, b"br") {
-                    run.text.push('\n');
-                } else if in_paragraph && is_local(local, b"docPr") {
-                    paragraph.pending_image_alt = description_attribute(&tag);
-                } else if in_paragraph && is_local(local, b"blip") {
-                    if let Some(rel_id) = embed_relationship_id(&tag) {
-                        paragraph.push_image(&rel_id, rels, graph);
-                    }
-                } else if in_paragraph && is_local(local, b"footnoteReference") {
-                    push_footnote_reference(
-                        graph,
-                        &mut paragraph,
-                        &mut hyperlink,
-                        footnotes,
-                        &mut referenced_footnotes,
-                        u32_attribute(&tag, b"id"),
-                    );
-                }
-            }
-            Event::Text(text) if in_run => {
-                let decoded = text
-                    .unescape()
-                    .map_err(|error| FormatError::parse("docx", error.to_string()))?;
-                run.text.push_str(&decoded);
-            }
-            Event::End(tag) => {
-                let local = tag.local_name();
-                if is_local(local, b"body") {
-                    flush_pending_list(graph, &mut body, numbering);
-                    in_body = false;
-                } else if is_local(local, b"pPr") {
-                    in_p_pr = false;
-                    in_num_pr = false;
-                } else if is_local(local, b"numPr") {
-                    in_num_pr = false;
-                } else if is_local(local, b"rPr") {
-                    in_r_pr = false;
-                } else if is_local(local, b"r") && in_run {
-                    if let Some(link) = hyperlink.as_mut() {
-                        link.push_run(&run);
-                    } else {
-                        paragraph.push_run(&run);
-                    }
-                    in_run = false;
-                    run = RunState::default();
-                } else if is_local(local, b"hyperlink") {
-                    if let Some(link) = hyperlink.take() {
-                        paragraph.push_hyperlink(&link, rels, graph);
-                    }
-                } else if is_local(local, b"p") && in_paragraph {
-                    if in_cell {
-                        if let Some(table) = table.as_mut() {
-                            if let Some(content) = paragraph_inlines(&paragraph) {
-                                append_cell_paragraph(&mut table.current_cell, &content);
-                            }
-                        }
-                    } else if !in_table {
-                        finish_paragraph(graph, &mut body, &paragraph, numbering);
-                    }
-                    in_paragraph = false;
-                    paragraph = ParagraphState::default();
-                } else if in_table && is_local(local, b"tc") {
-                    if let Some(table) = table.as_mut() {
-                        table.current_row.push(table.current_cell.clone());
-                        table.current_cell.clear();
-                    }
-                    in_cell = false;
-                } else if in_table && is_local(local, b"tr") {
-                    if let Some(table) = table.as_mut() {
-                        if !table.current_row.is_empty() {
-                            table.rows.push(table.current_row.clone());
-                        }
-                        table.current_row.clear();
-                    }
-                } else if in_table && is_local(local, b"tbl") {
-                    if let Some(table_state) = table.take() {
-                        push_table_block(graph, table_state);
-                    }
-                    in_table = false;
-                    in_cell = false;
-                }
-            }
-            Event::Empty(tag) => {
-                let local = tag.local_name();
-                if in_p_pr && is_local(local, b"pStyle") {
-                    paragraph.style = style_attribute(&tag);
-                } else if in_p_pr && is_local(local, b"numPr") {
-                    paragraph.is_list_item = true;
-                    in_num_pr = true;
-                } else if in_num_pr && is_local(local, b"numId") {
-                    paragraph.num_id = u32_attribute(&tag, b"val");
-                } else if in_num_pr && is_local(local, b"ilvl") {
-                    paragraph.ilvl = u32_attribute(&tag, b"val");
-                } else if in_r_pr && is_local(local, b"b") {
-                    run.bold = true;
-                } else if in_r_pr && is_local(local, b"i") {
-                    run.italic = true;
-                } else if in_run && is_local(local, b"tab") {
-                    run.text.push('\t');
-                } else if in_run && is_local(local, b"br") {
-                    run.text.push('\n');
-                } else if in_paragraph && is_local(local, b"docPr") {
-                    paragraph.pending_image_alt = description_attribute(&tag);
-                } else if in_paragraph && is_local(local, b"blip") {
-                    if let Some(rel_id) = embed_relationship_id(&tag) {
-                        paragraph.push_image(&rel_id, rels, graph);
-                    }
-                } else if in_paragraph && is_local(local, b"footnoteReference") {
-                    push_footnote_reference(
-                        graph,
-                        &mut paragraph,
-                        &mut hyperlink,
-                        footnotes,
-                        &mut referenced_footnotes,
-                        u32_attribute(&tag, b"id"),
-                    );
-                }
-            }
-            Event::Eof => break,
-            _ => {}
+    for child in body.children.iter().filter_map(XmlValue::as_element) {
+        if element_is(child, "tbl") {
+            flush_pending_list(graph, &mut body_state, numbering);
+            let table = parse_table_element(
+                child,
+                rels,
+                graph,
+                footnotes,
+                &mut referenced_footnotes,
+            );
+            push_table_block(graph, table);
+        } else if element_is(child, "p") {
+            let paragraph = parse_paragraph_element(
+                child,
+                rels,
+                graph,
+                footnotes,
+                &mut referenced_footnotes,
+            );
+            finish_paragraph(graph, &mut body_state, &paragraph, numbering);
         }
-        buf.clear();
     }
 
-    flush_pending_list(graph, &mut body, numbering);
+    flush_pending_list(graph, &mut body_state, numbering);
 
     if graph.blocks.is_empty() {
         graph.push_loss(LossMarker {
@@ -223,6 +66,183 @@ pub fn parse_document_xml(
     }
 
     Ok(referenced_footnotes)
+}
+
+fn parse_table_element(
+    table_element: &XmlElement,
+    rels: &HashMap<String, String>,
+    graph: &mut DocumentGraph,
+    footnotes: &FootnoteCatalog,
+    referenced_footnotes: &mut HashSet<u32>,
+) -> TableState {
+    let mut table = TableState::default();
+    for row in table_element
+        .children
+        .iter()
+        .filter_map(XmlValue::as_element)
+        .filter(|child| element_is(child, "tr"))
+    {
+        let mut current_row = Vec::new();
+        for cell in row
+            .children
+            .iter()
+            .filter_map(XmlValue::as_element)
+            .filter(|child| element_is(child, "tc"))
+        {
+            let mut current_cell = Vec::new();
+            for paragraph in cell
+                .children
+                .iter()
+                .filter_map(XmlValue::as_element)
+                .filter(|child| element_is(child, "p"))
+            {
+                let paragraph = parse_paragraph_element(
+                    paragraph,
+                    rels,
+                    graph,
+                    footnotes,
+                    referenced_footnotes,
+                );
+                if let Some(content) = paragraph_inlines(&paragraph) {
+                    append_cell_paragraph(&mut current_cell, &content);
+                }
+            }
+            current_row.push(current_cell);
+        }
+        if !current_row.is_empty() {
+            table.rows.push(current_row);
+        }
+    }
+    table
+}
+
+fn parse_paragraph_element(
+    paragraph_element: &XmlElement,
+    rels: &HashMap<String, String>,
+    graph: &mut DocumentGraph,
+    footnotes: &FootnoteCatalog,
+    referenced_footnotes: &mut HashSet<u32>,
+) -> ParagraphState {
+    let mut paragraph = ParagraphState::default();
+    if let Some(p_pr) = child_element(paragraph_element, "pPr") {
+        if let Some(p_style) = child_element(p_pr, "pStyle") {
+            paragraph.style = attribute_value(p_style, "val");
+        }
+        if let Some(num_pr) = child_element(p_pr, "numPr") {
+            paragraph.is_list_item = true;
+            if let Some(num_id) = child_element(num_pr, "numId") {
+                paragraph.num_id = u32_attribute(num_id, "val");
+            }
+            if let Some(ilvl) = child_element(num_pr, "ilvl") {
+                paragraph.ilvl = u32_attribute(ilvl, "val");
+            }
+        }
+    }
+
+    for child in paragraph_element
+        .children
+        .iter()
+        .filter_map(XmlValue::as_element)
+    {
+        if element_is(child, "hyperlink") {
+            let link = parse_hyperlink_element(child, graph, footnotes, referenced_footnotes);
+            paragraph.push_hyperlink(&link, rels, graph);
+        } else if element_is(child, "r") {
+            if let Some(footnote_ref) = child_element(child, "footnoteReference") {
+                push_footnote_reference(
+                    graph,
+                    &mut paragraph.inlines,
+                    footnotes,
+                    referenced_footnotes,
+                    u32_attribute(footnote_ref, "id"),
+                );
+            } else {
+                paragraph.push_run(&parse_run_element(child));
+            }
+        } else if element_is(child, "footnoteReference") {
+            push_footnote_reference(
+                graph,
+                &mut paragraph.inlines,
+                footnotes,
+                referenced_footnotes,
+                u32_attribute(child, "id"),
+            );
+        }
+    }
+
+    let doc_prs = elements_by_local_name(paragraph_element, "docPr");
+    for (index, blip) in elements_by_local_name(paragraph_element, "blip")
+        .iter()
+        .enumerate()
+    {
+        if let Some(rel_id) = attribute_value(blip, "embed") {
+            paragraph.pending_image_alt = doc_prs
+                .get(index)
+                .and_then(|doc_pr| attribute_value(doc_pr, "descr"));
+            paragraph.push_image(&rel_id, rels, graph);
+        }
+    }
+
+    paragraph
+}
+
+fn parse_hyperlink_element(
+    element: &XmlElement,
+    graph: &mut DocumentGraph,
+    footnotes: &FootnoteCatalog,
+    referenced_footnotes: &mut HashSet<u32>,
+) -> HyperlinkState {
+    let mut link = HyperlinkState {
+        rel_id: attribute_value(element, "id"),
+        inlines: Vec::new(),
+    };
+    for child in element.children.iter().filter_map(XmlValue::as_element) {
+        if element_is(child, "r") {
+            if let Some(footnote_ref) = child_element(child, "footnoteReference") {
+                push_footnote_reference(
+                    graph,
+                    &mut link.inlines,
+                    footnotes,
+                    referenced_footnotes,
+                    u32_attribute(footnote_ref, "id"),
+                );
+            } else {
+                link.push_run(&parse_run_element(child));
+            }
+        } else if element_is(child, "footnoteReference") {
+            push_footnote_reference(
+                graph,
+                &mut link.inlines,
+                footnotes,
+                referenced_footnotes,
+                u32_attribute(child, "id"),
+            );
+        }
+    }
+    link
+}
+
+fn parse_run_element(element: &XmlElement) -> RunState {
+    let mut run = RunState::default();
+    if let Some(r_pr) = child_element(element, "rPr") {
+        if let Some(bold) = child_element(r_pr, "b") {
+            run.bold = bool_from_element(Some(bold), true);
+        }
+        if let Some(italic) = child_element(r_pr, "i") {
+            run.italic = bool_from_element(Some(italic), true);
+        }
+    }
+    for child in &element.children {
+        match child {
+            XmlValue::Element(child) if element_is(child, "t") => {
+                run.text.push_str(&element_text(child));
+            }
+            XmlValue::Element(child) if element_is(child, "tab") => run.text.push('\t'),
+            XmlValue::Element(child) if element_is(child, "br") => run.text.push('\n'),
+            _ => {}
+        }
+    }
+    run
 }
 
 #[derive(Debug, Default)]
@@ -401,21 +421,18 @@ impl RunState {
 
 fn push_footnote_reference(
     graph: &mut DocumentGraph,
-    paragraph: &mut ParagraphState,
-    hyperlink: &mut Option<HyperlinkState>,
+    inlines: &mut Vec<Inline>,
     footnotes: &FootnoteCatalog,
     referenced: &mut HashSet<u32>,
     id: Option<u32>,
 ) {
     let label = id.map(|value| value.to_string()).unwrap_or_else(|| "?".to_string());
-    let inline = Inline::Text {
-        text: format!("[^{}]", label),
-    };
-    if let Some(link) = hyperlink.as_mut() {
-        push_inline(&mut link.inlines, inline);
-    } else {
-        push_inline(&mut paragraph.inlines, inline);
-    }
+    push_inline(
+        inlines,
+        Inline::Text {
+            text: format!("[^{}]", label),
+        },
+    );
     if let Some(id) = id {
         referenced.insert(id);
         if !footnotes.contains_key(&id) {
@@ -453,38 +470,6 @@ fn merge_text_inline(existing: &mut Inline, incoming: &Inline) -> bool {
     }
 }
 
-fn is_local(name: LocalName, local: &[u8]) -> bool {
-    name.as_ref() == local
-}
-
-fn style_attribute(tag: &quick_xml::events::BytesStart) -> Option<String> {
-    tag.attributes()
-        .filter_map(|attr| attr.ok())
-        .find(|attr| attr.key.local_name().as_ref() == b"val")
-        .and_then(|attr| attr.unescape_value().ok())
-        .map(|value| value.into_owned())
-}
-
-fn relationship_id(tag: &quick_xml::events::BytesStart) -> Option<String> {
-    attribute_value(tag, b"id")
-}
-
-fn embed_relationship_id(tag: &quick_xml::events::BytesStart) -> Option<String> {
-    attribute_value(tag, b"embed")
-}
-
-fn description_attribute(tag: &quick_xml::events::BytesStart) -> Option<String> {
-    attribute_value(tag, b"descr")
-}
-
-fn attribute_value(tag: &quick_xml::events::BytesStart, local: &[u8]) -> Option<String> {
-    tag.attributes()
-        .filter_map(|attr| attr.ok())
-        .find(|attr| attr.key.local_name().as_ref() == local)
-        .and_then(|attr| attr.unescape_value().ok())
-        .map(|value| value.into_owned())
-}
-
 fn media_type_for(path: &str) -> Option<String> {
     let extension = path.rsplit('.').next()?.to_ascii_lowercase();
     match extension.as_str() {
@@ -495,18 +480,6 @@ fn media_type_for(path: &str) -> Option<String> {
         "svg" => Some("image/svg+xml".into()),
         _ => None,
     }
-}
-
-fn bool_attribute(tag: &quick_xml::events::BytesStart, default: bool) -> bool {
-    tag.attributes()
-        .filter_map(|attr| attr.ok())
-        .find(|attr| attr.key.local_name().as_ref() == b"val")
-        .and_then(|attr| attr.unescape_value().ok())
-        .map(|value| {
-            let value = value.as_ref();
-            !matches!(value, "0" | "false" | "off")
-        })
-        .unwrap_or(default)
 }
 
 fn finish_paragraph(
@@ -580,14 +553,6 @@ fn flush_pending_list(
         ordered,
         items: list.items,
     });
-}
-
-fn u32_attribute(tag: &quick_xml::events::BytesStart, local: &[u8]) -> Option<u32> {
-    tag.attributes()
-        .filter_map(|attr| attr.ok())
-        .find(|attr| attr.key.local_name().as_ref() == local)
-        .and_then(|attr| attr.unescape_value().ok())
-        .and_then(|value| value.parse().ok())
 }
 
 fn paragraph_inlines(paragraph: &ParagraphState) -> Option<Vec<Inline>> {
@@ -666,4 +631,65 @@ fn document_id_for(label: &str) -> DocumentId {
         hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
     }
     DocumentId(hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::export::markdown::export_markdown;
+
+    #[test]
+    fn parses_footnote_reference_inside_run() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>See</w:t></w:r>
+      <w:r><w:footnoteReference w:id="1"/></w:r>
+      <w:r><w:t> for details.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+        let mut graph = new_graph("footnote");
+        let referenced = parse_document_xml(
+            xml,
+            &HashMap::new(),
+            &NumberingCatalog::default(),
+            &FootnoteCatalog::new(),
+            &mut graph,
+        )
+        .expect("parse document");
+        assert!(referenced.contains(&1));
+        let markdown = export_markdown(&graph).expect("export markdown");
+        assert!(
+            markdown.contains("See[^1] for details."),
+            "markdown was: {markdown:?}, blocks: {:?}",
+            graph.blocks
+        );
+    }
+
+    #[test]
+    fn parses_bold_and_italic_runs() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:rPr><w:b/></w:rPr><w:t>Bold</w:t></w:r>
+      <w:r><w:rPr><w:i/></w:rPr><w:t> italic</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+        let mut graph = new_graph("styled");
+        parse_document_xml(
+            xml,
+            &HashMap::new(),
+            &NumberingCatalog::default(),
+            &FootnoteCatalog::new(),
+            &mut graph,
+        )
+        .expect("parse document");
+        let markdown = export_markdown(&graph).expect("export markdown");
+        assert!(markdown.contains("**Bold**"));
+        assert!(markdown.contains("* italic*"), "markdown was: {markdown}");
+    }
 }

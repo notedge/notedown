@@ -2,6 +2,7 @@
 
 mod footnotes;
 mod numbering;
+mod oak_xml_util;
 mod reader;
 mod rels;
 mod table;

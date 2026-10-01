@@ -3,45 +3,22 @@ use std::collections::HashMap;
 use crate::FormatError;
 
 use super::map_opc_error;
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use super::oak_xml_util::{
+    attribute_value, document_root, elements_by_local_name, parse_xml_bytes,
+};
 
 /// Parses OPC relationship targets keyed by relationship id.
 pub fn parse_relationship_targets(xml: &[u8]) -> Result<HashMap<String, String>, FormatError> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut buf = Vec::new();
+    let value = parse_xml_bytes(xml)?;
+    let root = document_root(&value)?;
     let mut targets = HashMap::new();
-    while let Ok(event) = reader.read_event_into(&mut buf) {
-        match event {
-            Event::Start(tag) | Event::Empty(tag) => {
-                if tag.local_name().as_ref() != b"Relationship" {
-                    continue;
-                }
-                let mut id = None;
-                let mut target = None;
-                for attr in tag.attributes().flatten() {
-                    match attr.key.local_name().as_ref() {
-                        b"Id" => {
-                            id = attr.unescape_value().ok().map(|value| value.into_owned());
-                        }
-                        b"Target" => {
-                            target = attr.unescape_value().ok().map(|value| value.into_owned());
-                        }
-                        _ => {}
-                    }
-                }
-                if let (Some(id), Some(target)) = (id, target) {
-                    targets.insert(id, target);
-                }
-            }
-            Event::Eof => break,
-            _ => {}
+    for relationship in elements_by_local_name(root, "Relationship") {
+        let id = attribute_value(relationship, "Id");
+        let target = attribute_value(relationship, "Target");
+        if let (Some(id), Some(target)) = (id, target) {
+            targets.insert(id, target);
         }
-        buf.clear();
     }
-
     Ok(targets)
 }
 

@@ -17,13 +17,13 @@ acorn-core = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
 oak-html = { workspace = true, optional = true }
-quick-xml = { version = "0.37.5", optional = true }
+oak-xml = { workspace = true, optional = true }
 
 [features]
 default = ["markdown", "notedown", "docx", "epub"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
-docx = ["dep:acorn-core", "dep:acorn-docx", "dep:quick-xml"]
+docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-xml"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 
 [dev-dependencies]

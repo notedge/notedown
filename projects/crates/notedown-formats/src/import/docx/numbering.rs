@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use crate::FormatError;
-use quick_xml::events::Event;
-use quick_xml::Reader;
+
+use super::oak_xml_util::{
+    attribute_value, child_element, document_root, elements_by_local_name, parse_xml_bytes,
+    u32_attribute,
+};
 
 /// Resolved list marker styles from `word/numbering.xml`.
 #[derive(Debug, Default, Clone)]
@@ -23,99 +26,42 @@ impl NumberingCatalog {
 
 /// Parses `word/numbering.xml` into a lookup table for list marker styles.
 pub fn parse_numbering_xml(xml: &[u8]) -> Result<NumberingCatalog, FormatError> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut buf = Vec::new();
+    let value = parse_xml_bytes(xml)?;
+    let root = document_root(&value)?;
     let mut catalog = NumberingCatalog::default();
-    let mut current_abstract: Option<u32> = None;
-    let mut current_ilvl: Option<u32> = None;
-    let mut current_num_id: Option<u32> = None;
 
-    while let Ok(event) = reader.read_event_into(&mut buf) {
-        match event {
-            Event::Start(tag) => {
-                let local = tag.local_name();
-                match local.as_ref() {
-                    b"abstractNum" => {
-                        current_abstract = u32_attribute(&tag, b"abstractNumId");
-                        current_ilvl = None;
-                    }
-                    b"lvl" if current_abstract.is_some() => {
-                        current_ilvl = u32_attribute(&tag, b"ilvl");
-                    }
-                    b"numFmt" if current_abstract.is_some() && current_ilvl.is_some() => {
-                        record_num_fmt(&mut catalog, current_abstract, current_ilvl, &tag);
-                    }
-                    b"num" => {
-                        current_num_id = u32_attribute(&tag, b"numId");
-                    }
-                    b"abstractNumId" if current_num_id.is_some() => {
-                        if let (Some(num_id), Some(abstract_id)) =
-                            (current_num_id, w_val_attribute(&tag))
-                        {
-                            if let Ok(abstract_id) = abstract_id.parse::<u32>() {
-                                catalog.num_to_abstract.insert(num_id, abstract_id);
-                            }
-                        }
-                    }
-                    _ => {}
+    for abstract_num in elements_by_local_name(root, "abstractNum") {
+        let Some(abstract_id) = u32_attribute(abstract_num, "abstractNumId") else {
+            continue;
+        };
+        for lvl in elements_by_local_name(abstract_num, "lvl") {
+            let Some(ilvl) = u32_attribute(lvl, "ilvl") else {
+                continue;
+            };
+            if let Some(num_fmt) = child_element(lvl, "numFmt") {
+                if let Some(format) = attribute_value(num_fmt, "val") {
+                    catalog
+                        .abstract_levels
+                        .entry(abstract_id)
+                        .or_default()
+                        .insert(ilvl, format);
                 }
             }
-            Event::Empty(tag) => {
-                let local = tag.local_name();
-                match local.as_ref() {
-                    b"numFmt" if current_abstract.is_some() && current_ilvl.is_some() => {
-                        record_num_fmt(&mut catalog, current_abstract, current_ilvl, &tag);
-                    }
-                    b"abstractNumId" if current_num_id.is_some() => {
-                        if let (Some(num_id), Some(abstract_id)) =
-                            (current_num_id, w_val_attribute(&tag))
-                        {
-                            if let Ok(abstract_id) = abstract_id.parse::<u32>() {
-                                catalog.num_to_abstract.insert(num_id, abstract_id);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Event::End(tag) => {
-                let local = tag.local_name();
-                match local.as_ref() {
-                    b"abstractNum" => {
-                        current_abstract = None;
-                        current_ilvl = None;
-                    }
-                    b"lvl" => current_ilvl = None,
-                    b"num" => current_num_id = None,
-                    _ => {}
-                }
-            }
-            Event::Eof => break,
-            _ => {}
         }
-        buf.clear();
+    }
+
+    for num in elements_by_local_name(root, "num") {
+        let Some(num_id) = u32_attribute(num, "numId") else {
+            continue;
+        };
+        if let Some(abstract_num_id) = child_element(num, "abstractNumId") {
+            if let Some(abstract_id) = u32_attribute(abstract_num_id, "val") {
+                catalog.num_to_abstract.insert(num_id, abstract_id);
+            }
+        }
     }
 
     Ok(catalog)
-}
-
-fn record_num_fmt(
-    catalog: &mut NumberingCatalog,
-    abstract_id: Option<u32>,
-    ilvl: Option<u32>,
-    tag: &quick_xml::events::BytesStart,
-) {
-    if let (Some(abstract_id), Some(ilvl)) = (abstract_id, ilvl) {
-        if let Some(format) = w_val_attribute(tag) {
-            catalog
-                .abstract_levels
-                .entry(abstract_id)
-                .or_default()
-                .insert(ilvl, format);
-        }
-    }
 }
 
 fn num_fmt_is_ordered(format: &str) -> bool {
@@ -123,22 +69,6 @@ fn num_fmt_is_ordered(format: &str) -> bool {
         format,
         "bullet" | "none" | "chart" | "image" | "customBullet"
     )
-}
-
-fn u32_attribute(tag: &quick_xml::events::BytesStart, local: &[u8]) -> Option<u32> {
-    attribute_value(tag, local)?.parse().ok()
-}
-
-fn w_val_attribute(tag: &quick_xml::events::BytesStart) -> Option<String> {
-    attribute_value(tag, b"val")
-}
-
-fn attribute_value(tag: &quick_xml::events::BytesStart, local: &[u8]) -> Option<String> {
-    tag.attributes()
-        .filter_map(|attr| attr.ok())
-        .find(|attr| attr.key.local_name().as_ref() == local)
-        .and_then(|attr| attr.unescape_value().ok())
-        .map(|value| value.into_owned())
 }
 
 /// Best-effort numbering parse that ignores malformed fragments.

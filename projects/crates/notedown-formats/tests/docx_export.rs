@@ -88,6 +88,32 @@ fn docx_export_round_trips_paragraphs_and_headings() {
 }
 
 #[test]
+fn docx_export_round_trips_lists_with_numbering() {
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>One</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Two</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let zip = stored_zip(&[("word/document.xml", document_xml)]);
+    let graph = import_docx_bytes("list.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let payload = String::from_utf8_lossy(&exported);
+    assert!(payload.contains("word/numbering.xml"));
+    let round = import_docx_bytes("round.docx", &exported).expect("re-import docx");
+    let markdown = export_markdown(&round).expect("export markdown");
+    assert!(markdown.contains("- One"));
+    assert!(markdown.contains("- Two"));
+}
+
+#[test]
 fn docx_export_includes_minimal_opc_parts() {
     let zip = minimal_docx_zip();
     let graph = import_docx_bytes("sample.docx", &zip).expect("import docx");

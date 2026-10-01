@@ -1,25 +1,34 @@
 use std::fmt::Write as _;
 
-use notedown_ir::{Block, DocumentGraph, Inline};
+use notedown_ir::{Block, DocumentGraph, Inline, ListItem};
 
 use crate::FormatError;
 
+use super::numbering::{ORDERED_NUM_ID, UNORDERED_NUM_ID};
+
 const W_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
-pub fn render_document_xml(graph: &DocumentGraph) -> Result<String, FormatError> {
+pub fn render_document_xml(graph: &DocumentGraph) -> Result<(String, bool), FormatError> {
     let mut body = String::new();
+    let mut uses_numbering = false;
     for node in &graph.blocks {
+        if matches!(node.block, Block::List { .. }) {
+            uses_numbering = true;
+        }
         write_block(&mut body, &node.block)?;
     }
     body.push_str("<w:sectPr/>");
 
-    Ok(format!(
+    Ok((
+        format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{W_NS}">
   <w:body>
     {body}
   </w:body>
 </w:document>"#
+        ),
+        uses_numbering,
     ))
 }
 
@@ -47,8 +56,10 @@ fn write_block(out: &mut String, block: &Block) -> Result<(), FormatError> {
             write_inlines(out, content)?;
             out.push_str("</w:p>");
         }
-        Block::List { .. }
-        | Block::Table { .. }
+        Block::List { ordered, items } => {
+            write_list(out, *ordered, items)?;
+        }
+        Block::Table { .. }
         | Block::Math { .. }
         | Block::Opaque { .. } => {
             return Err(FormatError::unsupported(
@@ -56,6 +67,17 @@ fn write_block(out: &mut String, block: &Block) -> Result<(), FormatError> {
                 "block type is not supported by the conservative DOCX exporter yet",
             ));
         }
+    }
+    Ok(())
+}
+
+fn write_list(out: &mut String, ordered: bool, items: &[ListItem]) -> Result<(), FormatError> {
+    let num_id = if ordered { ORDERED_NUM_ID } else { UNORDERED_NUM_ID };
+    for item in items {
+        write!(out, "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{num_id}\"/></w:numPr></w:pPr>")
+            .map_err(map_fmt_error)?;
+        write_inlines(out, &item.content)?;
+        out.push_str("</w:p>");
     }
     Ok(())
 }

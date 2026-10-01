@@ -38,6 +38,16 @@ fn notedown_import_lowers_blockquote() {
 }
 
 #[test]
+fn notedown_import_lowers_multiline_blockquote() {
+    let source = "> Line one\n> Line two\n";
+    let graph = import_notedown_bytes("quote.nd", source).expect("import notedown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("Line one"));
+    assert!(markdown.contains("Line two"));
+    assert!(markdown.contains('>'));
+}
+
+#[test]
 fn notedown_import_lowers_links() {
     let source = "Visit [home](https://example.com) today.\n";
     let graph = import_notedown_bytes("link.nd", source).expect("import notedown");

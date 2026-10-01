@@ -162,7 +162,9 @@ fn lower_block_node(
             rows: extract_table_rows(node, source),
         }),
         NoteElementType::Blockquote => Some(Block::Quote {
-            content: collect_inlines(node, source),
+            content: vec![Inline::Text {
+                text: extract_notedown_blockquote_text(node, source),
+            }],
         }),
         NoteElementType::HorizontalRule => Some(Block::Opaque {
             kind: "thematic_break".into(),
@@ -451,6 +453,25 @@ fn lower_inline_node(
 
 fn should_keep_inline_text(text: &str) -> bool {
     !text.is_empty() && text != "\n" && text != "\r"
+}
+
+fn extract_notedown_blockquote_text(node: RedNode<NoteLanguage>, source: &SourceText) -> String {
+    let raw = node.text(source).into_owned();
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        let content = trimmed
+            .strip_prefix('>')
+            .map(str::trim_start)
+            .unwrap_or(trimmed);
+        if !content.is_empty() {
+            lines.push(content.to_string());
+        }
+    }
+    if lines.is_empty() {
+        return collect_plain_text(node, source);
+    }
+    lines.join("\n")
 }
 
 fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {

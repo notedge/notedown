@@ -1,4 +1,6 @@
-use notedown_ir::{Block, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus};
+use notedown_ir::{
+    Block, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableRow,
+};
 use oak_core::parser::session::ParseSession;
 use oak_core::{Parser, RedNode, RedTree, SourceText};
 use oak_html::parser::element_type::HtmlElementType;
@@ -36,11 +38,7 @@ pub fn blocks_from_xhtml_with_context(
     collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, graph, member_path);
 
     let scraped = scraper_blocks_from_xhtml(text.as_str(), graph, member_path)?;
-    if scraped.len() > blocks.len() {
-        blocks = scraped;
-    } else if blocks.is_empty() {
-        blocks = scraped;
-    }
+    blocks = merge_xhtml_blocks(blocks, scraped);
 
     if !losses.is_empty() && blocks.is_empty() {
         return Err(FormatError::parse(
@@ -260,12 +258,12 @@ fn lower_semantic_block<'a>(
             }
         }
         "table" => {
-            losses.push(LossMarker {
-                code: "import.epub.unsupported_xhtml_block".into(),
-                message: format!("unsupported xhtml block element `<{tag}>`"),
-                status: SemanticStatus::Unsupported,
-            });
-            None
+            let rows = collect_table_rows(node, source, graph, member_path, losses);
+            if rows.is_empty() {
+                None
+            } else {
+                Some(Block::Table { rows })
+            }
         }
         _ => {
             losses.push(LossMarker {
@@ -313,12 +311,162 @@ fn collect_list_items<'a>(
         if element_tag_name(child, source).as_deref() != Some("li") {
             continue;
         }
-        items.push(ListItem {
-            content: collect_inlines_from_element(child, source, graph, member_path, losses),
-            children: Vec::new(),
-        });
+        items.push(lower_list_item(child, source, graph, member_path, losses));
     }
     items
+}
+
+fn lower_list_item<'a>(
+    li: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+) -> ListItem {
+    let mut content = Vec::new();
+    let mut children = Vec::new();
+    let mut past_opening_tag = false;
+
+    for child in li.children() {
+        match child {
+            RedTree::Node(child_node) => {
+                let kind = child_node.element_type();
+                if kind == HtmlElementType::TagSlashOpen {
+                    break;
+                }
+                if !past_opening_tag {
+                    if kind == HtmlElementType::TagClose {
+                        past_opening_tag = true;
+                    }
+                    continue;
+                }
+                if kind == HtmlElementType::Element {
+                    note_inline_style_loss(child_node, source, losses);
+                    let tag = element_tag_name(child_node, source).unwrap_or_default();
+                    match tag.as_str() {
+                        "ul" | "ol" => {
+                            let nested = collect_list_items(
+                                child_node,
+                                source,
+                                graph,
+                                member_path,
+                                losses,
+                            );
+                            if !nested.is_empty() {
+                                let id = graph.push_block(Block::List {
+                                    ordered: tag == "ol",
+                                    items: nested,
+                                });
+                                children.push(id);
+                            }
+                        }
+                        "p" => {
+                            for inline in collect_inlines_from_element(
+                                child_node,
+                                source,
+                                graph,
+                                member_path,
+                                losses,
+                            ) {
+                                push_inline(&mut content, inline);
+                            }
+                        }
+                        _ => {
+                            if let Some(inline) = lower_inline_element(
+                                child_node,
+                                source,
+                                graph,
+                                member_path,
+                                losses,
+                            ) {
+                                push_inline(&mut content, inline);
+                            }
+                        }
+                    }
+                } else if kind == HtmlElementType::Text {
+                    let text = normalize_whitespace(child_node.text(source).as_ref());
+                    if !text.is_empty() {
+                        push_inline(&mut content, Inline::Text { text });
+                    }
+                } else {
+                    let text = normalize_whitespace(child_node.text(source).as_ref());
+                    if !text.is_empty() {
+                        push_inline(&mut content, Inline::Text { text });
+                    }
+                }
+            }
+            RedTree::Leaf(_) => {
+                if !past_opening_tag {
+                    continue;
+                }
+                let text = normalize_whitespace(child.text(source).as_ref());
+                if !text.is_empty() {
+                    push_inline(&mut content, Inline::Text { text });
+                }
+            }
+        }
+    }
+
+    ListItem { content, children }
+}
+
+fn collect_table_rows<'a>(
+    node: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+) -> Vec<TableRow> {
+    let mut rows = Vec::new();
+    walk_table_rows(node, source, graph, member_path, losses, &mut rows);
+    rows
+}
+
+fn walk_table_rows<'a>(
+    node: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+    rows: &mut Vec<TableRow>,
+) {
+    if node.element_type() == HtmlElementType::Element {
+        if let Some(tag) = element_tag_name(node, source) {
+            if tag == "tr" {
+                rows.push(collect_table_row(node, source, graph, member_path, losses));
+                return;
+            }
+        }
+    }
+
+    for child in element_body_children(node, source) {
+        if child.element_type() != HtmlElementType::Element {
+            continue;
+        }
+        walk_table_rows(child, source, graph, member_path, losses, rows);
+    }
+}
+
+fn collect_table_row<'a>(
+    row: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+) -> TableRow {
+    let mut cells = Vec::new();
+    for child in element_body_children(row, source) {
+        if child.element_type() != HtmlElementType::Element {
+            continue;
+        }
+        let tag = element_tag_name(child, source).unwrap_or_default();
+        if tag == "th" || tag == "td" {
+            cells.push(
+                collect_inlines_from_element(child, source, graph, member_path, losses),
+            );
+        }
+    }
+    TableRow { cells }
 }
 
 fn collect_inlines_from_element<'a>(
@@ -580,6 +728,44 @@ fn prepare_xhtml_for_oak_html(xml: &str) -> String {
     text
 }
 
+fn merge_xhtml_blocks(oak: Vec<Block>, scraped: Vec<Block>) -> Vec<Block> {
+    if scraped.is_empty() {
+        return oak;
+    }
+    if oak.is_empty() {
+        return scraped;
+    }
+    let oak_score = semantic_block_score(&oak);
+    let scraped_score = semantic_block_score(&scraped);
+    if scraped_score > oak_score {
+        scraped
+    } else {
+        oak
+    }
+}
+
+fn semantic_block_score(blocks: &[Block]) -> usize {
+    blocks.iter().map(block_score).sum()
+}
+
+fn block_score(block: &Block) -> usize {
+    match block {
+        Block::List { items, .. } => {
+            10 + items.len()
+                + items
+                    .iter()
+                    .map(|item| 5 + item.content.len() + item.children.len() * 8)
+                    .sum::<usize>()
+        }
+        Block::Table { rows, .. } => 8 + rows.len(),
+        Block::Section { title, .. } => 4 + title.len(),
+        Block::Paragraph { content, .. } => 2 + content.len(),
+        Block::Quote { content, .. } => 3 + content.len(),
+        Block::Code { content, .. } => 3 + content.len().min(32),
+        _ => 1,
+    }
+}
+
 /// Fallback block extraction when `oak-html` tree shape is still lossy.
 fn scraper_blocks_from_xhtml(
     text: &str,
@@ -653,10 +839,204 @@ fn scraper_blocks_from_xhtml(
             continue;
         }
 
+        if tag == "ul" || tag == "ol" {
+            let (content, next) = slice_until_close(text, inner_start, &tag)?;
+            let items = scrape_list_items(content, graph, member_path);
+            if !items.is_empty() {
+                blocks.push(Block::List {
+                    ordered: tag == "ol",
+                    items,
+                });
+            }
+            cursor = next;
+            continue;
+        }
+
+        if tag == "blockquote" {
+            let (content, next) = slice_until_close(text, inner_start, "blockquote")?;
+            let inlines = inlines_from_html_fragment(content, graph, member_path);
+            blocks.push(Block::Quote {
+                content: if inlines.is_empty() {
+                    vec![Inline::Text {
+                        text: strip_tags(content),
+                    }]
+                } else {
+                    inlines
+                },
+            });
+            cursor = next;
+            continue;
+        }
+
+        if tag == "pre" {
+            let (content, next) = slice_until_close(text, inner_start, "pre")?;
+            let code = strip_tags(content);
+            if !code.is_empty() {
+                blocks.push(Block::Code {
+                    language: None,
+                    content: code,
+                });
+            }
+            cursor = next;
+            continue;
+        }
+
+        if tag == "table" {
+            let (content, next) = slice_until_close(text, inner_start, "table")?;
+            let rows = scrape_table_rows(content, graph, member_path);
+            if !rows.is_empty() {
+                blocks.push(Block::Table { rows });
+            }
+            cursor = next;
+            continue;
+        }
+
         cursor = inner_start;
     }
 
     Ok(blocks)
+}
+
+fn scrape_list_items(
+    content: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Vec<ListItem> {
+    let mut items = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(start) = find_tag_open(&content[cursor..], "li") {
+        let absolute = cursor + start;
+        let rest = &content[absolute + 1..];
+        let close_index = rest.find('>').unwrap_or(0);
+        let inner_start = absolute + 1 + close_index + 1;
+        let (inner, next) = slice_until_close(content, inner_start, "li").unwrap_or((
+            &content[inner_start..],
+            content.len(),
+        ));
+        let nested_lists = scrape_nested_lists(inner, graph, member_path);
+        let inline_content = remove_nested_lists(inner);
+        let inlines = inlines_from_html_fragment(&inline_content, graph, member_path);
+        items.push(ListItem {
+            content: if inlines.is_empty() {
+                vec![Inline::Text {
+                    text: strip_tags(inner),
+                }]
+            } else {
+                inlines
+            },
+            children: nested_lists,
+        });
+        cursor = next;
+    }
+    items
+}
+
+fn remove_nested_lists(fragment: &str) -> String {
+    let mut parts = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < fragment.len() {
+        let next_ul = fragment[cursor..].find("<ul");
+        let next_ol = fragment[cursor..].find("<ol");
+        let next_special = match (next_ul, next_ol) {
+            (Some(left), Some(right)) => cursor + left.min(right),
+            (Some(left), None) => cursor + left,
+            (None, Some(right)) => cursor + right,
+            (None, None) => fragment.len(),
+        };
+        parts.push(&fragment[cursor..next_special]);
+        if next_special >= fragment.len() {
+            break;
+        }
+        let tag = if fragment[next_special..].starts_with("<ul") {
+            "ul"
+        } else {
+            "ol"
+        };
+        let rest = &fragment[next_special + 1..];
+        let close_index = rest.find('>').unwrap_or(0);
+        let inner_start = next_special + 1 + close_index + 1;
+        if let Ok((_, next)) = slice_until_close(fragment, inner_start, tag) {
+            cursor = next;
+        } else {
+            parts.push(&fragment[next_special..next_special + 1]);
+            cursor = next_special + 1;
+        }
+    }
+    parts.join("")
+}
+
+fn scrape_nested_lists(
+    content: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Vec<notedown_ir::NodeId> {
+    let mut children = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < content.len() {
+        let next_ul = content[cursor..].find("<ul");
+        let next_ol = content[cursor..].find("<ol");
+        let (absolute, tag, ordered) = match (next_ul, next_ol) {
+            (Some(left), Some(right)) if left <= right => (cursor + left, "ul", false),
+            (Some(_), Some(right)) => (cursor + right, "ol", true),
+            (Some(left), None) => (cursor + left, "ul", false),
+            (None, Some(right)) => (cursor + right, "ol", true),
+            (None, None) => break,
+        };
+        let rest = &content[absolute + 1..];
+        let close_index = rest.find('>').unwrap_or(0);
+        let inner_start = absolute + 1 + close_index + 1;
+        if let Ok((inner, next)) = slice_until_close(content, inner_start, tag) {
+            let items = scrape_list_items(inner, graph, member_path);
+            if !items.is_empty() {
+                children.push(graph.push_block(Block::List { ordered, items }));
+            }
+            cursor = next;
+        } else {
+            cursor = absolute + 1;
+        }
+    }
+    children
+}
+
+fn scrape_table_rows(
+    content: &str,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Vec<TableRow> {
+    let mut rows = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(start) = content[cursor..].find("<tr") {
+        let absolute = cursor + start;
+        let rest = &content[absolute + 1..];
+        let close_index = rest.find('>').unwrap_or(0);
+        let inner_start = absolute + 1 + close_index + 1;
+        let (inner, next) = slice_until_close(content, inner_start, "tr").unwrap_or((
+            &content[inner_start..],
+            content.len(),
+        ));
+        let mut cells = Vec::new();
+        let mut cell_cursor = 0usize;
+        while let Some(cell_start) = inner[cell_cursor..].find('<') {
+            let cell_absolute = cell_cursor + cell_start;
+            let cell_rest = &inner[cell_absolute + 1..];
+            let (cell_tag, _) = parse_tag_name(cell_rest).unwrap_or((String::new(), false));
+            if cell_tag != "th" && cell_tag != "td" {
+                cell_cursor = cell_absolute + 1;
+                continue;
+            }
+            let cell_close = cell_rest.find('>').unwrap_or(0);
+            let cell_inner_start = cell_absolute + 1 + cell_close + 1;
+            let (cell_inner, cell_next) = slice_until_close(inner, cell_inner_start, &cell_tag)
+                .unwrap_or((&inner[cell_inner_start..], inner.len()));
+            cells.push(inlines_from_html_fragment(cell_inner, graph, member_path));
+            cell_cursor = cell_next;
+        }
+        if !cells.is_empty() {
+            rows.push(TableRow { cells });
+        }
+        cursor = next;
+    }
+    rows
 }
 
 fn scrape_attribute(tag: &str, name: &str) -> Option<String> {
@@ -755,11 +1135,67 @@ fn slice_until_close<'a>(
     tag: &str,
 ) -> Result<(&'a str, usize), FormatError> {
     let close = format!("</{tag}>");
-    let slice = &text[start..];
-    let end = slice
-        .find(&close)
-        .ok_or_else(|| FormatError::parse("epub", format!("unclosed <{tag}>")))?;
-    Ok((&slice[..end], start + end + close.len()))
+    let mut depth = 1usize;
+    let mut cursor = start;
+    while cursor < text.len() && depth > 0 {
+        let rest = &text[cursor..];
+        let next_open = find_tag_open(rest, tag);
+        let next_close = rest.find(&close);
+        match (next_open, next_close) {
+            (Some(open_at), Some(close_at)) if open_at < close_at => {
+                depth += 1;
+                cursor += open_at + tag_open_token_len(rest, tag, open_at);
+            }
+            (None, Some(close_at)) => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = cursor + close_at;
+                    return Ok((&text[start..end], end + close.len()));
+                }
+                cursor += close_at + close.len();
+            }
+            (Some(_open_at), Some(close_at)) => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = cursor + close_at;
+                    return Ok((&text[start..end], end + close.len()));
+                }
+                cursor += close_at + close.len();
+            }
+            (Some(open_at), None) => {
+                depth += 1;
+                cursor += open_at + tag_open_token_len(rest, tag, open_at);
+            }
+            (None, None) => {
+                return Err(FormatError::parse("epub", format!("unclosed <{tag}>")));
+            }
+        }
+    }
+    Err(FormatError::parse("epub", format!("unclosed <{tag}>")))
+}
+
+fn find_tag_open(rest: &str, tag: &str) -> Option<usize> {
+    let needle = format!("<{tag}");
+    let mut cursor = 0usize;
+    while let Some(index) = rest[cursor..].find(&needle) {
+        let absolute = cursor + index;
+        let after = &rest[absolute + needle.len()..];
+        let valid = match after.chars().next() {
+            None | Some('>') | Some('/') => true,
+            Some(ch) => ch.is_whitespace(),
+        };
+        if valid {
+            return Some(absolute);
+        }
+        cursor = absolute + needle.len();
+    }
+    None
+}
+
+fn tag_open_token_len(rest: &str, tag: &str, open_at: usize) -> usize {
+    let after_needle = &rest[open_at + tag.len() + 1..];
+    let close = after_needle.find('>').unwrap_or(after_needle.len());
+    tag.len() + 1 + close + 1
 }
 
 fn strip_tags(text: &str) -> String {
@@ -887,5 +1323,27 @@ mod tests {
         let exported = crate::export::markdown::export_markdown(&graph).expect("export");
         assert!(exported.contains("# Chapter One"));
         assert!(exported.contains("**EPUB**"));
+    }
+
+    #[test]
+    fn oak_html_lowers_tables_and_nested_lists() {
+        const XHTML: &str = r#"<html><body>
+<table><tr><th>H</th><td>V</td></tr></table>
+<ul><li>Top<ul><li>Nested</li></ul></li></ul>
+</body></html>"#;
+        let mut graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(2));
+        let blocks = blocks_from_xhtml_with_context(XHTML.as_bytes(), &mut graph, None)
+            .expect("lower xhtml");
+        assert!(
+            blocks.iter().any(|block| matches!(block, Block::Table { .. })),
+            "blocks={blocks:?}"
+        );
+        for block in blocks {
+            graph.push_block(block);
+        }
+        let exported = crate::export::markdown::export_markdown(&graph).expect("export");
+        assert!(exported.contains("| H | V |"));
+        assert!(exported.contains("- Top"));
+        assert!(exported.contains("  - Nested"));
     }
 }

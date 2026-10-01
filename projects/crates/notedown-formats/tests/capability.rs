@@ -1,7 +1,7 @@
 use notedown_formats::{capabilities, FormatDirection, FormatStatus};
 
 #[test]
-fn capabilities_mark_markdown_ready() {
+fn capabilities_mark_ready_modules() {
     let caps = capabilities();
     assert!(caps.iter().any(|cap| {
         cap.id == "markdown"
@@ -13,5 +13,10 @@ fn capabilities_mark_markdown_ready() {
             && cap.direction == FormatDirection::Export
             && cap.status == FormatStatus::Ready
     }));
-    assert!(caps.iter().any(|cap| cap.id == "docx" && cap.status == FormatStatus::Planned));
+    assert!(caps.iter().any(|cap| {
+        cap.id == "docx"
+            && cap.direction == FormatDirection::Import
+            && cap.status == FormatStatus::Ready
+    }));
+    assert!(caps.iter().any(|cap| cap.id == "epub" && cap.status == FormatStatus::Planned));
 }

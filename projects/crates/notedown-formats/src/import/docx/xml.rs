@@ -663,7 +663,7 @@ pub fn new_graph(label: &str) -> DocumentGraph {
 fn document_id_for(label: &str) -> DocumentId {
     let mut hash = 1u64;
     for byte in label.bytes() {
-        hash = hash * 31 + u64::from(byte);
+        hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
     }
     DocumentId(hash)
 }

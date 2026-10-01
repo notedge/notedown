@@ -182,3 +182,48 @@ fn docx_export_round_trips_hyperlinks() {
     let markdown = export_markdown(&round).expect("export markdown");
     assert!(markdown.contains("[Example](https://example.com)"));
 }
+
+#[test]
+fn docx_export_round_trips_embedded_images() {
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:drawing>
+          <wp:inline>
+            <wp:docPr descr="Logo"/>
+            <a:graphic>
+              <a:graphicData>
+                <a:blip r:embed="rId2"/>
+              </a:graphicData>
+            </a:graphic>
+          </wp:inline>
+        </w:drawing>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    Target="media/logo.png"/>
+</Relationships>"#;
+    let image_bytes = b"\x89PNG\r\n";
+    let zip = stored_zip(&[
+        ("word/document.xml", document_xml),
+        ("word/_rels/document.xml.rels", rels_xml),
+        ("word/media/logo.png", image_bytes),
+    ]);
+    let graph = import_docx_bytes("image.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let payload = String::from_utf8_lossy(&exported);
+    assert!(payload.contains("word/media/logo.png"));
+    let round = import_docx_bytes("round.docx", &exported).expect("re-import docx");
+    let markdown = export_markdown(&round).expect("export markdown");
+    assert!(markdown.contains("![Logo](media/logo.png)"));
+}

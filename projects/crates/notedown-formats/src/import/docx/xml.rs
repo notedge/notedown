@@ -325,6 +325,7 @@ impl ParagraphState {
                 source: Some(target.clone()),
                 media_type: media_type_for(target),
                 status: SemanticStatus::Resolved,
+                bytes: None,
             });
             push_inline(
                 &mut self.inlines,

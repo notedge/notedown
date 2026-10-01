@@ -11,11 +11,13 @@ use crate::FormatError;
 
 /// Export a document graph to DOCX bytes.
 pub fn export_docx_bytes(graph: &DocumentGraph) -> Result<Vec<u8>, FormatError> {
-    let (document_xml, include_numbering, document_rels_xml) = writer::render_document_xml(graph)?;
+    let rendered = writer::render_document_xml(graph)?;
     Ok(package::build_minimal_opc_package(
-        &document_xml,
-        include_numbering,
-        &document_rels_xml,
+        &rendered.document_xml,
+        rendered.include_numbering,
+        &rendered.document_rels_xml,
+        &rendered.media_parts,
+        &rendered.image_extensions,
     ))
 }
 

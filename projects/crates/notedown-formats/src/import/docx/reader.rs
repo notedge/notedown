@@ -3,7 +3,7 @@ use std::path::Path;
 
 use acorn_core::ParseBudget;
 use acorn_docx::OpcPackage;
-use notedown_ir::{DocumentGraph, LossMarker, SemanticStatus};
+use notedown_ir::{AssetKind, DocumentGraph, LossMarker, SemanticStatus};
 
 use super::footnotes::{
     append_footnote_definitions, footnotes_part_path, parse_footnotes_xml_lossy, FootnoteCatalog,
@@ -49,6 +49,7 @@ pub fn import_docx_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
     let referenced_footnotes =
         xml::parse_document_xml(&xml, &rels, &numbering, &footnotes, &mut graph)?;
     append_footnote_definitions(&mut graph, &footnotes, &referenced_footnotes);
+    hydrate_embedded_assets(&package, &budget, &mut graph);
     graph.push_loss(LossMarker {
         code: "import.docx.partial_coverage".into(),
         message: "DOCX import currently maps paragraphs, heading styles, lists with numbering.xml marker resolution, tables, run bold/italic, hyperlinks, embedded images, footnote references, and footnote bodies from footnotes.xml".into(),
@@ -79,4 +80,19 @@ fn read_footnote_catalog(package: &OpcPackage, budget: &ParseBudget) -> Footnote
         .ok()
         .map(|xml| parse_footnotes_xml_lossy(&xml))
         .unwrap_or_default()
+}
+
+fn hydrate_embedded_assets(package: &OpcPackage, budget: &ParseBudget, graph: &mut DocumentGraph) {
+    for asset in &mut graph.assets {
+        if asset.kind != AssetKind::Image {
+            continue;
+        }
+        let Some(source) = asset.source.as_ref() else {
+            continue;
+        };
+        let part_path = format!("word/{source}");
+        if let Ok(bytes) = package.read_part(&part_path, budget) {
+            asset.bytes = Some(bytes);
+        }
+    }
 }

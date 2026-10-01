@@ -59,21 +59,6 @@ fn crc32(data: &[u8]) -> u32 {
     crc ^ 0xFFFF_FFFF
 }
 
-const CONTENT_TYPES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>"#;
-
-const CONTENT_TYPES_WITH_NUMBERING_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
-</Types>"#;
-
 const ROOT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
@@ -84,8 +69,10 @@ pub fn build_minimal_opc_package(
     document_xml: &str,
     include_numbering: bool,
     document_rels_xml: &str,
+    media_parts: &[(String, Vec<u8>)],
+    image_extensions: &[String],
 ) -> Vec<u8> {
-    let content_types = content_types_xml(include_numbering);
+    let content_types = content_types_xml(include_numbering, image_extensions);
     let mut entries = vec![
         ("[Content_Types].xml", content_types.as_bytes()),
         ("_rels/.rels", ROOT_RELS_XML.as_bytes()),
@@ -98,13 +85,42 @@ pub fn build_minimal_opc_package(
             ("word/numbering.xml", super::numbering::NUMBERING_XML.as_bytes()),
         );
     }
+    for (path, bytes) in media_parts {
+        entries.push((path.as_str(), bytes.as_slice()));
+    }
     stored_zip(&entries)
 }
 
-fn content_types_xml(include_numbering: bool) -> String {
+fn content_types_xml(include_numbering: bool, image_extensions: &[String]) -> String {
+    let mut xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    );
     if include_numbering {
-        CONTENT_TYPES_WITH_NUMBERING_XML.to_string()
-    } else {
-        CONTENT_TYPES_XML.to_string()
+        xml.push_str("\n  <Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>");
+    }
+    for extension in image_extensions {
+        let content_type = image_content_type(extension);
+        xml.push_str("\n  <Default Extension=\"");
+        xml.push_str(extension);
+        xml.push_str("\" ContentType=\"");
+        xml.push_str(content_type);
+        xml.push_str("\"/>");
+    }
+    xml.push_str("\n</Types>");
+    xml
+}
+
+fn image_content_type(extension: &str) -> &'static str {
+    match extension {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
     }
 }

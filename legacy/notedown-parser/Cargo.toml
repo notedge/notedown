@@ -16,12 +16,16 @@ url = "2.2.2"
 
 [dependencies.notedown_ast]
 version = "0.16"
-path = "../../projects/packages/notedown-ast"
+git = "https://github.com/notedge/notedown.git"
+branch = "dev"
+package = "notedown_ast"
 features = []
 
 [dependencies.notedown-rt]
 version = "0.3"
-path = "../../projects/packages/notedown-runtime"
+git = "https://github.com/notedge/notedown.git"
+branch = "dev"
+package = "notedown-rt"
 features = []
 
 [dev-dependencies]

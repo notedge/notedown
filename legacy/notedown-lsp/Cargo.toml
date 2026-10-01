@@ -26,5 +26,7 @@ itertools = "0.10.3"
 
 [dependencies.notedown-rt]
 version = "0.3"
-path = "../../projects/packages/notedown-runtime"
+git = "https://github.com/notedge/notedown.git"
+branch = "dev"
+package = "notedown-rt"
 features = ["lsp"]

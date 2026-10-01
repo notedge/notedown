@@ -289,6 +289,7 @@ fn lower_semantic_block<'a>(
             })?;
             Some(Block::Paragraph { content })
         }
+        "figcaption" => lower_figcaption_block(node, source, graph, member_path, losses),
         "ul" | "ol" => {
             let items = collect_list_items(node, source, graph, member_path, losses);
             if items.is_empty() {
@@ -398,6 +399,30 @@ fn non_empty_inlines(inlines: Vec<Inline>) -> Option<Vec<Inline>> {
     } else {
         Some(inlines)
     }
+}
+
+fn lower_figcaption_block<'a>(
+    node: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+) -> Option<Block> {
+    let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses))
+        .or_else(|| {
+            let plain = element_inner_plain_text(node, source);
+            if plain.is_empty() {
+                None
+            } else {
+                Some(vec![Inline::Text { text: plain }])
+            }
+        })?;
+    Some(Block::Paragraph {
+        content: vec![Inline::Styled {
+            style: "figcaption".into(),
+            children: content,
+        }],
+    })
 }
 
 fn element_inner_plain_text(node: RedNode<HtmlLanguage>, source: &SourceText) -> String {
@@ -954,6 +979,29 @@ fn scraper_blocks_from_xhtml(
             if !inlines.is_empty() {
                 blocks.push(Block::Paragraph { content: inlines });
             }
+            cursor = next;
+            continue;
+        }
+
+        if tag == "figcaption" {
+            let (content, next) = slice_until_close(text, inner_start, "figcaption")?;
+            let inlines = inlines_from_html_fragment(content, graph, member_path);
+            let children = if inlines.is_empty() {
+                let plain = strip_tags(content);
+                if plain.is_empty() {
+                    cursor = next;
+                    continue;
+                }
+                vec![Inline::Text { text: plain }]
+            } else {
+                inlines
+            };
+            blocks.push(Block::Paragraph {
+                content: vec![Inline::Styled {
+                    style: "figcaption".into(),
+                    children,
+                }],
+            });
             cursor = next;
             continue;
         }

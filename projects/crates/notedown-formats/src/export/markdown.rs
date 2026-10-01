@@ -247,7 +247,7 @@ fn write_inline(out: &mut String, inline: &Inline) -> Result<(), FormatError> {
             }
             let wrapper = match style.as_str() {
                 "bold" | "strong" => ("**", "**"),
-                "italic" | "emphasis" => ("*", "*"),
+                "italic" | "emphasis" | "figcaption" => ("*", "*"),
                 _ => ("", ""),
             };
             out.push_str(wrapper.0);

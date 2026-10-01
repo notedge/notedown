@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::asset::Asset;
 use crate::block::{Block, BlockNode};
 use crate::id::{AssetId, DocumentId, LinkId, NodeId};
-use crate::relation::Relation;
+use crate::relation::{Relation, RelationEndpoint, RelationKind};
 use crate::source::{CoverageReport, SourceRef};
 use crate::status::LossMarker;
 
@@ -78,6 +78,42 @@ impl DocumentGraph {
     /// Attach provenance to a semantic node.
     pub fn attach_source(&mut self, source: SourceRef) {
         self.sources.push(source);
+    }
+
+    /// Look up a block by semantic node id.
+    pub fn block(&self, id: NodeId) -> Option<&BlockNode> {
+        self.blocks.iter().find(|node| node.id == id)
+    }
+
+    /// Provenance records attached to a semantic node.
+    pub fn sources_for(&self, node: NodeId) -> Vec<&SourceRef> {
+        self.sources.iter().filter(|source| source.node == node).collect()
+    }
+
+    /// Relations whose source endpoint matches `endpoint`.
+    pub fn relations_from(&self, endpoint: &RelationEndpoint) -> Vec<&Relation> {
+        self.relations
+            .iter()
+            .filter(|relation| relation.source.matches(endpoint))
+            .collect()
+    }
+
+    /// Relations whose target endpoint matches `endpoint`.
+    pub fn relations_to(&self, endpoint: &RelationEndpoint) -> Vec<&Relation> {
+        self.relations
+            .iter()
+            .filter(|relation| relation.target.matches(endpoint))
+            .collect()
+    }
+
+    /// Indexed backlink edges pointing at `target`.
+    pub fn backlinks_to(&self, target: &RelationEndpoint) -> Vec<&Relation> {
+        self.relations
+            .iter()
+            .filter(|relation| {
+                relation.kind == RelationKind::Backlink && relation.target.matches(target)
+            })
+            .collect()
     }
 }
 

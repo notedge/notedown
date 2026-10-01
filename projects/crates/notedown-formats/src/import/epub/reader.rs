@@ -131,7 +131,7 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
 
     graph.push_loss(LossMarker {
         code: "import.epub.partial_coverage".into(),
-        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC, spine XHTML via oak-html, embedded image assets, manifest CSS members, and external SVG image references. Inline CSS semantics remain pending".into(),
+        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC, spine XHTML via oak-html with container unwrapping, blockquote, pre/code, hr, tables, nested lists, embedded image assets, manifest CSS members, and external SVG image references. Inline CSS semantics remain pending".into(),
         status: SemanticStatus::Partial,
     });
     Ok(graph)

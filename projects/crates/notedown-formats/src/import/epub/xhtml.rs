@@ -35,7 +35,15 @@ pub fn blocks_from_xhtml_with_context(
     let scope = find_body_or_document(root, &source);
     let mut blocks = Vec::new();
     let mut losses = Vec::new();
-    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, graph, member_path);
+    collect_semantic_blocks(
+        scope,
+        &source,
+        &mut blocks,
+        &mut losses,
+        graph,
+        member_path,
+        false,
+    );
 
     let scraped = scraper_blocks_from_xhtml(text.as_str(), graph, member_path)?;
     blocks = merge_xhtml_blocks(blocks, scraped);
@@ -70,7 +78,15 @@ pub fn losses_from_xhtml(xml: &[u8]) -> Result<Vec<LossMarker>, FormatError> {
     let mut blocks = Vec::new();
     let mut losses = Vec::new();
     let mut scratch = DocumentGraph::new(notedown_ir::DocumentId(0));
-    collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, &mut scratch, None);
+    collect_semantic_blocks(
+        scope,
+        &source,
+        &mut blocks,
+        &mut losses,
+        &mut scratch,
+        None,
+        false,
+    );
     losses.extend(scan_markup_losses(text.as_ref()));
     Ok(losses)
 }
@@ -132,9 +148,31 @@ fn collect_semantic_blocks<'a>(
     losses: &mut Vec<LossMarker>,
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
+    inside_list_item: bool,
 ) {
     if node.element_type() == HtmlElementType::Element {
         if let Some(tag) = element_tag_name(node, source) {
+            if tag == "li" {
+                for child in element_body_children(node, source) {
+                    collect_semantic_blocks(
+                        child,
+                        source,
+                        blocks,
+                        losses,
+                        graph,
+                        member_path,
+                        true,
+                    );
+                }
+                return;
+            }
+            if inside_list_item && (tag == "ul" || tag == "ol") {
+                return;
+            }
+            if matches!(tag.as_str(), "section" | "article" | "main" | "div" | "figure") {
+                blocks.extend(collect_child_blocks(node, source, graph, member_path, losses));
+                return;
+            }
             if let Some(block) = lower_semantic_block(node, source, &tag, losses, graph, member_path) {
                 blocks.push(block);
                 return;
@@ -144,8 +182,75 @@ fn collect_semantic_blocks<'a>(
 
     for child in node.children() {
         if let RedTree::Node(child_node) = child {
-            collect_semantic_blocks(child_node, source, blocks, losses, graph, member_path);
+            collect_semantic_blocks(
+                child_node,
+                source,
+                blocks,
+                losses,
+                graph,
+                member_path,
+                inside_list_item,
+            );
         }
+    }
+}
+
+fn collect_child_blocks<'a>(
+    node: RedNode<'a, HtmlLanguage>,
+    source: &SourceText,
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
+) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    for child in element_body_children(node, source) {
+        collect_semantic_blocks(
+            child,
+            source,
+            &mut blocks,
+            losses,
+            graph,
+            member_path,
+            false,
+        );
+    }
+    blocks
+}
+
+fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
+    let mut content = Vec::new();
+    for (index, block) in blocks.iter().enumerate() {
+        if index > 0 {
+            push_inline(&mut content, Inline::Text { text: "\n".into() });
+        }
+        match block {
+            Block::Paragraph { content: paragraph } => {
+                for inline in paragraph {
+                    push_inline(&mut content, inline.clone());
+                }
+            }
+            Block::Quote { content: quote } => {
+                for inline in quote {
+                    push_inline(&mut content, inline.clone());
+                }
+            }
+            Block::Section { title, .. } => {
+                for inline in title {
+                    push_inline(&mut content, inline.clone());
+                }
+            }
+            Block::Code { content: code, .. } => {
+                push_inline(&mut content, Inline::Text { text: code.clone() });
+            }
+            _ => {}
+        }
+    }
+    if content.is_empty() {
+        Block::Quote {
+            content: vec![Inline::Text { text: String::new() }],
+        }
+    } else {
+        Block::Quote { content }
     }
 }
 
@@ -195,23 +300,34 @@ fn lower_semantic_block<'a>(
                 })
             }
         }
-        "blockquote" => Some(Block::Quote {
-            content: non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses))
-                .unwrap_or_else(|| vec![Inline::Text {
-                    text: element_inner_plain_text(node, source),
-                }]),
-        }),
+        "blockquote" => {
+            let inner = collect_child_blocks(node, source, graph, member_path, losses);
+            if inner.is_empty() {
+                let plain = collect_plain_text(node, source);
+                if plain.is_empty() {
+                    None
+                } else {
+                    Some(Block::Quote {
+                        content: vec![Inline::Text { text: plain }],
+                    })
+                }
+            } else {
+                Some(quote_block_from_blocks(inner))
+            }
+        }
         "pre" => {
-            let content = element_inner_plain_text(node, source);
+            let (language, content) = extract_pre_code_content(node, source);
             if content.is_empty() {
                 None
             } else {
-                Some(Block::Code {
-                    language: None,
-                    content,
-                })
+                Some(Block::Code { language, content })
             }
         }
+        "hr" => Some(Block::Opaque {
+            kind: "thematic_break".into(),
+            payload_hint: "---".into(),
+            status: SemanticStatus::Partial,
+        }),
         "script" | "head" | "meta" | "title" | "html" | "body" | "section"
         | "article" | "main" | "div" | "nav" | "figure" => None,
         "style" => {
@@ -737,7 +853,9 @@ fn merge_xhtml_blocks(oak: Vec<Block>, scraped: Vec<Block>) -> Vec<Block> {
     }
     let oak_score = semantic_block_score(&oak);
     let scraped_score = semantic_block_score(&scraped);
-    if scraped_score > oak_score {
+    if scraped_score > oak_score
+        || (scraped_score == oak_score && scraped.len() >= oak.len())
+    {
         scraped
     } else {
         oak
@@ -762,6 +880,7 @@ fn block_score(block: &Block) -> usize {
         Block::Paragraph { content, .. } => 2 + content.len(),
         Block::Quote { content, .. } => 3 + content.len(),
         Block::Code { content, .. } => 3 + content.len().min(32),
+        Block::Opaque { kind, .. } if kind == "thematic_break" => 2,
         _ => 1,
     }
 }
@@ -852,17 +971,27 @@ fn scraper_blocks_from_xhtml(
             continue;
         }
 
+        if matches!(
+            tag.as_str(),
+            "section" | "article" | "main" | "div" | "figure"
+        ) {
+            let (content, next) = slice_until_close(text, inner_start, &tag)?;
+            blocks.extend(scraper_blocks_from_xhtml(content, graph, member_path)?);
+            cursor = next;
+            continue;
+        }
+
         if tag == "blockquote" {
             let (content, next) = slice_until_close(text, inner_start, "blockquote")?;
-            let inlines = inlines_from_html_fragment(content, graph, member_path);
-            blocks.push(Block::Quote {
-                content: if inlines.is_empty() {
-                    vec![Inline::Text {
+            let inner = scraper_blocks_from_xhtml(content, graph, member_path)?;
+            blocks.push(if inner.is_empty() {
+                Block::Quote {
+                    content: vec![Inline::Text {
                         text: strip_tags(content),
-                    }]
-                } else {
-                    inlines
-                },
+                    }],
+                }
+            } else {
+                quote_block_from_blocks(inner)
             });
             cursor = next;
             continue;
@@ -870,14 +999,24 @@ fn scraper_blocks_from_xhtml(
 
         if tag == "pre" {
             let (content, next) = slice_until_close(text, inner_start, "pre")?;
-            let code = strip_tags(content);
+            let (language, code) = scrape_pre_code(content);
             if !code.is_empty() {
                 blocks.push(Block::Code {
-                    language: None,
+                    language,
                     content: code,
                 });
             }
             cursor = next;
+            continue;
+        }
+
+        if tag == "hr" {
+            blocks.push(Block::Opaque {
+                kind: "thematic_break".into(),
+                payload_hint: "---".into(),
+                status: SemanticStatus::Partial,
+            });
+            cursor = inner_start;
             continue;
         }
 
@@ -1288,6 +1427,54 @@ fn scrape_svg_image_reference(fragment: &str) -> Option<(String, String)> {
     Some((href, alt))
 }
 
+fn extract_pre_code_content(node: RedNode<HtmlLanguage>, source: &SourceText) -> (Option<String>, String) {
+    for child in element_body_children(node, source) {
+        if child.element_type() != HtmlElementType::Element {
+            continue;
+        }
+        if element_tag_name(child, source).as_deref() == Some("code") {
+            let language = attribute_value(child, source, "class")
+                .as_deref()
+                .map(language_from_class);
+            let content = collect_plain_text(child, source);
+            return (language, content);
+        }
+    }
+    (None, element_inner_plain_text(node, source))
+}
+
+fn language_from_class(class: &str) -> String {
+    for token in class.split_whitespace() {
+        if let Some(language) = token.strip_prefix("language-") {
+            if !language.is_empty() {
+                return language.to_string();
+            }
+        }
+    }
+    class
+        .split_whitespace()
+        .next()
+        .filter(|token| !token.is_empty())
+        .unwrap_or(class)
+        .to_string()
+}
+
+fn scrape_pre_code(content: &str) -> (Option<String>, String) {
+    if let Some(start) = find_tag_open(content, "code") {
+        let rest = &content[start..];
+        let close_index = rest.find('>').unwrap_or(0);
+        let tag_source = &rest[..close_index + 1];
+        let inner_start = start + close_index + 1;
+        let language = scrape_attribute(tag_source, "class")
+            .as_deref()
+            .map(language_from_class);
+        if let Ok((inner, _)) = slice_until_close(content, inner_start, "code") {
+            return (language, strip_tags(inner));
+        }
+    }
+    (None, strip_tags(content))
+}
+
 fn unquote(value: &str) -> String {
     let trimmed = value.trim();
     if (trimmed.starts_with('"') && trimmed.ends_with('"'))
@@ -1345,5 +1532,46 @@ mod tests {
         assert!(exported.contains("| H | V |"));
         assert!(exported.contains("- Top"));
         assert!(exported.contains("  - Nested"));
+    }
+
+    #[test]
+    fn scraper_lowers_blockquote_and_pre_code() {
+        const XHTML: &str = r#"<blockquote><p>Quoted line</p></blockquote>
+<pre><code class="language-rust">fn main() {}</code></pre><hr/>"#;
+        let mut graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(4));
+        let blocks = scraper_blocks_from_xhtml(XHTML, &mut graph, None).expect("scrape");
+        assert!(
+            blocks.iter().any(|block| matches!(block, Block::Quote { .. })),
+            "blocks={blocks:?}"
+        );
+        assert!(
+            blocks.iter().any(|block| matches!(
+                block,
+                Block::Code { content, .. } if content.contains("fn main")
+            )),
+            "blocks={blocks:?}"
+        );
+    }
+
+    #[test]
+    fn oak_html_lowers_container_blockquote_code_and_hr() {
+        const XHTML: &str = r#"<html><body>
+<section><div><p>Wrapped</p></div></section>
+<blockquote><p>Quote</p></blockquote>
+<pre><code class="language-js">console.log(1)</code></pre>
+<hr/>
+</body></html>"#;
+        let mut graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(3));
+        let blocks = blocks_from_xhtml_with_context(XHTML.as_bytes(), &mut graph, None)
+            .expect("lower xhtml");
+        for block in blocks {
+            graph.push_block(block);
+        }
+        let exported = crate::export::markdown::export_markdown(&graph).expect("export");
+        assert!(exported.contains("Wrapped"));
+        assert!(exported.contains("> Quote"));
+        assert!(exported.contains("```js"));
+        assert!(exported.contains("console.log(1)"));
+        assert!(exported.contains("---"));
     }
 }

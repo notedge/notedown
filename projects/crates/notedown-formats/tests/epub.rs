@@ -345,6 +345,59 @@ fn epub_with_table_and_nested_list_zip() -> Vec<u8> {
     ])
 }
 
+fn epub_with_block_elements_zip() -> Vec<u8> {
+    let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+    let opf = br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Blocks Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+    stored_zip(&[
+        ("mimetype", b"application/epub+zip"),
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        (
+            "OEBPS/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <section>
+      <p>Inside section</p>
+    </section>
+    <blockquote><p>Quoted line</p></blockquote>
+    <pre><code class="language-rust">fn main() {}</code></pre>
+    <hr/>
+  </body>
+</html>"#,
+        ),
+    ])
+}
+
+#[test]
+fn epub_import_lowers_container_blockquote_code_and_hr() {
+    let zip = epub_with_block_elements_zip();
+    let graph = import_epub_bytes("blocks.epub", &zip).expect("import epub");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("Inside section"));
+    assert!(markdown.contains("> Quoted line"));
+    assert!(markdown.contains("```rust"));
+    assert!(markdown.contains("fn main() {}"));
+    assert!(markdown.contains("---"));
+}
+
 #[test]
 fn epub_import_lowers_tables_and_nested_lists() {
     let zip = epub_with_table_and_nested_list_zip();

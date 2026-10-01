@@ -10,7 +10,7 @@ use crate::FormatError;
 /// Export a document graph to DOCX bytes.
 pub fn export_docx_bytes(graph: &DocumentGraph) -> Result<Vec<u8>, FormatError> {
     let document_xml = writer::render_document_xml(graph)?;
-    Ok(package::stored_zip(&[("word/document.xml", document_xml.as_bytes())]))
+    Ok(package::build_minimal_opc_package(&document_xml))
 }
 
 /// Export a document graph to DOCX bytes on disk.

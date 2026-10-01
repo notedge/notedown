@@ -86,3 +86,15 @@ fn docx_export_round_trips_paragraphs_and_headings() {
     assert!(markdown.contains("Hello DOCX"));
     assert!(markdown.contains("# Title"));
 }
+
+#[test]
+fn docx_export_includes_minimal_opc_parts() {
+    let zip = minimal_docx_zip();
+    let graph = import_docx_bytes("sample.docx", &zip).expect("import docx");
+    let exported = export_docx_bytes(&graph).expect("export docx");
+    let members = String::from_utf8_lossy(&exported);
+    assert!(members.contains("[Content_Types].xml"));
+    assert!(members.contains("_rels/.rels"));
+    assert!(members.contains("word/_rels/document.xml.rels"));
+    assert!(members.contains("word/document.xml"));
+}

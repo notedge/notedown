@@ -58,3 +58,29 @@ fn crc32(data: &[u8]) -> u32 {
     }
     crc ^ 0xFFFF_FFFF
 }
+
+const CONTENT_TYPES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#;
+
+const ROOT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#;
+
+const DOCUMENT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#;
+
+/// Package a WordprocessingML body into a minimal OPC DOCX archive.
+pub fn build_minimal_opc_package(document_xml: &str) -> Vec<u8> {
+    stored_zip(&[
+        ("[Content_Types].xml", CONTENT_TYPES_XML.as_bytes()),
+        ("_rels/.rels", ROOT_RELS_XML.as_bytes()),
+        ("word/_rels/document.xml.rels", DOCUMENT_RELS_XML.as_bytes()),
+        ("word/document.xml", document_xml.as_bytes()),
+    ])
+}

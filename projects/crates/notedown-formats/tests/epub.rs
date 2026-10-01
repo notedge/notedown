@@ -109,3 +109,61 @@ fn epub_import_maps_metadata_and_spine_xhtml() {
     assert!(markdown.contains("# Chapter One"));
     assert!(markdown.contains("Hello EPUB"));
 }
+
+fn epub_with_nav_zip() -> Vec<u8> {
+    let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+    let opf = br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Nav Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+    let nav = br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <body>
+    <nav epub:type="toc" id="toc">
+      <ol>
+        <li><a href="chapter.xhtml">Chapter One</a></li>
+      </ol>
+    </nav>
+  </body>
+</html>"#;
+    stored_zip(&[
+        ("mimetype", b"application/epub+zip"),
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/nav.xhtml", nav),
+        (
+            "OEBPS/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <h1>Chapter One</h1>
+    <p>Body text</p>
+  </body>
+</html>"#,
+        ),
+    ])
+}
+
+#[test]
+fn epub_import_maps_navigation_toc() {
+    let zip = epub_with_nav_zip();
+    let graph = import_epub_bytes("nav.epub", &zip).expect("import epub");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("[Chapter One](chapter.xhtml)"));
+    assert!(markdown.contains("# Chapter One"));
+}

@@ -73,7 +73,28 @@ pub fn losses_from_xhtml(xml: &[u8]) -> Result<Vec<LossMarker>, FormatError> {
     let mut losses = Vec::new();
     let mut scratch = DocumentGraph::new(notedown_ir::DocumentId(0));
     collect_semantic_blocks(scope, &source, &mut blocks, &mut losses, &mut scratch, None);
+    losses.extend(scan_markup_losses(text.as_ref()));
     Ok(losses)
+}
+
+fn scan_markup_losses(text: &str) -> Vec<LossMarker> {
+    let mut losses = Vec::new();
+    let lower = text.to_ascii_lowercase();
+    if lower.contains(" style=\"") || lower.contains(" style='") {
+        losses.push(LossMarker {
+            code: "import.epub.inline_style_unsupported".into(),
+            message: "inline style attributes are not lowered into Notedown IR yet".into(),
+            status: SemanticStatus::Unsupported,
+        });
+    }
+    if lower.contains("<style") {
+        losses.push(LossMarker {
+            code: "import.epub.css_inline_block_unsupported".into(),
+            message: "embedded <style> blocks are not lowered into Notedown IR yet".into(),
+            status: SemanticStatus::Unsupported,
+        });
+    }
+    losses
 }
 
 fn find_body_or_document<'a>(
@@ -138,12 +159,13 @@ fn lower_semantic_block<'a>(
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
 ) -> Option<Block> {
+    note_inline_style_loss(node, source, losses);
     match tag {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let level = tag[1..].parse::<u8>().unwrap_or(1);
             let plain = element_inner_plain_text(node, source);
             let title = if plain.is_empty() {
-                collect_inlines_from_element(node, source, graph, member_path)
+                collect_inlines_from_element(node, source, graph, member_path, losses)
             } else {
                 vec![Inline::Text { text: plain }]
             };
@@ -154,7 +176,7 @@ fn lower_semantic_block<'a>(
             })
         }
         "p" => {
-            let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path)).or_else(|| {
+            let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses)).or_else(|| {
                 let plain = element_inner_plain_text(node, source);
                 if plain.is_empty() {
                     None
@@ -165,7 +187,7 @@ fn lower_semantic_block<'a>(
             Some(Block::Paragraph { content })
         }
         "ul" | "ol" => {
-            let items = collect_list_items(node, source, graph, member_path);
+            let items = collect_list_items(node, source, graph, member_path, losses);
             if items.is_empty() {
                 None
             } else {
@@ -176,7 +198,7 @@ fn lower_semantic_block<'a>(
             }
         }
         "blockquote" => Some(Block::Quote {
-            content: non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path))
+            content: non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses))
                 .unwrap_or_else(|| vec![Inline::Text {
                     text: element_inner_plain_text(node, source),
                 }]),
@@ -192,8 +214,27 @@ fn lower_semantic_block<'a>(
                 })
             }
         }
-        "script" | "style" | "head" | "meta" | "link" | "title" | "html" | "body" | "section"
+        "script" | "head" | "meta" | "title" | "html" | "body" | "section"
         | "article" | "main" | "div" | "nav" | "figure" => None,
+        "style" => {
+            losses.push(LossMarker {
+                code: "import.epub.css_inline_block_unsupported".into(),
+                message: "embedded <style> blocks are not lowered into Notedown IR yet".into(),
+                status: SemanticStatus::Unsupported,
+            });
+            None
+        }
+        "link" => {
+            let rel = attribute_value(node, source, "rel").unwrap_or_default();
+            if rel.eq_ignore_ascii_case("stylesheet") {
+                losses.push(LossMarker {
+                    code: "import.epub.css_link_unsupported".into(),
+                    message: "linked stylesheets are registered as package assets but not applied during import".into(),
+                    status: SemanticStatus::Unsupported,
+                });
+            }
+            None
+        }
         "img" => {
             let src = attribute_value(node, source, "src").unwrap_or_default();
             let alt = attribute_value(node, source, "alt").unwrap_or_default();
@@ -201,7 +242,24 @@ fn lower_semantic_block<'a>(
                 content: vec![inline],
             })
         }
-        "table" | "svg" => {
+        "svg" => {
+            if let Some((href, alt)) = extract_svg_image_href(node, source) {
+                register_and_image_inline(&href, &alt, graph, member_path).map(|inline| {
+                    Block::Paragraph {
+                        content: vec![inline],
+                    }
+                })
+            } else {
+                losses.push(LossMarker {
+                    code: "import.epub.svg_inline_unsupported".into(),
+                    message: "inline <svg> without an external <image> reference is not lowered yet"
+                        .into(),
+                    status: SemanticStatus::Unsupported,
+                });
+                None
+            }
+        }
+        "table" => {
             losses.push(LossMarker {
                 code: "import.epub.unsupported_xhtml_block".into(),
                 message: format!("unsupported xhtml block element `<{tag}>`"),
@@ -245,6 +303,7 @@ fn collect_list_items<'a>(
     source: &SourceText,
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
 ) -> Vec<ListItem> {
     let mut items = Vec::new();
     for child in element_body_children(node, source) {
@@ -255,7 +314,7 @@ fn collect_list_items<'a>(
             continue;
         }
         items.push(ListItem {
-            content: collect_inlines_from_element(child, source, graph, member_path),
+            content: collect_inlines_from_element(child, source, graph, member_path, losses),
             children: Vec::new(),
         });
     }
@@ -267,6 +326,7 @@ fn collect_inlines_from_element<'a>(
     source: &SourceText,
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
 ) -> Vec<Inline> {
     let mut inlines = Vec::new();
     let mut past_opening_tag = false;
@@ -284,7 +344,9 @@ fn collect_inlines_from_element<'a>(
                     continue;
                 }
                 if kind == HtmlElementType::Element {
-                    if let Some(inline) = lower_inline_element(child_node, source, graph, member_path) {
+                    note_inline_style_loss(child_node, source, losses);
+                    if let Some(inline) =
+                        lower_inline_element(child_node, source, graph, member_path, losses) {
                         push_inline(&mut inlines, inline);
                     }
                 } else if kind == HtmlElementType::Text {
@@ -318,6 +380,7 @@ fn lower_inline_element<'a>(
     source: &SourceText,
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
+    losses: &mut Vec<LossMarker>,
 ) -> Option<Inline> {
     let tag = element_tag_name(node, source)?;
     match tag.as_str() {
@@ -328,17 +391,17 @@ fn lower_inline_element<'a>(
         }
         "strong" | "b" => Some(Inline::Styled {
             style: "bold".into(),
-            children: collect_inlines_from_element(node, source, graph, member_path),
+            children: collect_inlines_from_element(node, source, graph, member_path, losses),
         }),
         "em" | "i" => Some(Inline::Styled {
             style: "italic".into(),
-            children: collect_inlines_from_element(node, source, graph, member_path),
+            children: collect_inlines_from_element(node, source, graph, member_path, losses),
         }),
         "code" => Some(Inline::InlineCode {
             text: collect_plain_text(node, source),
         }),
         "a" => {
-            let children = collect_inlines_from_element(node, source, graph, member_path);
+            let children = collect_inlines_from_element(node, source, graph, member_path, losses);
             let href = attribute_value(node, source, "href").unwrap_or_default();
             if href.is_empty() {
                 return children.first().cloned();
@@ -355,7 +418,7 @@ fn lower_inline_element<'a>(
             })
         }
         "span" | "sup" | "sub" => {
-            let children = collect_inlines_from_element(node, source, graph, member_path);
+            let children = collect_inlines_from_element(node, source, graph, member_path, losses);
             if children.is_empty() {
                 None
             } else if children.len() == 1 {
@@ -553,6 +616,19 @@ fn scraper_blocks_from_xhtml(
             continue;
         }
 
+        if tag == "svg" {
+            let (content, next) = slice_until_close(text, inner_start, "svg")?;
+            if let Some((href, alt)) = scrape_svg_image_reference(content) {
+                if let Some(inline) = register_and_image_inline(&href, &alt, graph, member_path) {
+                    blocks.push(Block::Paragraph {
+                        content: vec![inline],
+                    });
+                }
+            }
+            cursor = next;
+            continue;
+        }
+
         if matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
             let level = tag[1..].parse::<u8>().unwrap_or(1);
             let (content, next) = slice_until_close(text, inner_start, &tag)?;
@@ -710,6 +786,70 @@ fn register_and_image_inline(
         register_image_from_src(graph, member_path, src);
     }
     image_inline(src, alt)
+}
+
+fn note_inline_style_loss(
+    node: RedNode<HtmlLanguage>,
+    source: &SourceText,
+    losses: &mut Vec<LossMarker>,
+) {
+    if attribute_value(node, source, "style").is_some() {
+        losses.push(LossMarker {
+            code: "import.epub.inline_style_unsupported".into(),
+            message: "inline style attributes are not lowered into Notedown IR yet".into(),
+            status: SemanticStatus::Unsupported,
+        });
+    }
+}
+
+fn link_href_attribute(node: RedNode<HtmlLanguage>, source: &SourceText) -> Option<String> {
+    attribute_value(node, source, "href")
+        .or_else(|| attribute_value(node, source, "xlink:href"))
+}
+
+fn extract_svg_image_href(
+    node: RedNode<HtmlLanguage>,
+    source: &SourceText,
+) -> Option<(String, String)> {
+    for child in element_body_children(node, source) {
+        if child.element_type() != HtmlElementType::Element {
+            continue;
+        }
+        let tag = element_tag_name(child, source)?;
+        if tag == "image" {
+            let href = link_href_attribute(child, source)?;
+            if href.is_empty() {
+                continue;
+            }
+            let alt = attribute_value(child, source, "alt")
+                .or_else(|| attribute_value(child, source, "aria-label"))
+                .unwrap_or_default();
+            return Some((href, alt));
+        }
+        if tag == "svg" {
+            if let Some(found) = extract_svg_image_href(child, source) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn scrape_svg_image_reference(fragment: &str) -> Option<(String, String)> {
+    let lower = fragment.to_ascii_lowercase();
+    let image_start = lower.find("<image")?;
+    let rest = &fragment[image_start..];
+    let tag_end = rest.find('>').unwrap_or(rest.len());
+    let tag = &rest[..tag_end + 1];
+    let href = scrape_attribute(tag, "href")
+        .or_else(|| scrape_attribute(tag, "xlink:href"))?;
+    if href.is_empty() {
+        return None;
+    }
+    let alt = scrape_attribute(tag, "alt")
+        .or_else(|| scrape_attribute(tag, "aria-label"))
+        .unwrap_or_default();
+    Some((href, alt))
 }
 
 fn unquote(value: &str) -> String {

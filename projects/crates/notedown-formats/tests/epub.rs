@@ -217,3 +217,84 @@ fn epub_import_registers_embedded_images() {
     assert!(markdown.contains("![Cover art](images/cover.png)"));
     assert!(markdown.contains("Before image"));
 }
+
+fn epub_with_stylesheet_and_svg_zip() -> Vec<u8> {
+    let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+    let opf = br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Styled Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="css" href="styles/main.css" media-type="text/css"/>
+    <item id="ch1" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+    <item id="logo" href="images/logo.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+    stored_zip(&[
+        ("mimetype", b"application/epub+zip"),
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/styles/main.css", b"body { color: red; }"),
+        ("OEBPS/images/logo.png", b"\x89PNG\r\n"),
+        (
+            "OEBPS/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:xlink="http://www.w3.org/1999/xlink">
+  <head>
+    <link rel="stylesheet" href="styles/main.css"/>
+  </head>
+  <body>
+    <p style="color: blue;">Styled text</p>
+    <svg>
+      <image xlink:href="images/logo.png" alt="Logo"/>
+    </svg>
+  </body>
+</html>"#,
+        ),
+    ])
+}
+
+#[test]
+fn epub_import_registers_stylesheet_assets() {
+    let zip = epub_with_stylesheet_and_svg_zip();
+    let graph = import_epub_bytes("styled.epub", &zip).expect("import epub");
+    assert!(
+        graph
+            .assets
+            .iter()
+            .any(|asset| asset.media_type.as_deref() == Some("text/css"))
+    );
+    assert!(
+        graph
+            .coverage
+            .loss
+            .iter()
+            .any(|loss| loss.code == "import.epub.css_link_unsupported")
+    );
+    assert!(
+        graph
+            .coverage
+            .loss
+            .iter()
+            .any(|loss| loss.code == "import.epub.inline_style_unsupported")
+    );
+}
+
+#[test]
+fn epub_import_lowers_svg_external_image_references() {
+    let zip = epub_with_stylesheet_and_svg_zip();
+    let graph = import_epub_bytes("svg.epub", &zip).expect("import epub");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("![Logo](images/logo.png)"));
+}

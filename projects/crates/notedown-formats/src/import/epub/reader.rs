@@ -8,7 +8,8 @@ use notedown_ir::{
 
 use super::map_ocf_error;
 use super::assets::{
-    find_cover_manifest_item, hydrate_image_assets, register_cover_asset,
+    find_cover_manifest_item, hydrate_package_assets, register_cover_asset,
+    register_stylesheet_assets,
 };
 use super::navigation::{
     find_nav_manifest_item, navigation_list_block, parse_nav_toc,
@@ -50,6 +51,7 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         let member_path = OcfPackage::resolve_href(package.root_opf_path(), &cover_item.href);
         register_cover_asset(&mut graph, &member_path, &cover_item.href);
     }
+    register_stylesheet_assets(&mut graph, package.root_opf_path(), &opf);
     if let Some(nav_item) = find_nav_manifest_item(&opf) {
         let member_path = OcfPackage::resolve_href(package.root_opf_path(), &nav_item.href);
         match package.read_member(&member_path, &budget) {
@@ -125,11 +127,11 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         }
     }
 
-    hydrate_image_assets(&mut graph, &package, &budget);
+    hydrate_package_assets(&mut graph, &package, &budget);
 
     graph.push_loss(LossMarker {
         code: "import.epub.partial_coverage".into(),
-        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC, spine XHTML via oak-html, and embedded image assets. CSS/SVG remain pending".into(),
+        message: "EPUB import maps OPF metadata, EPUB3 navigation TOC, spine XHTML via oak-html, embedded image assets, manifest CSS members, and external SVG image references. Inline CSS semantics remain pending".into(),
         status: SemanticStatus::Partial,
     });
     Ok(graph)
@@ -142,7 +144,7 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
 fn document_id_for(label: &str) -> DocumentId {
     let mut hash = 1u64;
     for byte in label.bytes() {
-        hash = hash * 31 + u64::from(byte);
+        hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
     }
     DocumentId(hash)
 }

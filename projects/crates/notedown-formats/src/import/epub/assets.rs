@@ -1,8 +1,9 @@
 use acorn_core::ParseBudget;
 use acorn_epub::{ManifestItem, OcfPackage, OpfDocument};
 use notedown_ir::{
-    Asset, AssetId, AssetKind, DocumentGraph, Inline, SemanticStatus,
+    Asset, AssetId, AssetKind, DocumentGraph, Inline, LossMarker, SemanticStatus,
 };
+
 /// Locate the EPUB3 cover image manifest item when declared via `properties="cover-image"`.
 pub fn find_cover_manifest_item(opf: &OpfDocument) -> Option<&ManifestItem> {
     opf.manifest.values().find(|item| {
@@ -11,6 +12,28 @@ pub fn find_cover_manifest_item(opf: &OpfDocument) -> Option<&ManifestItem> {
             .map(|properties| properties.split_whitespace().any(|token| token == "cover-image"))
             .unwrap_or(false)
     })
+}
+
+/// Register CSS stylesheet members from the OPF manifest.
+pub fn register_stylesheet_assets(
+    graph: &mut DocumentGraph,
+    opf_path: &str,
+    opf: &OpfDocument,
+) {
+    for item in opf.manifest.values() {
+        if !is_stylesheet_item(item) {
+            continue;
+        }
+        let member_path = OcfPackage::resolve_href(opf_path, &item.href);
+        register_stylesheet_asset(graph, &member_path, &item.href);
+        graph.push_loss(LossMarker {
+            code: "import.epub.css_link_unsupported".into(),
+            message: format!(
+                "stylesheet `{member_path}` is registered as a package asset but not applied during import"
+            ),
+            status: SemanticStatus::Unsupported,
+        });
+    }
 }
 
 /// Register a cover asset from the OPF manifest without requiring spine presence.
@@ -85,16 +108,13 @@ fn register_image_asset(graph: &mut DocumentGraph, member_path: &str, display_hr
     });
 }
 
-/// Materialize embedded image bytes for registered assets from the OCF package.
-pub fn hydrate_image_assets(
+/// Materialize package bytes for registered assets from the OCF package.
+pub fn hydrate_package_assets(
     graph: &mut DocumentGraph,
     package: &OcfPackage,
     budget: &ParseBudget,
 ) {
     for asset in &mut graph.assets {
-        if asset.kind != AssetKind::Image {
-            continue;
-        }
         let Some(source) = asset.source.as_ref() else {
             continue;
         };
@@ -102,6 +122,39 @@ pub fn hydrate_image_assets(
             asset.bytes = Some(bytes);
         }
     }
+}
+
+/// Materialize embedded image bytes for registered assets from the OCF package.
+pub fn hydrate_image_assets(
+    graph: &mut DocumentGraph,
+    package: &OcfPackage,
+    budget: &ParseBudget,
+) {
+    hydrate_package_assets(graph, package, budget);
+}
+
+fn register_stylesheet_asset(graph: &mut DocumentGraph, member_path: &str, _display_href: &str) {
+    if graph
+        .assets
+        .iter()
+        .any(|asset| asset.source.as_deref() == Some(member_path))
+    {
+        return;
+    }
+    let asset_id = AssetId(graph.assets.len() as u64 + 1);
+    graph.push_asset(Asset {
+        id: asset_id,
+        kind: AssetKind::Attachment,
+        content_identity: None,
+        source: Some(member_path.to_string()),
+        media_type: Some("text/css".into()),
+        status: SemanticStatus::Resolved,
+        bytes: None,
+    });
+}
+
+fn is_stylesheet_item(item: &ManifestItem) -> bool {
+    item.media_type.contains("css") || item.href.to_ascii_lowercase().ends_with(".css")
 }
 
 fn media_type_for(path: &str) -> Option<String> {

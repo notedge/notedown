@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use notedown_ir::{Block, DocumentGraph, Inline, TableRow};
+use notedown_ir::{Block, DocumentGraph, Inline, ListItem, NodeId, TableRow};
 
 use crate::FormatError;
 
@@ -8,7 +9,11 @@ use crate::FormatError;
 pub fn export_markdown(graph: &DocumentGraph) -> Result<String, FormatError> {
     let mut output = String::new();
     let mut footnotes = Vec::new();
+    let nested = nested_block_ids(graph);
     for node in &graph.blocks {
+        if nested.contains(&node.id) {
+            continue;
+        }
         if let Block::Opaque {
             kind,
             payload_hint,
@@ -20,7 +25,7 @@ pub fn export_markdown(graph: &DocumentGraph) -> Result<String, FormatError> {
                 continue;
             }
         }
-        write_block(&mut output, &node.block)?;
+        write_block(&mut output, graph, &node.block)?;
     }
     for footnote in footnotes {
         output.push_str(footnote);
@@ -29,7 +34,23 @@ pub fn export_markdown(graph: &DocumentGraph) -> Result<String, FormatError> {
     Ok(output)
 }
 
-fn write_block(out: &mut String, block: &Block) -> Result<(), FormatError> {
+fn nested_block_ids(graph: &DocumentGraph) -> HashSet<NodeId> {
+    let mut ids = HashSet::new();
+    for node in &graph.blocks {
+        match &node.block {
+            Block::Section { children, .. } => ids.extend(children.iter().copied()),
+            Block::List { items, .. } => {
+                for item in items {
+                    ids.extend(item.children.iter().copied());
+                }
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result<(), FormatError> {
     match block {
         Block::Section { level, title, children: _ } => {
             let level = (*level).clamp(1, 6);
@@ -64,17 +85,7 @@ fn write_block(out: &mut String, block: &Block) -> Result<(), FormatError> {
             out.push('\n');
         }
         Block::List { ordered, items } => {
-            for (index, item) in items.iter().enumerate() {
-                if *ordered {
-                    write!(out, "{}. ", index + 1).map_err(|error| {
-                        FormatError::unsupported("markdown", error.to_string())
-                    })?;
-                } else {
-                    out.push_str("- ");
-                }
-                write_inlines(out, &item.content)?;
-                out.push('\n');
-            }
+            write_list(out, graph, *ordered, items, 0)?;
             out.push('\n');
         }
         Block::Table { rows } => {
@@ -92,6 +103,40 @@ fn write_block(out: &mut String, block: &Block) -> Result<(), FormatError> {
                 "markdown",
                 format!("opaque block kind `{kind}` is not supported by the IR markdown exporter yet"),
             ));
+        }
+    }
+    Ok(())
+}
+
+fn write_list(
+    out: &mut String,
+    graph: &DocumentGraph,
+    ordered: bool,
+    items: &[ListItem],
+    indent: usize,
+) -> Result<(), FormatError> {
+    let prefix = " ".repeat(indent);
+    for (index, item) in items.iter().enumerate() {
+        out.push_str(&prefix);
+        if ordered {
+            write!(out, "{}. ", index + 1).map_err(|error| {
+                FormatError::unsupported("markdown", error.to_string())
+            })?;
+        } else {
+            out.push_str("- ");
+        }
+        write_inlines(out, &item.content)?;
+        out.push('\n');
+        for child_id in &item.children {
+            if let Some(child) = graph.block(*child_id) {
+                if let Block::List {
+                    ordered: nested_ordered,
+                    items: nested_items,
+                } = &child.block
+                {
+                    write_list(out, graph, *nested_ordered, nested_items, indent + 2)?;
+                }
+            }
         }
     }
     Ok(())

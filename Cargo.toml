@@ -4,6 +4,7 @@ members = ["projects/crates/*", "projects/packages/*"]
 default-members = [
     "projects/crates/notedown-error",
     "projects/crates/notedown-ir",
+    "projects/crates/notedown-formats",
 ]
 exclude = [
 
@@ -17,6 +18,7 @@ notedown_ast = { git = "https://github.com/notedge/notedown.git", branch = "dev"
 text-utils = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "text-utils" }
 notedown-rt = { git = "https://github.com/notedge/notedown.git", branch = "dev", package = "notedown-rt" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
+notedown-formats = { path = "projects/crates/notedown-formats" }
 
 [profile.release]
 lto = true

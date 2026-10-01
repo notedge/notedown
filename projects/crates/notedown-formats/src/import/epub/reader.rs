@@ -11,9 +11,7 @@ use super::assets::{
     find_cover_manifest_item, hydrate_package_assets, register_cover_asset,
     register_stylesheet_assets,
 };
-use super::navigation::{
-    find_nav_manifest_item, navigation_list_block, parse_nav_toc,
-};
+use super::navigation::{find_nav_manifest_item, parse_nav_toc, push_navigation_toc};
 use super::xhtml::blocks_from_xhtml_with_context;
 use crate::FormatError;
 
@@ -57,7 +55,7 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         match package.read_member(&member_path, &budget) {
             Ok(nav_xhtml) => match parse_nav_toc(&nav_xhtml) {
                 Ok(entries) => {
-                    let node = graph.push_block(navigation_list_block(&entries));
+                    let node = push_navigation_toc(&mut graph, &entries);
                     graph.attach_source(SourceRef {
                         node,
                         kind: SourceKind::PackageMember { path: member_path },

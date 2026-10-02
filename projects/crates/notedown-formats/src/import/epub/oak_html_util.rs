@@ -1,6 +1,8 @@
 use oak_core::parser::session::ParseSession;
+use oak_core::query::QueryBudget;
 use oak_core::{Builder, SourceText};
 use oak_html::ast::{Element, HtmlDocument, HtmlNode, Text};
+use oak_html::query::{select_css_elements, HtmlDocumentView};
 use oak_html::{HtmlBuilder, HtmlLanguage};
 
 use crate::FormatError;
@@ -97,6 +99,18 @@ pub fn first_descendant_element<'a>(element: &'a Element, expected: &str) -> Opt
         }
     }
     None
+}
+
+/// Selects elements in a document using a CSS selector subset.
+pub fn select_css<'a>(
+    document: &'a HtmlDocument,
+    selector: &str,
+) -> Result<Vec<&'a Element>, FormatError> {
+    let view = HtmlDocumentView::from_document(document);
+    let (_, elements) = select_css_elements(&view, selector, QueryBudget::default()).map_err(
+        |error| FormatError::parse("epub", error.to_string()),
+    )?;
+    Ok(elements)
 }
 
 /// Finds the first descendant anchor and returns its label and `href`.

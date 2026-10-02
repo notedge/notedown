@@ -7,6 +7,9 @@ use oak_html::parser::element_type::HtmlElementType;
 use oak_html::{HtmlLanguage, HtmlParser};
 
 use super::assets::{image_inline, register_image_from_src};
+use super::oak_html_util::{
+    attribute_value as html_attribute_value, parse_html_bytes, select_css,
+};
 use crate::FormatError;
 
 /// Lower XHTML spine content into `notedown-ir` blocks via `oak-html`.
@@ -21,6 +24,7 @@ pub fn blocks_from_xhtml_with_context(
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
 ) -> Result<Vec<Block>, FormatError> {
+    register_spine_images_via_css(xml, graph, member_path)?;
     let text = prepare_xhtml_for_oak_html(&String::from_utf8_lossy(xml));
     let language = HtmlLanguage::default();
     let source = SourceText::new(text.as_str());
@@ -855,6 +859,31 @@ fn normalize_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Register embedded image assets discovered via CSS selectors.
+fn register_spine_images_via_css(
+    xml: &[u8],
+    graph: &mut DocumentGraph,
+    member_path: Option<&str>,
+) -> Result<(), FormatError> {
+    let Some(member_path) = member_path else {
+        return Ok(());
+    };
+    let document = parse_html_bytes(xml)?;
+    for img in select_css(&document, "img[src]")? {
+        if let Some(src) = html_attribute_value(img, "src") {
+            register_image_from_src(graph, member_path, &src);
+        }
+    }
+    for image in select_css(&document, "svg image")? {
+        let href = html_attribute_value(image, "href")
+            .or_else(|| html_attribute_value(image, "xlink:href"));
+        if let Some(href) = href {
+            register_image_from_src(graph, member_path, &href);
+        }
+    }
+    Ok(())
+}
+
 /// Normalize EPUB XHTML into HTML that `oak-html` can parse reliably today.
 fn prepare_xhtml_for_oak_html(xml: &str) -> String {
     let mut text = xml.trim().to_string();
@@ -1628,6 +1657,35 @@ mod tests {
         assert!(exported.contains("| H | V |"));
         assert!(exported.contains("- Top"));
         assert!(exported.contains("  - Nested"));
+    }
+
+    #[test]
+    fn css_selector_registers_spine_images() {
+        const XHTML: &str = r#"<html><body>
+<p><img src="images/cover.png" alt="Cover"/></p>
+<svg><image xlink:href="images/diagram.svg"/></svg>
+</body></html>"#;
+        let mut graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(3));
+        let blocks = blocks_from_xhtml_with_context(
+            XHTML.as_bytes(),
+            &mut graph,
+            Some("OEBPS/chapter.xhtml"),
+        )
+        .expect("lower xhtml");
+        assert!(!blocks.is_empty());
+        assert_eq!(graph.assets.len(), 2);
+        assert!(
+            graph
+                .assets
+                .iter()
+                .any(|asset| asset.source.as_deref() == Some("OEBPS/images/cover.png"))
+        );
+        assert!(
+            graph
+                .assets
+                .iter()
+                .any(|asset| asset.source.as_deref() == Some("OEBPS/images/diagram.svg"))
+        );
     }
 
     #[test]

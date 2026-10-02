@@ -23,7 +23,7 @@ oak-xml = { workspace = true, optional = true }
 default = ["markdown", "notedown", "docx", "epub"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
-docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-xml"]
+docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-core", "dep:oak-xml"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 
 [dev-dependencies]

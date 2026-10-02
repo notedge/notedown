@@ -1,4 +1,6 @@
+use oak_core::query::QueryBudget;
 use oak_xml::ast::{XmlElement, XmlValue};
+use oak_xml::query::{select_xpath_elements, XmlDocumentView};
 
 use crate::FormatError;
 
@@ -58,22 +60,19 @@ pub fn elements_by_local_name<'a>(
     element: &'a XmlElement,
     expected: &str,
 ) -> Vec<&'a XmlElement> {
-    let mut matches = Vec::new();
-    collect_elements_by_local_name(element, expected, &mut matches);
-    matches
+    let xpath = format!("//{expected}");
+    elements_by_xpath(element, &xpath).unwrap_or_default()
 }
 
-fn collect_elements_by_local_name<'a>(
+/// Collects elements matched by an Oak XPath subset rooted at `element`.
+pub fn elements_by_xpath<'a>(
     element: &'a XmlElement,
-    expected: &str,
-    matches: &mut Vec<&'a XmlElement>,
-) {
-    if element_is(element, expected) {
-        matches.push(element);
-    }
-    for child in element.children.iter().filter_map(XmlValue::as_element) {
-        collect_elements_by_local_name(child, expected, matches);
-    }
+    xpath: &str,
+) -> Result<Vec<&'a XmlElement>, FormatError> {
+    let view = XmlDocumentView::from_element(element);
+    let (_result, elements) = select_xpath_elements(&view, xpath, QueryBudget::default())
+        .map_err(|error| FormatError::parse("docx", error.to_string()))?;
+    Ok(elements)
 }
 
 /// Returns trimmed text content for an element.
@@ -106,6 +105,22 @@ fn collect_element_text(element: &XmlElement, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xpath_collects_descendant_elements_by_local_name() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl>
+  </w:abstractNum>
+</w:numbering>"#;
+        let value = parse_xml_bytes(xml).expect("parse");
+        let root = document_root(&value).expect("root");
+        let matches = elements_by_local_name(root, "abstractNum");
+        assert_eq!(matches.len(), 1);
+        let levels = elements_by_xpath(matches[0], "//lvl").expect("xpath");
+        assert_eq!(levels.len(), 1);
+    }
 
     #[test]
     fn parses_wordprocessingml_footnote_reference_run() {

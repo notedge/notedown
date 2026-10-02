@@ -2,6 +2,7 @@
 
 mod assets;
 mod navigation;
+mod oak_html_util;
 mod reader;
 mod xhtml;
 

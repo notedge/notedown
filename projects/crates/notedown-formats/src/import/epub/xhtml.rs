@@ -878,12 +878,60 @@ fn merge_xhtml_blocks(oak: Vec<Block>, scraped: Vec<Block>) -> Vec<Block> {
     }
     let oak_score = semantic_block_score(&oak);
     let scraped_score = semantic_block_score(&scraped);
-    if scraped_score > oak_score
+    let oak_quality = semantic_block_quality(&oak);
+    let scraped_quality = semantic_block_quality(&scraped);
+    if scraped_quality > oak_quality {
+        scraped
+    } else if oak_quality > scraped_quality {
+        oak
+    } else if scraped_score > oak_score
         || (scraped_score == oak_score && scraped.len() >= oak.len())
     {
         scraped
     } else {
         oak
+    }
+}
+
+/// Penalize blocks that still contain unparsed markup in text payloads.
+fn semantic_block_quality(blocks: &[Block]) -> isize {
+    blocks
+        .iter()
+        .map(|block| block_quality(block) as isize)
+        .sum()
+}
+
+fn block_quality(block: &Block) -> isize {
+    let mut score = block_score(block) as isize;
+    if block_contains_unparsed_markup(block) {
+        score -= 1_000;
+    }
+    score
+}
+
+fn block_contains_unparsed_markup(block: &Block) -> bool {
+    match block {
+        Block::Paragraph { content } | Block::Quote { content } | Block::Section { title: content, .. } => {
+            content.iter().any(|inline| inline_contains_unparsed_markup(inline))
+        }
+        Block::Code { content, .. } => content.contains('<') && content.contains('>'),
+        Block::List { items, .. } => items
+            .iter()
+            .any(|item| item.content.iter().any(inline_contains_unparsed_markup)),
+        Block::Table { rows, .. } => rows.iter().any(|row| {
+            row.cells
+                .iter()
+                .any(|cell| cell.iter().any(inline_contains_unparsed_markup))
+        }),
+        _ => false,
+    }
+}
+
+fn inline_contains_unparsed_markup(inline: &Inline) -> bool {
+    match inline {
+        Inline::Text { text } => text.contains('<') && text.contains('>'),
+        Inline::Styled { children, .. } => children.iter().any(inline_contains_unparsed_markup),
+        _ => false,
     }
 }
 
@@ -1021,7 +1069,7 @@ fn scraper_blocks_from_xhtml(
 
         if matches!(
             tag.as_str(),
-            "section" | "article" | "main" | "div" | "figure"
+            "html" | "body" | "section" | "article" | "main" | "div" | "figure"
         ) {
             let (content, next) = slice_until_close(text, inner_start, &tag)?;
             blocks.extend(scraper_blocks_from_xhtml(content, graph, member_path)?);

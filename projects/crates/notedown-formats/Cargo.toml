@@ -30,4 +30,5 @@ epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 serde_json = "1.0"
 oak-core = { workspace = true }
 oak-notedown = { workspace = true, features = ["serde", "diagnostic"] }
+oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
 oak-testing = { workspace = true }

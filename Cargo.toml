@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
-    "projects/tests/oak-conformance",
 ]
 default-members = [
     "projects/crates/notedown-ir",

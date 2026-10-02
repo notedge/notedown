@@ -41,6 +41,15 @@ pub fn attribute_value(element: &Element, expected: &str) -> Option<String> {
         .and_then(|attr| attr.value.clone())
 }
 
+/// Returns all direct child elements regardless of tag name.
+pub fn direct_child_elements<'a>(element: &'a Element) -> Vec<&'a Element> {
+    element
+        .children
+        .iter()
+        .filter_map(as_element)
+        .collect()
+}
+
 /// Returns direct child elements whose tag name matches `expected`.
 pub fn child_elements<'a>(element: &'a Element, expected: &str) -> Vec<&'a Element> {
     element

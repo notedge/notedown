@@ -1,15 +1,10 @@
 use notedown_ir::{
     Block, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableRow,
 };
-use oak_core::parser::session::ParseSession;
-use oak_core::{Parser, RedNode, RedTree, SourceText};
-use oak_html::parser::element_type::HtmlElementType;
-use oak_html::{HtmlLanguage, HtmlParser};
 
+use super::ast_lowering::{blocks_from_html_document, register_spine_images_from_document};
 use super::assets::{image_inline, register_image_from_src};
-use super::oak_html_util::{
-    attribute_value as html_attribute_value, parse_html_bytes, select_css,
-};
+use super::oak_html_util::parse_html_bytes;
 use crate::FormatError;
 
 /// Lower XHTML spine content into `notedown-ir` blocks via `oak-html`.
@@ -24,30 +19,11 @@ pub fn blocks_from_xhtml_with_context(
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
 ) -> Result<Vec<Block>, FormatError> {
-    register_spine_images_via_css(xml, graph, member_path)?;
     let text = prepare_xhtml_for_oak_html(&String::from_utf8_lossy(xml));
-    let language = HtmlLanguage::default();
-    let source = SourceText::new(text.as_str());
-    let mut cache = ParseSession::<HtmlLanguage>::default();
-    let parser = HtmlParser::new(&language);
-    let parsed = parser.parse(&source, &[], &mut cache);
-    let green_tree = parsed
-        .result
-        .map_err(|error| FormatError::parse("epub", error.to_string()))?;
-
-    let root = RedNode::new(&green_tree, 0);
-    let scope = find_body_or_document(root, &source);
-    let mut blocks = Vec::new();
-    let mut losses = Vec::new();
-    collect_semantic_blocks(
-        scope,
-        &source,
-        &mut blocks,
-        &mut losses,
-        graph,
-        member_path,
-        false,
-    );
+    let document = parse_html_bytes(text.as_bytes())?;
+    register_spine_images_from_document(&document, graph, member_path)?;
+    let (mut blocks, mut losses) =
+        blocks_from_html_document(&document, graph, member_path);
 
     let scraped = scraper_blocks_from_xhtml(text.as_str(), graph, member_path)?;
     blocks = merge_xhtml_blocks(blocks, scraped);
@@ -68,29 +44,13 @@ pub fn blocks_from_xhtml_with_context(
 /// Loss markers discovered while lowering XHTML (CSS/SVG still pending).
 pub fn losses_from_xhtml(xml: &[u8]) -> Result<Vec<LossMarker>, FormatError> {
     let text = prepare_xhtml_for_oak_html(&String::from_utf8_lossy(xml));
-    let language = HtmlLanguage::default();
-    let source = SourceText::new(text.as_str());
-    let mut cache = ParseSession::<HtmlLanguage>::default();
-    let parser = HtmlParser::new(&language);
-    let parsed = parser.parse(&source, &[], &mut cache);
-    let green_tree = parsed
-        .result
-        .map_err(|error| FormatError::parse("epub", error.to_string()))?;
-
-    let root = RedNode::new(&green_tree, 0);
-    let scope = find_body_or_document(root, &source);
-    let mut blocks = Vec::new();
-    let mut losses = Vec::new();
-    let mut scratch = DocumentGraph::new(notedown_ir::DocumentId(0));
-    collect_semantic_blocks(
-        scope,
-        &source,
-        &mut blocks,
-        &mut losses,
-        &mut scratch,
+    let document = parse_html_bytes(text.as_bytes())?;
+    let (_, losses) = blocks_from_html_document(
+        &document,
+        &mut DocumentGraph::new(notedown_ir::DocumentId(0)),
         None,
-        false,
     );
+    let mut losses = losses;
     losses.extend(scan_markup_losses(text.as_ref()));
     Ok(losses)
 }
@@ -115,113 +75,7 @@ fn scan_markup_losses(text: &str) -> Vec<LossMarker> {
     losses
 }
 
-fn find_body_or_document<'a>(
-    root: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-) -> RedNode<'a, HtmlLanguage> {
-    if let Some(body) = find_first_element_by_tag(root, source, "body") {
-        return body;
-    }
-    root
-}
-
-fn find_first_element_by_tag<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    tag: &str,
-) -> Option<RedNode<'a, HtmlLanguage>> {
-    if node.element_type() == HtmlElementType::Element {
-        if element_tag_name(node, source).as_deref() == Some(tag) {
-            return Some(node);
-        }
-    }
-    for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            if let Some(found) = find_first_element_by_tag(child_node, source, tag) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
-
-fn collect_semantic_blocks<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    blocks: &mut Vec<Block>,
-    losses: &mut Vec<LossMarker>,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    inside_list_item: bool,
-) {
-    if node.element_type() == HtmlElementType::Element {
-        if let Some(tag) = element_tag_name(node, source) {
-            if tag == "li" {
-                for child in element_body_children(node, source) {
-                    collect_semantic_blocks(
-                        child,
-                        source,
-                        blocks,
-                        losses,
-                        graph,
-                        member_path,
-                        true,
-                    );
-                }
-                return;
-            }
-            if inside_list_item && (tag == "ul" || tag == "ol") {
-                return;
-            }
-            if matches!(tag.as_str(), "section" | "article" | "main" | "div" | "figure") {
-                blocks.extend(collect_child_blocks(node, source, graph, member_path, losses));
-                return;
-            }
-            if let Some(block) = lower_semantic_block(node, source, &tag, losses, graph, member_path) {
-                blocks.push(block);
-                return;
-            }
-        }
-    }
-
-    for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            collect_semantic_blocks(
-                child_node,
-                source,
-                blocks,
-                losses,
-                graph,
-                member_path,
-                inside_list_item,
-            );
-        }
-    }
-}
-
-fn collect_child_blocks<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    for child in element_body_children(node, source) {
-        collect_semantic_blocks(
-            child,
-            source,
-            &mut blocks,
-            losses,
-            graph,
-            member_path,
-            false,
-        );
-    }
-    blocks
-}
-
-fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
+pub(crate) fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
     let mut content = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
@@ -258,589 +112,8 @@ fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
     }
 }
 
-fn lower_semantic_block<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    tag: &str,
-    losses: &mut Vec<LossMarker>,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-) -> Option<Block> {
-    note_inline_style_loss(node, source, losses);
-    match tag {
-        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            let level = tag[1..].parse::<u8>().unwrap_or(1);
-            let plain = element_inner_plain_text(node, source);
-            let title = if plain.is_empty() {
-                collect_inlines_from_element(node, source, graph, member_path, losses)
-            } else {
-                vec![Inline::Text { text: plain }]
-            };
-            Some(Block::Section {
-                level,
-                title,
-                children: Vec::new(),
-            })
-        }
-        "p" => {
-            let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses)).or_else(|| {
-                let plain = element_inner_plain_text(node, source);
-                if plain.is_empty() {
-                    None
-                } else {
-                    Some(vec![Inline::Text { text: plain }])
-                }
-            })?;
-            Some(Block::Paragraph { content })
-        }
-        "figcaption" => lower_figcaption_block(node, source, graph, member_path, losses),
-        "ul" | "ol" => {
-            let items = collect_list_items(node, source, graph, member_path, losses);
-            if items.is_empty() {
-                None
-            } else {
-                Some(Block::List {
-                    ordered: tag == "ol",
-                    items,
-                })
-            }
-        }
-        "blockquote" => {
-            let inner = collect_child_blocks(node, source, graph, member_path, losses);
-            if inner.is_empty() {
-                let plain = collect_plain_text(node, source);
-                if plain.is_empty() {
-                    None
-                } else {
-                    Some(Block::Quote {
-                        content: vec![Inline::Text { text: plain }],
-                    })
-                }
-            } else {
-                Some(quote_block_from_blocks(inner))
-            }
-        }
-        "pre" => {
-            let (language, content) = extract_pre_code_content(node, source);
-            if content.is_empty() {
-                None
-            } else {
-                Some(Block::Code { language, content })
-            }
-        }
-        "hr" => Some(Block::Opaque {
-            kind: "thematic_break".into(),
-            payload_hint: "---".into(),
-            status: SemanticStatus::Partial,
-        }),
-        "script" | "head" | "meta" | "title" | "html" | "body" | "section"
-        | "article" | "main" | "div" | "nav" | "figure" => None,
-        "style" => {
-            losses.push(LossMarker {
-                code: "import.epub.css_inline_block_unsupported".into(),
-                message: "embedded <style> blocks are not lowered into Notedown IR yet".into(),
-                status: SemanticStatus::Unsupported,
-            });
-            None
-        }
-        "link" => {
-            let rel = attribute_value(node, source, "rel").unwrap_or_default();
-            if rel.eq_ignore_ascii_case("stylesheet") {
-                losses.push(LossMarker {
-                    code: "import.epub.css_link_unsupported".into(),
-                    message: "linked stylesheets are registered as package assets but not applied during import".into(),
-                    status: SemanticStatus::Unsupported,
-                });
-            }
-            None
-        }
-        "img" => {
-            let src = attribute_value(node, source, "src").unwrap_or_default();
-            let alt = attribute_value(node, source, "alt").unwrap_or_default();
-            register_and_image_inline(&src, &alt, graph, member_path).map(|inline| Block::Paragraph {
-                content: vec![inline],
-            })
-        }
-        "svg" => {
-            if let Some((href, alt)) = extract_svg_image_href(node, source) {
-                register_and_image_inline(&href, &alt, graph, member_path).map(|inline| {
-                    Block::Paragraph {
-                        content: vec![inline],
-                    }
-                })
-            } else {
-                losses.push(LossMarker {
-                    code: "import.epub.svg_inline_unsupported".into(),
-                    message: "inline <svg> without an external <image> reference is not lowered yet"
-                        .into(),
-                    status: SemanticStatus::Unsupported,
-                });
-                None
-            }
-        }
-        "table" => {
-            let rows = collect_table_rows(node, source, graph, member_path, losses);
-            if rows.is_empty() {
-                None
-            } else {
-                Some(Block::Table { rows })
-            }
-        }
-        _ => {
-            losses.push(LossMarker {
-                code: "import.epub.unsupported_xhtml_block".into(),
-                message: format!("unsupported xhtml block element `<{tag}>`"),
-                status: SemanticStatus::Unsupported,
-            });
-            None
-        }
-    }
-}
 
-fn non_empty_inlines(inlines: Vec<Inline>) -> Option<Vec<Inline>> {
-    if inlines.is_empty() {
-        None
-    } else {
-        Some(inlines)
-    }
-}
-
-fn lower_figcaption_block<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Option<Block> {
-    let content = non_empty_inlines(collect_inlines_from_element(node, source, graph, member_path, losses))
-        .or_else(|| {
-            let plain = element_inner_plain_text(node, source);
-            if plain.is_empty() {
-                None
-            } else {
-                Some(vec![Inline::Text { text: plain }])
-            }
-        })?;
-    Some(Block::Paragraph {
-        content: vec![Inline::Styled {
-            style: "figcaption".into(),
-            children: content,
-        }],
-    })
-}
-
-fn element_inner_plain_text(node: RedNode<HtmlLanguage>, source: &SourceText) -> String {
-    let raw = node.text(source);
-    let open = raw.find('>').map(|index| index + 1).unwrap_or(0);
-    let close = raw.rfind('<').unwrap_or(raw.len());
-    let slice = if close > open {
-        &raw[open..close]
-    } else {
-        raw.as_ref()
-    };
-    normalize_whitespace(slice)
-}
-
-fn collect_list_items<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<ListItem> {
-    let mut items = Vec::new();
-    for child in element_body_children(node, source) {
-        if child.element_type() != HtmlElementType::Element {
-            continue;
-        }
-        if element_tag_name(child, source).as_deref() != Some("li") {
-            continue;
-        }
-        items.push(lower_list_item(child, source, graph, member_path, losses));
-    }
-    items
-}
-
-fn lower_list_item<'a>(
-    li: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> ListItem {
-    let mut content = Vec::new();
-    let mut children = Vec::new();
-    let mut past_opening_tag = false;
-
-    for child in li.children() {
-        match child {
-            RedTree::Node(child_node) => {
-                let kind = child_node.element_type();
-                if kind == HtmlElementType::TagSlashOpen {
-                    break;
-                }
-                if !past_opening_tag {
-                    if kind == HtmlElementType::TagClose {
-                        past_opening_tag = true;
-                    }
-                    continue;
-                }
-                if kind == HtmlElementType::Element {
-                    note_inline_style_loss(child_node, source, losses);
-                    let tag = element_tag_name(child_node, source).unwrap_or_default();
-                    match tag.as_str() {
-                        "ul" | "ol" => {
-                            let nested = collect_list_items(
-                                child_node,
-                                source,
-                                graph,
-                                member_path,
-                                losses,
-                            );
-                            if !nested.is_empty() {
-                                let id = graph.push_block(Block::List {
-                                    ordered: tag == "ol",
-                                    items: nested,
-                                });
-                                children.push(id);
-                            }
-                        }
-                        "p" => {
-                            for inline in collect_inlines_from_element(
-                                child_node,
-                                source,
-                                graph,
-                                member_path,
-                                losses,
-                            ) {
-                                push_inline(&mut content, inline);
-                            }
-                        }
-                        _ => {
-                            if let Some(inline) = lower_inline_element(
-                                child_node,
-                                source,
-                                graph,
-                                member_path,
-                                losses,
-                            ) {
-                                push_inline(&mut content, inline);
-                            }
-                        }
-                    }
-                } else if kind == HtmlElementType::Text {
-                    let text = normalize_whitespace(child_node.text(source).as_ref());
-                    if !text.is_empty() {
-                        push_inline(&mut content, Inline::Text { text });
-                    }
-                } else {
-                    let text = normalize_whitespace(child_node.text(source).as_ref());
-                    if !text.is_empty() {
-                        push_inline(&mut content, Inline::Text { text });
-                    }
-                }
-            }
-            RedTree::Leaf(_) => {
-                if !past_opening_tag {
-                    continue;
-                }
-                let text = normalize_whitespace(child.text(source).as_ref());
-                if !text.is_empty() {
-                    push_inline(&mut content, Inline::Text { text });
-                }
-            }
-        }
-    }
-
-    ListItem { content, children }
-}
-
-fn collect_table_rows<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<TableRow> {
-    let mut rows = Vec::new();
-    walk_table_rows(node, source, graph, member_path, losses, &mut rows);
-    rows
-}
-
-fn walk_table_rows<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-    rows: &mut Vec<TableRow>,
-) {
-    if node.element_type() == HtmlElementType::Element {
-        if let Some(tag) = element_tag_name(node, source) {
-            if tag == "tr" {
-                rows.push(collect_table_row(node, source, graph, member_path, losses));
-                return;
-            }
-        }
-    }
-
-    for child in element_body_children(node, source) {
-        if child.element_type() != HtmlElementType::Element {
-            continue;
-        }
-        walk_table_rows(child, source, graph, member_path, losses, rows);
-    }
-}
-
-fn collect_table_row<'a>(
-    row: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> TableRow {
-    let mut cells = Vec::new();
-    for child in element_body_children(row, source) {
-        if child.element_type() != HtmlElementType::Element {
-            continue;
-        }
-        let tag = element_tag_name(child, source).unwrap_or_default();
-        if tag == "th" || tag == "td" {
-            cells.push(
-                collect_inlines_from_element(child, source, graph, member_path, losses),
-            );
-        }
-    }
-    TableRow { cells }
-}
-
-fn collect_inlines_from_element<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<Inline> {
-    let mut inlines = Vec::new();
-    let mut past_opening_tag = false;
-    for child in node.children() {
-        match child {
-            RedTree::Node(child_node) => {
-                let kind = child_node.element_type();
-                if kind == HtmlElementType::TagSlashOpen {
-                    break;
-                }
-                if !past_opening_tag {
-                    if kind == HtmlElementType::TagClose {
-                        past_opening_tag = true;
-                    }
-                    continue;
-                }
-                if kind == HtmlElementType::Element {
-                    note_inline_style_loss(child_node, source, losses);
-                    if let Some(inline) =
-                        lower_inline_element(child_node, source, graph, member_path, losses) {
-                        push_inline(&mut inlines, inline);
-                    }
-                } else if kind == HtmlElementType::Text {
-                    let text = normalize_whitespace(child_node.text(source).as_ref());
-                    if !text.is_empty() {
-                        push_inline(&mut inlines, Inline::Text { text });
-                    }
-                } else {
-                    let text = normalize_whitespace(child_node.text(source).as_ref());
-                    if !text.is_empty() {
-                        push_inline(&mut inlines, Inline::Text { text });
-                    }
-                }
-            }
-            RedTree::Leaf(_) => {
-                if !past_opening_tag {
-                    continue;
-                }
-                let text = normalize_whitespace(child.text(source).as_ref());
-                if !text.is_empty() {
-                    push_inline(&mut inlines, Inline::Text { text });
-                }
-            }
-        }
-    }
-    inlines
-}
-
-fn lower_inline_element<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    source: &SourceText,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Option<Inline> {
-    let tag = element_tag_name(node, source)?;
-    match tag.as_str() {
-        "img" => {
-            let src = attribute_value(node, source, "src").unwrap_or_default();
-            let alt = attribute_value(node, source, "alt").unwrap_or_default();
-            register_and_image_inline(&src, &alt, graph, member_path)
-        }
-        "strong" | "b" => Some(Inline::Styled {
-            style: "bold".into(),
-            children: collect_inlines_from_element(node, source, graph, member_path, losses),
-        }),
-        "em" | "i" => Some(Inline::Styled {
-            style: "italic".into(),
-            children: collect_inlines_from_element(node, source, graph, member_path, losses),
-        }),
-        "code" => Some(Inline::InlineCode {
-            text: collect_plain_text(node, source),
-        }),
-        "a" => {
-            let children = collect_inlines_from_element(node, source, graph, member_path, losses);
-            let href = attribute_value(node, source, "href").unwrap_or_default();
-            if href.is_empty() {
-                return children.first().cloned();
-            }
-            Some(Inline::Styled {
-                style: "link".into(),
-                children: if children.is_empty() {
-                    vec![Inline::Text { text: href.clone() }, Inline::Text { text: href }]
-                } else {
-                    let mut linked = children;
-                    linked.push(Inline::Text { text: href });
-                    linked
-                },
-            })
-        }
-        "span" | "sup" | "sub" => {
-            let children = collect_inlines_from_element(node, source, graph, member_path, losses);
-            if children.is_empty() {
-                None
-            } else if children.len() == 1 {
-                children.first().cloned()
-            } else {
-                Some(Inline::Styled {
-                    style: tag,
-                    children,
-                })
-            }
-        }
-        _ => {
-            let text = collect_plain_text(node, source);
-            if text.is_empty() {
-                None
-            } else {
-                Some(Inline::Text { text })
-            }
-        }
-    }
-}
-
-fn element_body_children<'a>(
-    node: RedNode<'a, HtmlLanguage>,
-    _source: &SourceText,
-) -> Vec<RedNode<'a, HtmlLanguage>> {
-    let mut children = Vec::new();
-    let mut past_opening_tag = false;
-    for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            let kind = child_node.element_type();
-            if kind == HtmlElementType::TagSlashOpen {
-                break;
-            }
-            if past_opening_tag {
-                children.push(child_node);
-            } else if kind == HtmlElementType::TagClose {
-                past_opening_tag = true;
-            }
-        }
-    }
-    children
-}
-
-fn element_tag_name(node: RedNode<HtmlLanguage>, source: &SourceText) -> Option<String> {
-    for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            if child_node.element_type() == HtmlElementType::TagName {
-                let name = child_node.text(source).trim().to_ascii_lowercase();
-                if !name.is_empty() {
-                    return Some(name);
-                }
-            }
-        }
-    }
-    tag_name_from_element_text(node.text(source).as_ref())
-}
-
-fn tag_name_from_element_text(text: &str) -> Option<String> {
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with('<') || trimmed.starts_with("</") {
-        return None;
-    }
-    let inner = &trimmed[1..];
-    let end = inner
-        .find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/')
-        .unwrap_or(inner.len());
-    let tag = inner[..end].trim().to_ascii_lowercase();
-    if tag.is_empty() {
-        None
-    } else {
-        Some(tag)
-    }
-}
-
-fn attribute_value(
-    node: RedNode<HtmlLanguage>,
-    source: &SourceText,
-    name: &str,
-) -> Option<String> {
-    for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            if child_node.element_type() != HtmlElementType::Attribute {
-                continue;
-            }
-            let mut attr_name = None;
-            let mut attr_value = None;
-            for attr_child in child_node.children() {
-                if let RedTree::Node(attr_part) = attr_child {
-                    match attr_part.element_type() {
-                        HtmlElementType::AttributeName => {
-                            attr_name = Some(attr_part.text(source).trim().to_ascii_lowercase());
-                        }
-                        HtmlElementType::AttributeValue => {
-                            attr_value = Some(unquote(attr_part.text(source).as_ref()));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if attr_name.as_deref() == Some(name) {
-                return attr_value;
-            }
-        }
-    }
-    None
-}
-
-fn collect_plain_text(node: RedNode<HtmlLanguage>, source: &SourceText) -> String {
-    let mut text = String::new();
-    for child in node.children() {
-        match child {
-            RedTree::Node(child_node) => {
-                if child_node.element_type() == HtmlElementType::TagSlashOpen {
-                    break;
-                }
-                if child_node.element_type() == HtmlElementType::Text {
-                    text.push_str(child_node.text(source).as_ref());
-                } else {
-                    text.push_str(&collect_plain_text(child_node, source));
-                }
-            }
-            RedTree::Leaf(_) => text.push_str(child.text(source).as_ref()),
-        }
-    }
-    normalize_whitespace(text.trim())
-}
-
-fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {
+pub(crate) fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {
     if let Inline::Text { text: right } = inline {
         if let Some(Inline::Text { text: left }) = inlines.last_mut() {
             left.push_str(&right);
@@ -855,33 +128,8 @@ fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {
     inlines.push(inline);
 }
 
-fn normalize_whitespace(text: &str) -> String {
+pub(crate) fn normalize_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Register embedded image assets discovered via CSS selectors.
-fn register_spine_images_via_css(
-    xml: &[u8],
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-) -> Result<(), FormatError> {
-    let Some(member_path) = member_path else {
-        return Ok(());
-    };
-    let document = parse_html_bytes(xml)?;
-    for img in select_css(&document, "img[src]")? {
-        if let Some(src) = html_attribute_value(img, "src") {
-            register_image_from_src(graph, member_path, &src);
-        }
-    }
-    for image in select_css(&document, "svg image")? {
-        let href = html_attribute_value(image, "href")
-            .or_else(|| html_attribute_value(image, "xlink:href"));
-        if let Some(href) = href {
-            register_image_from_src(graph, member_path, &href);
-        }
-    }
-    Ok(())
 }
 
 /// Normalize EPUB XHTML into HTML that `oak-html` can parse reliably today.
@@ -898,7 +146,7 @@ fn prepare_xhtml_for_oak_html(xml: &str) -> String {
     text
 }
 
-fn merge_xhtml_blocks(oak: Vec<Block>, scraped: Vec<Block>) -> Vec<Block> {
+pub(crate) fn merge_xhtml_blocks(oak: Vec<Block>, scraped: Vec<Block>) -> Vec<Block> {
     if scraped.is_empty() {
         return oak;
     }
@@ -1476,7 +724,7 @@ fn strip_tags(text: &str) -> String {
     normalize_whitespace(output.trim())
 }
 
-fn register_and_image_inline(
+pub(crate) fn register_and_image_inline(
     src: &str,
     alt: &str,
     graph: &mut DocumentGraph,
@@ -1486,53 +734,6 @@ fn register_and_image_inline(
         register_image_from_src(graph, member_path, src);
     }
     image_inline(src, alt)
-}
-
-fn note_inline_style_loss(
-    node: RedNode<HtmlLanguage>,
-    source: &SourceText,
-    losses: &mut Vec<LossMarker>,
-) {
-    if attribute_value(node, source, "style").is_some() {
-        losses.push(LossMarker {
-            code: "import.epub.inline_style_unsupported".into(),
-            message: "inline style attributes are not lowered into Notedown IR yet".into(),
-            status: SemanticStatus::Unsupported,
-        });
-    }
-}
-
-fn link_href_attribute(node: RedNode<HtmlLanguage>, source: &SourceText) -> Option<String> {
-    attribute_value(node, source, "href")
-        .or_else(|| attribute_value(node, source, "xlink:href"))
-}
-
-fn extract_svg_image_href(
-    node: RedNode<HtmlLanguage>,
-    source: &SourceText,
-) -> Option<(String, String)> {
-    for child in element_body_children(node, source) {
-        if child.element_type() != HtmlElementType::Element {
-            continue;
-        }
-        let tag = element_tag_name(child, source)?;
-        if tag == "image" {
-            let href = link_href_attribute(child, source)?;
-            if href.is_empty() {
-                continue;
-            }
-            let alt = attribute_value(child, source, "alt")
-                .or_else(|| attribute_value(child, source, "aria-label"))
-                .unwrap_or_default();
-            return Some((href, alt));
-        }
-        if tag == "svg" {
-            if let Some(found) = extract_svg_image_href(child, source) {
-                return Some(found);
-            }
-        }
-    }
-    None
 }
 
 fn scrape_svg_image_reference(fragment: &str) -> Option<(String, String)> {
@@ -1552,23 +753,7 @@ fn scrape_svg_image_reference(fragment: &str) -> Option<(String, String)> {
     Some((href, alt))
 }
 
-fn extract_pre_code_content(node: RedNode<HtmlLanguage>, source: &SourceText) -> (Option<String>, String) {
-    for child in element_body_children(node, source) {
-        if child.element_type() != HtmlElementType::Element {
-            continue;
-        }
-        if element_tag_name(child, source).as_deref() == Some("code") {
-            let language = attribute_value(child, source, "class")
-                .as_deref()
-                .map(language_from_class);
-            let content = collect_plain_text(child, source);
-            return (language, content);
-        }
-    }
-    (None, element_inner_plain_text(node, source))
-}
-
-fn language_from_class(class: &str) -> String {
+pub(crate) fn language_from_class(class: &str) -> String {
     for token in class.split_whitespace() {
         if let Some(language) = token.strip_prefix("language-") {
             if !language.is_empty() {

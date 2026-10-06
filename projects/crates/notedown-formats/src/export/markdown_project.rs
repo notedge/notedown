@@ -210,11 +210,23 @@ fn plan_project_assets(graph: &DocumentGraph) -> Result<(HashMap<String, String>
         let file_name = stable_asset_file_name(asset, &used_names);
         used_names.insert(file_name.clone());
         let relative_path = format!("assets/{file_name}");
-        image_urls.insert(source.clone(), relative_path.clone());
+        register_image_url_alias(&mut image_urls, source, &relative_path);
         assets.push(MarkdownProjectAsset { relative_path, bytes: bytes.clone(), asset_id: asset.id });
     }
 
     Ok((image_urls, assets, unresolved))
+}
+
+fn register_image_url_alias(image_urls: &mut HashMap<String, String>, source: &str, relative_path: &str) {
+    image_urls.insert(source.to_string(), relative_path.to_string());
+    for prefix in ["OEBPS/", "word/"] {
+        if let Some(stripped) = source.strip_prefix(prefix) {
+            image_urls.insert(stripped.to_string(), relative_path.to_string());
+        }
+    }
+    if let Some(file_name) = source.rsplit('/').next().filter(|name| !name.is_empty()) {
+        image_urls.insert(file_name.to_string(), relative_path.to_string());
+    }
 }
 
 fn stable_asset_file_name(asset: &Asset, used: &HashSet<String>) -> String {

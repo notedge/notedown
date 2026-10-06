@@ -135,3 +135,54 @@ fn epub_exports_multi_chapter_markdown_project() {
             if title.iter().any(|inline| matches!(inline, Inline::Text { text } if text == "Chapter One"))
     )));
 }
+
+fn epub_with_image_zip() -> Vec<u8> {
+    let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+    let opf = br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Image Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+    <item id="ch1" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+    stored_zip(&[
+        ("mimetype", b"application/epub+zip"),
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        (
+            "OEBPS/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <p>Before image</p>
+    <img src="images/cover.png" alt="Cover art"/>
+  </body>
+</html>"#,
+        ),
+        ("OEBPS/images/cover.png", b"\x89PNG\r\n"),
+    ])
+}
+
+#[test]
+fn epub_exports_single_chapter_markdown_project_with_materialized_image() {
+    let graph = import_epub_bytes("image.epub", &epub_with_image_zip()).expect("import epub");
+    let project = export_markdown_project(&graph).expect("export project");
+
+    assert!(project.chapters.is_empty());
+    assert!(project.index_markdown.contains("![Cover art](assets/cover.png)"));
+    assert_eq!(project.assets.len(), 1);
+    assert_eq!(project.assets[0].relative_path, "assets/cover.png");
+    assert_eq!(project.assets[0].bytes, b"\x89PNG\r\n");
+}

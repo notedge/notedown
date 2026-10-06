@@ -114,13 +114,27 @@ pub fn hydrate_package_assets(
     package: &OcfPackage,
     budget: &ParseBudget,
 ) {
+    let mut losses = Vec::new();
     for asset in &mut graph.assets {
         let Some(source) = asset.source.as_ref() else {
             continue;
         };
-        if let Ok(bytes) = package.read_member(source, budget) {
-            asset.bytes = Some(bytes);
+        match package.read_member(source, budget) {
+            Ok(bytes) => {
+                asset.bytes = Some(bytes);
+            }
+            Err(error) => {
+                asset.status = SemanticStatus::Unresolved;
+                losses.push(LossMarker {
+                    code: "import.epub.asset_unresolved".into(),
+                    message: format!("failed to materialize package asset `{source}`: {error:?}"),
+                    status: SemanticStatus::Unresolved,
+                });
+            }
         }
+    }
+    for loss in losses {
+        graph.push_loss(loss);
     }
 }
 

@@ -1,5 +1,5 @@
-use notedown_formats::export::markdown::export_markdown;
-use notedown_formats::import::epub::import_epub_bytes;
+use notedown_formats::{export::markdown::export_markdown, import::epub::import_epub_bytes};
+use notedown_ir::{Block, Inline};
 
 fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut archive = Vec::new();
@@ -231,6 +231,10 @@ fn epub_import_maps_nested_navigation_toc() {
 }
 
 fn epub_with_image_zip() -> Vec<u8> {
+    epub_with_image_member(true)
+}
+
+fn epub_with_image_member(include_image: bool) -> Vec<u8> {
     let container = br#"<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
@@ -251,11 +255,10 @@ fn epub_with_image_zip() -> Vec<u8> {
     <itemref idref="ch1"/>
   </spine>
 </package>"#;
-    stored_zip(&[
+    let mut entries: Vec<(&str, &[u8])> = vec![
         ("mimetype", b"application/epub+zip"),
         ("META-INF/container.xml", container),
         ("OEBPS/content.opf", opf),
-        ("OEBPS/images/cover.png", b"\x89PNG\r\n"),
         (
             "OEBPS/chapter.xhtml",
             br#"<?xml version="1.0" encoding="UTF-8"?>
@@ -266,7 +269,11 @@ fn epub_with_image_zip() -> Vec<u8> {
   </body>
 </html>"#,
         ),
-    ])
+    ];
+    if include_image {
+        entries.push(("OEBPS/images/cover.png", b"\x89PNG\r\n"));
+    }
+    stored_zip(&entries)
 }
 
 #[test]
@@ -278,6 +285,17 @@ fn epub_import_registers_embedded_images() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("![Cover art](images/cover.png)"));
     assert!(markdown.contains("Before image"));
+}
+
+#[test]
+fn epub_missing_image_member_is_unresolved_and_reported() {
+    let graph = import_epub_bytes("missing-image.epub", &epub_with_image_member(false)).expect("import");
+    let image = graph.assets.iter().find(|asset| asset.source.as_deref() == Some("OEBPS/images/cover.png")).expect("image asset");
+    assert!(image.bytes.is_none());
+    assert_eq!(image.status, notedown_ir::SemanticStatus::Unresolved);
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.epub.asset_unresolved" && loss.status == notedown_ir::SemanticStatus::Unresolved));
+    assert!(!graph.coverage.complete);
+    assert!(graph.validate().is_valid());
 }
 
 fn epub_with_stylesheet_and_svg_zip() -> Vec<u8> {
@@ -331,26 +349,9 @@ fn epub_with_stylesheet_and_svg_zip() -> Vec<u8> {
 fn epub_import_registers_stylesheet_assets() {
     let zip = epub_with_stylesheet_and_svg_zip();
     let graph = import_epub_bytes("styled.epub", &zip).expect("import epub");
-    assert!(
-        graph
-            .assets
-            .iter()
-            .any(|asset| asset.media_type.as_deref() == Some("text/css"))
-    );
-    assert!(
-        graph
-            .coverage
-            .loss
-            .iter()
-            .any(|loss| loss.code == "import.epub.css_link_unsupported")
-    );
-    assert!(
-        graph
-            .coverage
-            .loss
-            .iter()
-            .any(|loss| loss.code == "import.epub.inline_style_unsupported")
-    );
+    assert!(graph.assets.iter().any(|asset| asset.media_type.as_deref() == Some("text/css")));
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.epub.css_link_unsupported"));
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.epub.inline_style_unsupported"));
 }
 
 #[test]
@@ -550,9 +551,18 @@ fn epub_with_figure_zip() -> Vec<u8> {
 fn epub_import_lowers_figure_image_and_figcaption() {
     let zip = epub_with_figure_zip();
     let graph = import_epub_bytes("figure.epub", &zip).expect("import epub");
-    let markdown = export_markdown(&graph).expect("export markdown");
-    assert!(markdown.contains("![Sunset](images/photo.png)"));
-    assert!(markdown.contains("*Sunset over the bay*"));
+    assert!(graph.assets.iter().any(|asset| { asset.source.as_deref() == Some("OEBPS/images/photo.png") }));
+    assert!(graph.blocks.iter().any(|node| matches!(
+        &node.block,
+        Block::Paragraph { content }
+            if content.iter().any(|inline| matches!(
+                inline,
+                Inline::Styled { style, .. } if style == "figcaption"
+            ))
+    )));
+
+    let error = export_markdown(&graph).expect_err("figcaption must not be flattened to emphasis");
+    assert!(error.to_string().contains("figcaption"));
 }
 
 #[test]

@@ -44,6 +44,10 @@ name = "markdown_project_docx"
 required-features = ["docx", "markdown"]
 
 [[test]]
+name = "markdown_project_epub"
+required-features = ["epub", "markdown"]
+
+[[test]]
 name = "epub"
 required-features = ["epub", "markdown"]
 

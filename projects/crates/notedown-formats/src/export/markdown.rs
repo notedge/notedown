@@ -14,17 +14,32 @@ pub fn export_markdown_with_image_urls(
     graph: &DocumentGraph,
     image_urls: Option<&HashMap<String, String>>,
 ) -> Result<String, FormatError> {
+    export_markdown_with_image_urls_for_roots(graph, None, image_urls)
+}
+
+/// Export Markdown for selected top-level block roots.
+pub fn export_markdown_with_image_urls_for_roots(
+    graph: &DocumentGraph,
+    roots: Option<&[NodeId]>,
+    image_urls: Option<&HashMap<String, String>>,
+) -> Result<String, FormatError> {
     let validation = graph.validate();
     if !validation.is_valid() {
         return Err(FormatError::invalid_input(format!("invalid document graph: {:?}", validation.issues)));
     }
 
+    let root_filter = roots.map(|items| items.iter().copied().collect::<HashSet<_>>());
     let mut output = String::new();
     let mut footnotes = Vec::new();
     let nested = nested_block_ids(graph);
     for node in &graph.blocks {
         if nested.contains(&node.id) {
             continue;
+        }
+        if let Some(filter) = &root_filter {
+            if !filter.contains(&node.id) {
+                continue;
+            }
         }
         if let Block::Opaque { kind, payload_hint, .. } = &node.block {
             if kind == "footnote_definition" {

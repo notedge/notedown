@@ -11,6 +11,7 @@ pub enum FormatStatus {
     Ready,
     Partial,
     Planned,
+    Unavailable,
 }
 
 /// One import or export capability entry.

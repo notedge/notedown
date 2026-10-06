@@ -60,6 +60,10 @@ name = "doc"
 required-features = ["doc"]
 
 [[test]]
+name = "markdown_project_doc"
+required-features = ["doc", "markdown"]
+
+[[test]]
 name = "html_import"
 required-features = ["html", "markdown"]
 
@@ -72,6 +76,7 @@ name = "notedown"
 required-features = ["markdown", "notedown"]
 
 [dev-dependencies]
+cfb = "0.7.3"
 serde_json = "1.0"
 oak-core = { workspace = true }
 oak-html = { workspace = true }

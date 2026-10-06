@@ -1,22 +1,17 @@
 use std::path::Path;
 
-use notedown_ir::{
-    Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, SemanticStatus, TableRow,
-};
-use oak_core::parser::session::ParseSession;
-use oak_core::{Parser, RedNode, RedTree, SourceText};
-use oak_notedown::parser::element_type::NoteElementType;
-use oak_notedown::lexer::token_type::NoteTokenType;
-use oak_notedown::{NoteLanguage, NoteParser};
+use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, SemanticStatus, TableRow};
+use oak_core::{Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
+use oak_notedown::{NoteLanguage, NoteParser, lexer::token_type::NoteTokenType, parser::element_type::NoteElementType};
 
+use super::common::{decode_escaped_text, register_image_assets};
 use crate::FormatError;
 
 /// Import Notedown text from disk into `notedown-ir` via `oak-notedown`.
 pub fn import_notedown(path: impl AsRef<Path>) -> Result<DocumentGraph, FormatError> {
     let path = path.as_ref();
-    let text = std::fs::read_to_string(path).map_err(|error| {
-        FormatError::invalid_input(format!("failed to read {}: {error}", path.display()))
-    })?;
+    let text =
+        std::fs::read_to_string(path).map_err(|error| FormatError::invalid_input(format!("failed to read {}: {error}", path.display())))?;
     import_notedown_bytes(&path.display().to_string(), &text)
 }
 
@@ -27,23 +22,18 @@ pub fn import_notedown_bytes(label: &str, text: &str) -> Result<DocumentGraph, F
     let mut cache = ParseSession::<NoteLanguage>::default();
     let parser = NoteParser::new(&language);
     let parsed = parser.parse(&source, &[], &mut cache);
-    let green_tree = parsed
-        .result
-        .map_err(|error| FormatError::parse("notedown", error.to_string()))?;
+    let green_tree = parsed.result.map_err(|error| FormatError::parse("notedown", error.to_string()))?;
     lower_notedown_tree(label, green_tree, &source)
 }
 
-fn lower_notedown_tree(
-    label: &str,
-    green_tree: &oak_core::GreenNode<NoteLanguage>,
-    source: &SourceText,
-) -> Result<DocumentGraph, FormatError> {
+fn lower_notedown_tree(label: &str, green_tree: &oak_core::GreenNode<NoteLanguage>, source: &SourceText) -> Result<DocumentGraph, FormatError> {
     let root = RedNode::new(green_tree, 0);
     let mut graph = DocumentGraph::new(document_id_for(label));
     let blocks = lower_root_blocks(root, source);
     for block in blocks {
         graph.push_block(block);
     }
+    register_image_assets(&mut graph);
 
     if graph.blocks.is_empty() {
         graph.push_loss(LossMarker {
@@ -51,7 +41,8 @@ fn lower_notedown_tree(
             message: "notedown source produced no semantic blocks".into(),
             status: SemanticStatus::Partial,
         });
-    } else {
+    }
+    else {
         graph.push_loss(LossMarker {
             code: "import.notedown.partial_coverage".into(),
             message: "notedown import lowers headings, paragraphs, lists, code blocks, tables, and basic links via oak-notedown".into(),
@@ -76,10 +67,7 @@ fn lower_root_blocks(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Bl
                 }
                 NoteElementType::ListItem => {
                     let ordered = list_marker_ordered(child_node.text(source).as_ref());
-                    let item = ListItem {
-                        content: collect_inlines(child_node, source),
-                        children: Vec::new(),
-                    };
+                    let item = ListItem { content: collect_inlines(child_node, source), children: Vec::new() };
                     match &mut pending_list {
                         Some((list_ordered, items)) if *list_ordered == ordered => {
                             items.push(item);
@@ -106,7 +94,8 @@ fn lower_root_blocks(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Bl
                     flush_list(&mut blocks, &mut pending_list);
                     if let Some(block) = promote_heading(child_node, source) {
                         blocks.push(block);
-                    } else if let Some(block) = lower_paragraph(child_node, source) {
+                    }
+                    else if let Some(block) = lower_paragraph(child_node, source) {
                         blocks.push(block);
                     }
                 }
@@ -131,46 +120,28 @@ fn flush_list(blocks: &mut Vec<Block>, pending: &mut Option<(bool, Vec<ListItem>
     }
 }
 
-fn lower_block_node(
-    node: RedNode<NoteLanguage>,
-    source: &SourceText,
-    kind: NoteElementType,
-) -> Option<Block> {
+fn lower_block_node(node: RedNode<NoteLanguage>, source: &SourceText, kind: NoteElementType) -> Option<Block> {
     match kind {
         NoteElementType::Heading => {
             let (level, title) = heading_parts(node, source);
             Some(Block::Section {
                 level,
-                title: if title.is_empty() {
-                    collect_inlines(node, source)
-                } else {
-                    vec![Inline::Text { text: title }]
-                },
+                title: if title.is_empty() { collect_inlines(node, source) } else { vec![Inline::Text { text: title }] },
                 children: Vec::new(),
             })
         }
         NoteElementType::Paragraph => lower_paragraph(node, source),
         NoteElementType::CodeBlock => {
             let (language, content) = extract_code_block(node, source);
-            if content.is_empty() {
-                None
-            } else {
-                Some(Block::Code { language, content })
-            }
+            if content.is_empty() { None } else { Some(Block::Code { language, content }) }
         }
-        NoteElementType::Table => Some(Block::Table {
-            rows: extract_table_rows(node, source),
-        }),
-        NoteElementType::Blockquote => Some(Block::Quote {
-            content: vec![Inline::Text {
-                text: extract_notedown_blockquote_text(node, source),
-            }],
-        }),
-        NoteElementType::HorizontalRule => Some(Block::Opaque {
-            kind: "thematic_break".into(),
-            payload_hint: "---".into(),
-            status: SemanticStatus::Partial,
-        }),
+        NoteElementType::Table => Some(Block::Table { rows: extract_table_rows(node, source) }),
+        NoteElementType::Blockquote => {
+            Some(Block::Quote { content: vec![Inline::Text { text: extract_notedown_blockquote_text(node, source) }] })
+        }
+        NoteElementType::HorizontalRule => {
+            Some(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial })
+        }
         NoteElementType::Error => None,
         _ => None,
     }
@@ -190,49 +161,18 @@ fn promote_heading(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<B
     if title.is_empty() {
         return None;
     }
-    Some(Block::Section {
-        level: hashes as u8,
-        title: vec![Inline::Text { text: title.to_string() }],
-        children: Vec::new(),
-    })
+    Some(Block::Section { level: hashes as u8, title: vec![Inline::Text { text: title.to_string() }], children: Vec::new() })
 }
 
-fn promote_list_item(
-    node: RedNode<NoteLanguage>,
-    source: &SourceText,
-) -> Option<(bool, ListItem)> {
+fn promote_list_item(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<(bool, ListItem)> {
     let text = node.text(source).into_owned();
     let raw = text.trim();
-    if let Some(content) = raw.strip_prefix("- ")
-        .or_else(|| raw.strip_prefix("* "))
-        .or_else(|| raw.strip_prefix("+ "))
-    {
-        return Some((
-            false,
-            ListItem {
-                content: vec![Inline::Text {
-                    text: content.trim().to_string(),
-                }],
-                children: Vec::new(),
-            },
-        ));
+    if let Some(content) = raw.strip_prefix("- ").or_else(|| raw.strip_prefix("* ")).or_else(|| raw.strip_prefix("+ ")) {
+        return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
     }
     if let Some((prefix, content)) = raw.split_once(". ") {
-        if !prefix.is_empty()
-            && prefix
-                .chars()
-                .all(|ch| ch.is_ascii_digit())
-            && !content.is_empty()
-        {
-            return Some((
-                true,
-                ListItem {
-                    content: vec![Inline::Text {
-                        text: content.trim().to_string(),
-                    }],
-                    children: Vec::new(),
-                },
-            ));
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) && !content.is_empty() {
+            return Some((true, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
         }
     }
     let inlines = collect_inlines(node, source);
@@ -240,19 +180,8 @@ fn promote_list_item(
         return None;
     }
     if let Inline::Text { text } = &inlines[0] {
-        if let Some(content) = text.strip_prefix("- ")
-            .or_else(|| text.strip_prefix("* "))
-            .or_else(|| text.strip_prefix("+ "))
-        {
-            return Some((
-                false,
-                ListItem {
-                    content: vec![Inline::Text {
-                        text: content.trim().to_string(),
-                    }],
-                    children: Vec::new(),
-                },
-            ));
+        if let Some(content) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")).or_else(|| text.strip_prefix("+ ")) {
+            return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
         }
     }
     None
@@ -268,50 +197,30 @@ fn lower_paragraph(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<B
 
 fn heading_parts(node: RedNode<NoteLanguage>, source: &SourceText) -> (u8, String) {
     let raw = node.text(source);
-    let trimmed = raw.trim_start();
+    let trimmed = raw.trim();
     let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
     let level = hashes.clamp(1, 6) as u8;
-    let title = if hashes > 0 {
-        trimmed[hashes..].trim_start().to_string()
-    } else {
-        collect_plain_text(node, source)
-    };
+    let title = if hashes > 0 { trimmed[hashes..].trim_start().to_string() } else { collect_plain_text(node, source) };
     (level, title)
 }
 
 fn list_marker_ordered(text: &str) -> bool {
-    text
-        .trim_start()
-        .chars()
-        .next()
-        .map(|ch| ch.is_ascii_digit())
-        .unwrap_or(false)
+    text.trim_start().chars().next().map(|ch| ch.is_ascii_digit()).unwrap_or(false)
 }
 
-fn extract_code_block(
-    node: RedNode<NoteLanguage>,
-    source: &SourceText,
-) -> (Option<String>, String) {
+fn extract_code_block(node: RedNode<NoteLanguage>, source: &SourceText) -> (Option<String>, String) {
     let raw = node.text(source);
-    let stripped = raw
-        .trim()
-        .trim_start_matches('`')
-        .trim_end_matches('`');
+    let stripped = raw.trim().trim_start_matches('`').trim_end_matches('`');
     let mut lines = stripped.lines();
     let first = lines.next().unwrap_or("").trim();
-    let language = if first.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-        && !first.is_empty()
-        && !first.contains(' ')
+    let language = if first.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') && !first.is_empty() && !first.contains(' ')
     {
         Some(first.to_string())
-    } else {
+    }
+    else {
         None
     };
-    let content = if language.is_some() {
-        lines.collect::<Vec<_>>().join("\n")
-    } else {
-        stripped.to_string()
-    };
+    let content = if language.is_some() { lines.collect::<Vec<_>>().join("\n") } else { stripped.to_string() };
     (language, content.trim().to_string())
 }
 
@@ -344,11 +253,7 @@ fn is_gfm_table_separator_row(cells: &[Vec<Inline>]) -> bool {
     cells.iter().all(|cell| {
         let text = table_cell_plain_text(cell);
         let trimmed = text.trim();
-        !trimmed.is_empty()
-            && trimmed.contains('-')
-            && trimmed
-                .chars()
-                .all(|ch| ch == '-' || ch == ':' || ch.is_whitespace())
+        !trimmed.is_empty() && trimmed.contains('-') && trimmed.chars().all(|ch| ch == '-' || ch == ':' || ch.is_whitespace())
     })
 }
 
@@ -385,8 +290,34 @@ fn collect_inlines(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Inli
     for child in node.children() {
         match child {
             RedTree::Node(child_node) => {
+                let link_like = matches!(
+                    child_node.element_type(),
+                    NoteElementType::Link | NoteElementType::Image
+                );
+                let trailing = if link_like {
+                    trailing_link_whitespace(&child_node.text(source))
+                } else {
+                    String::new()
+                };
                 if let Some(inline) = lower_inline_node(child_node, source) {
                     push_inline(&mut inlines, inline);
+                }
+                if !trailing.is_empty() {
+                    push_inline(&mut inlines, Inline::Text { text: trailing });
+                }
+                if matches!(child_node.element_type(), NoteElementType::Token(NoteTokenType::Strong | NoteTokenType::Emphasis)) {
+                    let trailing = child_node
+                        .text(source)
+                        .chars()
+                        .rev()
+                        .take_while(|character| character.is_whitespace())
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect::<String>();
+                    if !trailing.is_empty() {
+                        push_inline(&mut inlines, Inline::Text { text: trailing });
+                    }
                 }
             }
             RedTree::Leaf(_) => {
@@ -406,49 +337,61 @@ fn collect_inlines(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Inli
     inlines
 }
 
-fn lower_inline_node(
-    node: RedNode<NoteLanguage>,
-    source: &SourceText,
-) -> Option<Inline> {
+fn lower_inline_node(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<Inline> {
     match node.element_type() {
         NoteElementType::Link => parse_inline_link(node, source),
+        NoteElementType::Image => parse_inline_image(node, source),
         NoteElementType::Root => {
             let children = collect_inlines(node, source);
             if children.is_empty() {
                 None
-            } else if children.len() == 1 {
+            }
+            else if children.len() == 1 {
                 children.first().cloned()
-            } else {
-                Some(Inline::Styled {
-                    style: "span".into(),
-                    children,
-                })
+            }
+            else {
+                Some(Inline::Styled { style: "span".into(), children })
             }
         }
         NoteElementType::Token(token) => match token {
             NoteTokenType::Text | NoteTokenType::HeadingText | NoteTokenType::LinkText => {
-                Some(Inline::Text {
-                    text: node.text(source).into_owned(),
-                })
+                Some(Inline::Text { text: node.text(source).into_owned() })
             }
-            NoteTokenType::InlineCode => Some(Inline::InlineCode {
-                text: node.text(source).into_owned(),
-            }),
-            NoteTokenType::Strong => Some(Inline::Styled {
-                style: "bold".into(),
-                children: collect_inlines(node, source),
-            }),
-            NoteTokenType::Emphasis => Some(Inline::Styled {
-                style: "italic".into(),
-                children: collect_inlines(node, source),
-            }),
-            NoteTokenType::Whitespace => Some(Inline::Text {
-                text: node.text(source).into_owned(),
-            }),
+            NoteTokenType::InlineCode => Some(Inline::InlineCode { text: node.text(source).into_owned() }),
+            NoteTokenType::Strong | NoteTokenType::Emphasis => {
+                let raw = node.text(source);
+                let marker = match (token, raw.starts_with('_')) {
+                    (NoteTokenType::Strong, true) => "__",
+                    (NoteTokenType::Strong, false) => "**",
+                    (_, true) => "_",
+                    (_, false) => "*",
+                };
+                let style = if token == NoteTokenType::Strong { "bold" } else { "italic" };
+                Some(Inline::Styled { style: style.into(), children: strip_inline_marker(collect_inlines(node, source), marker) })
+            }
+            NoteTokenType::Whitespace => Some(Inline::Text { text: node.text(source).into_owned() }),
             _ => None,
         },
         _ => None,
     }
+}
+
+fn strip_inline_marker(mut children: Vec<Inline>, marker: &str) -> Vec<Inline> {
+    if let Some(Inline::Text { text }) = children.first_mut() {
+        if let Some(stripped) = text.strip_prefix(marker) {
+            *text = stripped.to_string();
+        }
+    }
+    if let Some(Inline::Text { text }) = children.last_mut() {
+        if let Some(index) = text.rfind(marker) {
+            if text[index + marker.len()..].trim().is_empty() {
+                text.replace_range(index..index + marker.len(), "");
+            }
+        }
+        let trimmed_length = text.trim_end().len();
+        text.truncate(trimmed_length);
+    }
+    children
 }
 
 fn should_keep_inline_text(text: &str) -> bool {
@@ -460,10 +403,7 @@ fn extract_notedown_blockquote_text(node: RedNode<NoteLanguage>, source: &Source
     let mut lines = Vec::new();
     for line in raw.lines() {
         let trimmed = line.trim();
-        let content = trimmed
-            .strip_prefix('>')
-            .map(str::trim_start)
-            .unwrap_or(trimmed);
+        let content = trimmed.strip_prefix('>').map(str::trim_start).unwrap_or(trimmed);
         if !content.is_empty() {
             lines.push(content.to_string());
         }
@@ -506,30 +446,64 @@ fn collect_plain_text(node: RedNode<NoteLanguage>, source: &SourceText) -> Strin
 fn parse_inline_link(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<Inline> {
     let raw = node.text(source);
     if let Some((text, url)) = split_markdown_link(raw.as_ref()) {
-        return Some(Inline::Styled {
-            style: "link".into(),
-            children: vec![Inline::Text { text }, Inline::Text { text: url }],
-        });
+        return Some(Inline::Styled { style: "link".into(), children: vec![Inline::Text { text }, Inline::Text { text: url }] });
     }
     let text = collect_plain_text(node, source);
-    if text.is_empty() {
-        None
-    } else {
-        Some(Inline::Text { text })
-    }
+    if text.is_empty() { None } else { Some(Inline::Text { text }) }
+}
+
+fn parse_inline_image(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<Inline> {
+    let raw = node.text(source);
+    let (alt, url) = split_markdown_link(raw.as_ref())?;
+    Some(Inline::Styled { style: "image".into(), children: vec![Inline::Text { text: alt }, Inline::Text { text: url }] })
 }
 
 fn split_markdown_link(raw: &str) -> Option<(String, String)> {
     let start = raw.find("](")?;
-    let text = raw[..start].trim_start_matches('[').trim().to_string();
-    let url = raw[start + 2..]
-        .trim_end_matches(')')
-        .trim()
-        .to_string();
+    let label = raw[..start].trim();
+    let text = decode_escaped_text(label.strip_prefix("![").or_else(|| label.strip_prefix('['))?);
+    let destination = &raw[start + 2..];
+    let close = link_destination_close(destination)?;
+    let url = decode_escaped_text(destination[..close].trim());
     if text.is_empty() || url.is_empty() {
         return None;
     }
     Some((text, url))
+}
+
+fn trailing_link_whitespace(raw: &str) -> String {
+    let Some(start) = raw.find("](") else {
+        return String::new();
+    };
+    let destination = &raw[start + 2..];
+    let Some(close) = link_destination_close(destination) else {
+        return String::new();
+    };
+    destination[close + 1..]
+        .chars()
+        .take_while(|character| character.is_whitespace())
+        .collect()
+}
+
+fn link_destination_close(destination: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut escaped = false;
+    for (index, character) in destination.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' => escaped = true,
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                return Some(index);
+            }
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn document_id_for(label: &str) -> DocumentId {

@@ -199,6 +199,41 @@ fn same_semantic_paragraph_can_carry_different_sources() {
 }
 
 #[test]
+fn provenance_is_optional_and_does_not_define_block_semantics() {
+    let mut ids = IdAllocator::default();
+    let mut without_source = DocumentGraph::new(ids.document_id());
+    let unprovenanced = without_source.push_block(Block::Paragraph {
+        content: same_paragraph_text(),
+    });
+
+    let mut with_uncertain_source = DocumentGraph::new(ids.document_id());
+    let sourced = with_uncertain_source.push_block(Block::Paragraph {
+        content: same_paragraph_text(),
+    });
+    with_uncertain_source.attach_source(SourceRef {
+        node: sourced,
+        kind: SourceKind::Synthetic {
+            reason: "source precision is unknown".to_string(),
+        },
+        precision: SemanticStatus::Unsupported,
+    });
+
+    assert!(without_source.sources_for(unprovenanced).is_empty());
+    assert_eq!(
+        without_source.block(unprovenanced).expect("block").block,
+        with_uncertain_source.block(sourced).expect("block").block
+    );
+
+    let encoded = serde_json::to_string(&with_uncertain_source).expect("serialize");
+    let restored: DocumentGraph = serde_json::from_str(&encoded).expect("deserialize");
+    assert_eq!(restored.sources_for(sourced).len(), 1);
+    assert_eq!(
+        restored.sources_for(sourced)[0].precision,
+        SemanticStatus::Unsupported
+    );
+}
+
+#[test]
 fn metadata_and_asset_path_changes_preserve_link_identity() {
     let mut ids = IdAllocator::default();
     let doc_id = ids.document_id();

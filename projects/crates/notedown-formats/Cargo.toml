@@ -16,19 +16,61 @@ oak-notedown = { workspace = true, optional = true }
 acorn-core = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
+cfb = { version = "0.7.3", optional = true }
+flate2 = { version = "1.1", optional = true }
 oak-html = { workspace = true, optional = true }
 oak-xml = { workspace = true, optional = true }
 
 [features]
-default = ["markdown", "notedown", "docx", "epub"]
+default = ["markdown"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-core", "dep:oak-xml"]
+doc = ["dep:cfb"]
+pdf = ["dep:flate2"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
+html = ["dep:oak-core", "dep:oak-html"]
+
+[[test]]
+name = "docx"
+required-features = ["docx", "markdown"]
+
+[[test]]
+name = "docx_export"
+required-features = ["docx", "markdown"]
+
+[[test]]
+name = "markdown_project_docx"
+required-features = ["docx", "markdown"]
+
+[[test]]
+name = "epub"
+required-features = ["epub", "markdown"]
+
+[[test]]
+name = "pdf"
+required-features = ["pdf"]
+
+[[test]]
+name = "doc"
+required-features = ["doc"]
+
+[[test]]
+name = "html_import"
+required-features = ["html", "markdown"]
+
+[[test]]
+name = "markdown"
+required-features = ["markdown"]
+
+[[test]]
+name = "notedown"
+required-features = ["markdown", "notedown"]
 
 [dev-dependencies]
 serde_json = "1.0"
 oak-core = { workspace = true }
+oak-html = { workspace = true }
 oak-notedown = { workspace = true, features = ["serde", "diagnostic"] }
 oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
 oak-testing = { workspace = true }

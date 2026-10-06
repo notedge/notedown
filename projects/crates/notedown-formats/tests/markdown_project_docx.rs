@@ -1,5 +1,7 @@
 use notedown_formats::export::markdown_project::export_markdown_project;
 use notedown_formats::import::docx::import_docx_bytes;
+use notedown_formats::import::markdown::import_markdown_bytes;
+use notedown_ir::{Block, Inline};
 
 fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut archive = Vec::new();
@@ -105,4 +107,19 @@ fn docx_exports_markdown_project_with_materialized_image() {
     assert_eq!(project.assets[0].relative_path, "assets/logo.png");
     assert_eq!(project.assets[0].bytes, b"\x89PNG\r\n");
     assert!(project.unresolved_asset_sources.is_empty());
+
+    let reopened = import_markdown_bytes("index.md", &project.index_markdown).expect("oak markdown reopen");
+    assert!(reopened.validate().is_valid());
+    assert!(reopened.blocks.iter().any(|node| matches!(
+        &node.block,
+        Block::Paragraph { content }
+            if content.iter().any(|inline| matches!(
+                inline,
+                Inline::Styled { style, children }
+                    if style == "image"
+                        && children.len() >= 2
+                        && matches!(&children[0], Inline::Text { text } if text == "Logo")
+                        && matches!(&children[1], Inline::Text { text } if text == "assets/logo.png")
+            ))
+    )));
 }

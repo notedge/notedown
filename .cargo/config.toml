@@ -16,5 +16,6 @@ oak-testing = { path = "../oaks/projects/oak-testing" }
 
 [patch."https://github.com/yggdrasil-language/acorn.rs.git"]
 acorn-core = { path = "../acorn.rs/projects/acorn-core" }
+acorn-cfb = { path = "../acorn.rs/examples/acorn-cfb" }
 acorn-docx = { path = "../acorn.rs/examples/acorn-docx" }
 acorn-epub = { path = "../acorn.rs/examples/acorn-epub" }

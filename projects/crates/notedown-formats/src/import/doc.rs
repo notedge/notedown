@@ -1,22 +1,19 @@
-use std::io::{Cursor, Read};
+use acorn_cfb::CompoundFile;
 
-use cfb::CompoundFile;
 use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, LossMarker, SemanticStatus};
 
 use crate::FormatError;
 
 /// Import extractable text from a legacy OLE Word document.
 pub fn import_doc_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, FormatError> {
-    if !bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+    if !CompoundFile::is_compound_file(bytes) {
         return Err(FormatError::invalid_input("input is not an OLE Compound File"));
     }
-    let mut compound = CompoundFile::open(Cursor::new(bytes.to_vec())).map_err(|error| FormatError::parse("doc", error.to_string()))?;
-    let mut word_document = Vec::new();
-    {
-        let mut stream = compound.open_stream("/WordDocument").map_err(|error| FormatError::parse("doc", format!("WordDocument stream: {error}")))?;
-        stream.read_to_end(&mut word_document).map_err(|error| FormatError::parse("doc", error.to_string()))?;
-    }
-    let table_stream = read_table_stream(&mut compound, &word_document).unwrap_or_default();
+    let compound = CompoundFile::open(bytes.to_vec()).map_err(|error| FormatError::parse("doc", error.to_string()))?;
+    let word_document = compound
+        .read_stream("/WordDocument")
+        .map_err(|error| FormatError::parse("doc", format!("WordDocument stream: {error}")))?;
+    let table_stream = read_table_stream(&compound, &word_document).unwrap_or_default();
     let (text, complex, piece_table_used) = extract_word_text(&word_document, &table_stream)?;
     let mut graph = DocumentGraph::new(DocumentId(1));
     for paragraph in split_doc_paragraphs(&text) {
@@ -48,13 +45,12 @@ pub fn import_doc(path: impl AsRef<std::path::Path>) -> Result<DocumentGraph, Fo
     import_doc_bytes(&path.display().to_string(), &bytes)
 }
 
-fn read_table_stream(compound: &mut CompoundFile<Cursor<Vec<u8>>>, word_document: &[u8]) -> Result<Vec<u8>, FormatError> {
+fn read_table_stream(compound: &CompoundFile, word_document: &[u8]) -> Result<Vec<u8>, FormatError> {
     let flags = word_document.get(10..12).and_then(|bytes| bytes.try_into().ok()).map(u16::from_le_bytes).unwrap_or_default();
     let stream_name = if flags & (1 << 9) != 0 { "/1Table" } else { "/0Table" };
-    let mut stream = compound.open_stream(stream_name).map_err(|error| FormatError::parse("doc", format!("{stream_name} stream: {error}")))?;
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).map_err(|error| FormatError::parse("doc", error.to_string()))?;
-    Ok(bytes)
+    compound
+        .read_stream(stream_name)
+        .map_err(|error| FormatError::parse("doc", format!("{stream_name} stream: {error}")))
 }
 
 fn extract_word_text(bytes: &[u8], table_stream: &[u8]) -> Result<(String, bool, bool), FormatError> {

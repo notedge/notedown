@@ -14,9 +14,9 @@ oak-core = { workspace = true, optional = true }
 oak-markdown = { workspace = true, optional = true }
 oak-notedown = { workspace = true, optional = true }
 acorn-core = { workspace = true, optional = true }
+acorn-cfb = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
-cfb = { version = "0.7.3", optional = true }
 flate2 = { version = "1.1", optional = true }
 oak-html = { workspace = true, optional = true }
 oak-xml = { workspace = true, optional = true }
@@ -26,7 +26,7 @@ default = ["markdown"]
 markdown = ["dep:oak-core", "dep:oak-markdown"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-core", "dep:oak-xml"]
-doc = ["dep:cfb"]
+doc = ["dep:acorn-cfb"]
 pdf = ["dep:flate2"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 html = ["dep:oak-core", "dep:oak-html"]

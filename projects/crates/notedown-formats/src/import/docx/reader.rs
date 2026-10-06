@@ -3,11 +3,12 @@ use std::path::Path;
 
 use acorn_core::ParseBudget;
 use acorn_docx::OpcPackage;
-use notedown_ir::{AssetKind, DocumentGraph, LossMarker, SemanticStatus};
+use notedown_ir::{AssetKind, DocumentGraph, DocumentMetadata, LossMarker, SemanticStatus};
 
 use super::footnotes::{
     append_footnote_definitions, footnotes_part_path, parse_footnotes_xml_lossy, FootnoteCatalog,
 };
+use super::oak_xml_util::{document_root, element_text, elements_by_local_name, parse_xml_bytes};
 use super::numbering::{parse_numbering_xml_lossy, NumberingCatalog};
 use super::rels::read_document_relationships;
 use super::{map_opc_error, xml};
@@ -54,12 +55,40 @@ pub fn import_docx_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         xml::parse_document_xml(&xml, &rels, &numbering, &footnotes, &mut graph)?;
     append_footnote_definitions(&mut graph, &footnotes, &referenced_footnotes);
     hydrate_embedded_assets(&package, &budget, &mut graph);
+    hydrate_core_metadata(&package, &budget, &mut graph);
     graph.push_loss(LossMarker {
         code: "import.docx.partial_coverage".into(),
-        message: "DOCX import currently maps paragraphs, heading styles, lists with numbering.xml marker resolution, tables, run bold/italic, hyperlinks, embedded images, footnote references, and footnote bodies from footnotes.xml".into(),
+        message: "DOCX import currently maps paragraphs, heading styles, nested lists with numbering.xml marker resolution, tables, run bold/italic/underline/strike/superscript/subscript/color/font-size/font-family/highlight, hyperlinks, embedded images, footnote references, footnote bodies from footnotes.xml, and core metadata. Tracked changes, comments, page-break layout, and complex character properties remain partial".into(),
         status: SemanticStatus::Partial,
     });
     Ok(graph)
+}
+
+fn hydrate_core_metadata(package: &OpcPackage, budget: &ParseBudget, graph: &mut DocumentGraph) {
+    let Ok(xml) = package.read_part("docProps/core.xml", budget) else {
+        return;
+    };
+    let Ok(value) = parse_xml_bytes(&xml) else {
+        graph.push_loss(LossMarker {
+            code: "reader.docx.invalid_core_metadata".into(),
+            message: "docProps/core.xml could not be parsed as XML".into(),
+            status: SemanticStatus::Partial,
+        });
+        return;
+    };
+    let Ok(root) = document_root(&value) else {
+        return;
+    };
+    let text = |name: &str| elements_by_local_name(root, name).first().map(|element| element_text(element).trim().to_owned()).filter(|value| !value.is_empty());
+    let tags = text("keywords")
+        .map(|value| value.split(',').flat_map(|part| part.split(';')).map(str::trim).filter(|item| !item.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default();
+    graph.metadata = DocumentMetadata {
+        title: text("title"),
+        language: text("language"),
+        authors: text("creator").into_iter().collect(),
+        tags,
+    };
 }
 
 fn looks_like_zip(bytes: &[u8]) -> bool {

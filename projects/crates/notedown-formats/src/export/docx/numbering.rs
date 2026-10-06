@@ -5,6 +5,14 @@ pub const NUMBERING_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalo
     <w:lvl w:ilvl="0">
       <w:numFmt w:val="bullet"/>
     </w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="2"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="3"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="4"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="5"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="6"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="7"><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="8"><w:numFmt w:val="bullet"/></w:lvl>
   </w:abstractNum>
   <w:num w:numId="1">
     <w:abstractNumId w:val="0"/>
@@ -13,6 +21,14 @@ pub const NUMBERING_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalo
     <w:lvl w:ilvl="0">
       <w:numFmt w:val="decimal"/>
     </w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="2"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="3"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="4"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="5"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="6"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="7"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="8"><w:numFmt w:val="decimal"/></w:lvl>
   </w:abstractNum>
   <w:num w:numId="2">
     <w:abstractNumId w:val="1"/>

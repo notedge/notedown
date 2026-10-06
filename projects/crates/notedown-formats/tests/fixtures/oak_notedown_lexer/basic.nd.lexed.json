@@ -1,6 +1,6 @@
 {
     "success": true,
-    "count": 1330,
+    "count": 1358,
     "tokens": [
         {
             "kind": "Heading1",
@@ -477,9 +477,15 @@
             "end": 340
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 341,
+            "end": 342
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 342,
             "end": 343
         },
         {
@@ -489,9 +495,15 @@
             "end": 347
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 347,
+            "end": 348
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 348,
             "end": 349
         },
         {
@@ -579,9 +591,15 @@
             "end": 408
         },
         {
-            "kind": "Strong",
-            "text": "__",
+            "kind": "Emphasis",
+            "text": "_",
             "start": 409,
+            "end": 410
+        },
+        {
+            "kind": "Emphasis",
+            "text": "_",
+            "start": 410,
             "end": 411
         },
         {
@@ -597,9 +615,15 @@
             "end": 429
         },
         {
-            "kind": "Strong",
-            "text": "__",
+            "kind": "Emphasis",
+            "text": "_",
             "start": 429,
+            "end": 430
+        },
+        {
+            "kind": "Emphasis",
+            "text": "_",
+            "start": 430,
             "end": 431
         },
         {
@@ -681,9 +705,21 @@
             "end": 480
         },
         {
-            "kind": "Strong",
-            "text": "***",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 481,
+            "end": 482
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 482,
+            "end": 483
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 483,
             "end": 484
         },
         {
@@ -705,9 +741,21 @@
             "end": 499
         },
         {
-            "kind": "Strong",
-            "text": "***",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 499,
+            "end": 500
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 500,
+            "end": 501
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 501,
             "end": 502
         },
         {
@@ -747,9 +795,15 @@
             "end": 529
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 530,
+            "end": 531
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 531,
             "end": 532
         },
         {
@@ -783,9 +837,15 @@
             "end": 549
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 549,
+            "end": 550
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 550,
             "end": 551
         },
         {
@@ -3951,9 +4011,15 @@
             "end": 2357
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 2358,
+            "end": 2359
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 2359,
             "end": 2360
         },
         {
@@ -3963,9 +4029,15 @@
             "end": 2364
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 2364,
+            "end": 2365
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 2365,
             "end": 2366
         },
         {
@@ -5661,9 +5733,21 @@
             "end": 3086
         },
         {
-            "kind": "Strong",
-            "text": "***",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3086,
+            "end": 3087
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3087,
+            "end": 3088
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3088,
             "end": 3089
         },
         {
@@ -5679,9 +5763,21 @@
             "end": 3091
         },
         {
-            "kind": "Strong",
-            "text": "___",
+            "kind": "Emphasis",
+            "text": "_",
             "start": 3091,
+            "end": 3092
+        },
+        {
+            "kind": "Emphasis",
+            "text": "_",
+            "start": 3092,
+            "end": 3093
+        },
+        {
+            "kind": "Emphasis",
+            "text": "_",
+            "start": 3093,
             "end": 3094
         },
         {
@@ -6687,9 +6783,15 @@
             "end": 3692
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3693,
+            "end": 3694
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3694,
             "end": 3695
         },
         {
@@ -6705,9 +6807,15 @@
             "end": 3700
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3700,
+            "end": 3701
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3701,
             "end": 3702
         },
         {
@@ -6771,9 +6879,15 @@
             "end": 3734
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3735,
+            "end": 3736
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3736,
             "end": 3737
         },
         {
@@ -6789,9 +6903,15 @@
             "end": 3745
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3745,
+            "end": 3746
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3746,
             "end": 3747
         },
         {
@@ -7179,9 +7299,15 @@
             "end": 3954
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3955,
+            "end": 3956
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3956,
             "end": 3957
         },
         {
@@ -7191,9 +7317,15 @@
             "end": 3961
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 3961,
+            "end": 3962
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 3962,
             "end": 3963
         },
         {
@@ -7347,9 +7479,15 @@
             "end": 4037
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4038,
+            "end": 4039
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4039,
             "end": 4040
         },
         {
@@ -7359,9 +7497,15 @@
             "end": 4050
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4050,
+            "end": 4051
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4051,
             "end": 4052
         },
         {
@@ -7479,9 +7623,15 @@
             "end": 4106
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4107,
+            "end": 4108
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4108,
             "end": 4109
         },
         {
@@ -7491,9 +7641,15 @@
             "end": 4113
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4113,
+            "end": 4114
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4114,
             "end": 4115
         },
         {
@@ -7731,9 +7887,15 @@
             "end": 4252
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4253,
+            "end": 4254
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4254,
             "end": 4255
         },
         {
@@ -7749,9 +7911,15 @@
             "end": 4265
         },
         {
-            "kind": "Strong",
-            "text": "**",
+            "kind": "Emphasis",
+            "text": "*",
             "start": 4265,
+            "end": 4266
+        },
+        {
+            "kind": "Emphasis",
+            "text": "*",
+            "start": 4266,
             "end": 4267
         },
         {

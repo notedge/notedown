@@ -32,24 +32,7 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
     let mut context = LinkContext::default();
     for child in red_root.children() {
         if let RedTree::Node(node) = child {
-            if node.element_type() == MarkdownElementType::LinkDefinition {
-                if let Some((label, destination, has_title)) = parse_link_definition(&node.text(source)) {
-                    context.definitions.entry(label).or_insert(destination);
-                    if has_title {
-                        context.losses.push(LossMarker {
-                            code: "import.markdown.reference_definition_title".into(),
-                            message: "reference-link definition title is not represented in the current link IR".into(),
-                            status: SemanticStatus::Lossy,
-                        });
-                    }
-                } else {
-                    context.losses.push(LossMarker {
-                        code: "import.markdown.invalid_link_definition".into(),
-                        message: format!("unsupported or invalid link definition: {}", node.text(source)),
-                        status: SemanticStatus::Partial,
-                    });
-                }
-            }
+            register_link_definition_node(node, source, &mut context);
         }
     }
     for child in red_root.children() {
@@ -92,6 +75,32 @@ enum BlockOutcome {
 struct LinkContext {
     definitions: HashMap<String, String>,
     losses: Vec<LossMarker>,
+}
+
+fn register_link_definition_node(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) {
+    if node.element_type() != MarkdownElementType::Paragraph {
+        return;
+    }
+    let text = node.text(source);
+    let raw = text.trim();
+    if let Some((label, destination, has_title)) = parse_link_definition(raw) {
+        context.definitions.entry(label).or_insert(destination);
+        if has_title {
+            context.losses.push(LossMarker {
+                code: "import.markdown.reference_definition_title".into(),
+                message: "reference-link definition title is not represented in the current link IR".into(),
+                status: SemanticStatus::Lossy,
+            });
+        }
+        return;
+    }
+    if raw.starts_with('[') && raw.contains("]:") {
+        context.losses.push(LossMarker {
+            code: "import.markdown.invalid_link_definition".into(),
+            message: format!("unsupported or invalid link definition: {}", raw),
+            status: SemanticStatus::Partial,
+        });
+    }
 }
 
 fn parse_link_definition(raw: &str) -> Option<(String, String, bool)> {
@@ -154,8 +163,14 @@ fn lower_block_node(node: RedNode<MarkdownLanguage>, source: &SourceText, contex
         | MarkdownElementType::Heading6 => {
             BlockOutcome::Block(Block::Section { level: heading_level(kind), title: collect_heading_inlines(node, source, context), children: Vec::new() })
         }
-        MarkdownElementType::Paragraph => BlockOutcome::Block(Block::Paragraph { content: collect_inlines(node, source, context) }),
-        MarkdownElementType::LinkDefinition => BlockOutcome::Skip,
+        MarkdownElementType::Paragraph => {
+            let text = node.text(source);
+            if parse_link_definition(text.trim()).is_some() {
+                BlockOutcome::Skip
+            } else {
+                BlockOutcome::Block(Block::Paragraph { content: collect_inlines(node, source, context) })
+            }
+        }
         MarkdownElementType::CodeBlock => {
             let (language, content) = extract_code_block(node, source);
             BlockOutcome::Block(Block::Code { language, content })

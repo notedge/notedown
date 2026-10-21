@@ -2,10 +2,13 @@
 .vscode
 .idea
 *.iml
+*.log
+*.txt
 
 # Rust
 target/
 Cargo.lock
+.cargo/config.toml
 
 # Special
 time-travel.*

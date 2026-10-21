@@ -1,4 +1,4 @@
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 //! Embedded conformance fixtures for Notedown, Panduck, and downstream Acorn
 //! probes.

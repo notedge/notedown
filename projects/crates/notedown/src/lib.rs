@@ -1,7 +1,8 @@
 //! Unified entry for the Notedown document IR and format import/export family.
 //!
 //! Enable capabilities through crate features. Each module re-exports the
-//! corresponding `notedown-*` crate without copying types or adding global state.
+//! corresponding `notedown-*` crate without copying types or adding global
+//! state.
 
 #![deny(missing_docs)]
 

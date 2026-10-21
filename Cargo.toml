@@ -25,11 +25,11 @@ license = "MPL-2.0"
 # Overlaid by local path `.cargo/config.toml` (git ignored).
 boost-benchmark = { git = "https://github.com/oovm/rust-boost", rev = "2218a644af335aa4cef9f3e9e6b37475a829cfe2" }
 # Binary Readers
-acorn-core = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "0b2c71ce9ce5c7862098d7dab255b23796873199" }
-acorn-cfb = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "0b2c71ce9ce5c7862098d7dab255b23796873199" }
-acorn-doc = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "0b2c71ce9ce5c7862098d7dab255b23796873199" }
-acorn-docx = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "0b2c71ce9ce5c7862098d7dab255b23796873199" }
-acorn-epub = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "0b2c71ce9ce5c7862098d7dab255b23796873199" }
+acorn-core = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
+acorn-cfb = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
+acorn-doc = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
+acorn-docx = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
+acorn-epub = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
 # Overlaid by local path `.cargo/config.toml` (git ignored).
 oak-core = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "c126aa4be34d380317539053566b8b0436015130" }
 oak-markdown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "c126aa4be34d380317539053566b8b0436015130", default-features = false, features = ["serde"] }

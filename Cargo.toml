@@ -1,11 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "projects/crates/notedown",
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
     "projects/crates/notedown-fixtures",
 ]
 default-members = [
+    "projects/crates/notedown",
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
     "projects/crates/notedown-fixtures",
@@ -36,6 +38,7 @@ oak-xml = { git = "https://github.com/yggdrasil-language/oak.rs.git", branch = "
 oak-org-mode = { git = "https://github.com/yggdrasil-language/oak.rs.git", branch = "dev", default-features = false, features = ["serde"] }
 oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", branch = "dev" }
 
+notedown = { path = "projects/crates/notedown" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats" }
 notedown-fixtures = { path = "projects/crates/notedown-fixtures" }

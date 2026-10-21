@@ -12,9 +12,13 @@ use crate::{
 /// Document-level metadata (title is not document identity).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DocumentMetadata {
+    /// Display title (not document identity).
     pub title: Option<String>,
+    /// Primary language tag when known.
     pub language: Option<String>,
+    /// Document authors in display order.
     pub authors: Vec<String>,
+    /// Free-form tags or keywords.
     pub tags: Vec<String>,
 }
 
@@ -22,14 +26,23 @@ pub struct DocumentMetadata {
 /// consume it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DocumentGraph {
+    /// Stable document identity.
     pub id: DocumentId,
+    /// Monotonic revision bumped on semantic edits.
     pub revision: u64,
+    /// Display metadata separate from identity.
     pub metadata: DocumentMetadata,
+    /// Top-level and nested block nodes.
     pub blocks: Vec<BlockNode>,
+    /// Directed semantic relations.
     pub relations: Vec<Relation>,
+    /// Registered assets referenced by the document.
     pub assets: Vec<Asset>,
+    /// Provenance sidecar records.
     pub sources: Vec<SourceRef>,
+    /// Import/export completeness summary.
     pub coverage: CoverageReport,
+    /// Internal allocator for auto-assigned node ids.
     #[serde(default)]
     next_node: u64,
 }
@@ -148,21 +161,25 @@ pub struct IdAllocator {
 }
 
 impl IdAllocator {
+    /// Allocate the next document id.
     pub fn document_id(&mut self) -> DocumentId {
         self.next_document += 1;
         DocumentId(self.next_document)
     }
 
+    /// Allocate the next node id.
     pub fn node_id(&mut self) -> NodeId {
         self.next_node += 1;
         NodeId(self.next_node)
     }
 
+    /// Allocate the next asset id.
     pub fn asset_id(&mut self) -> AssetId {
         self.next_asset += 1;
         AssetId(self.next_asset)
     }
 
+    /// Allocate the next relation id.
     pub fn link_id(&mut self) -> LinkId {
         self.next_link += 1;
         LinkId(self.next_link)

@@ -14,61 +14,88 @@ use crate::{
 /// its logical identity separate from its storage location.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Inline {
+    /// Plain text run.
     Text {
+        /// Text payload.
         text: String,
     },
+    /// Styled inline span.
     Styled {
+        /// Style name or class.
         style: String,
+        /// Nested inline content receiving the style.
         children: Vec<Inline>,
     },
+    /// Inline code span.
     InlineCode {
+        /// Code text.
         text: String,
     },
+    /// Inline math span.
     InlineMath {
+        /// Math source text.
         content: String,
+        /// Optional language tag such as `latex`.
         language: Option<String>,
     },
+    /// Intra-document reference by node id.
     Reference {
+        /// Referenced node id.
         target: NodeId,
+        /// Authored display text.
         display: String,
     },
     /// Authored hyperlink. Display content is independent from the destination,
     /// and an unresolved destination stays a real relation rather than a gap.
     Link {
+        /// Link destination endpoint.
         target: RelationEndpoint,
+        /// Visible link content.
         display: Vec<Inline>,
+        /// Optional title attribute.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
     /// Authored media reference. `source` records the requested location while
     /// `asset` binds to the registered asset identity, which survives renames.
     Image {
+        /// Requested source location or URI.
         source: String,
+        /// Alternative text content.
         alt: Vec<Inline>,
+        /// Optional title attribute.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        /// Bound asset identity when import registered the media.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         asset: Option<AssetId>,
     },
     /// Note (footnote/endnote) reference, addressed by label.
     Note {
+        /// Note label.
         label: String,
+        /// Optional authored display content.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         display: Option<Vec<Inline>>,
     },
     /// Citation reference, addressed by citation key.
     Citation {
+        /// Citation key.
         key: String,
+        /// Optional authored display content.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         display: Option<Vec<Inline>>,
     },
     /// Explicit inline break, distinct from block-level thematic breaks.
     Break {
+        /// Break semantics.
         kind: BreakKind,
     },
     /// Attributes attached to the wrapped inline content.
     Attributed {
+        /// Identity, class, and key/value attributes.
         attributes: Attributes,
+        /// Wrapped inline content.
         children: Vec<Inline>,
     },
 }
@@ -85,10 +112,13 @@ pub enum BreakKind {
 /// Identity, class, and key/value attributes of a semantic object.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attributes {
+    /// Optional DOM-style id attribute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Class names applied to the object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classes: Vec<String>,
+    /// Additional key/value attributes in stable order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pairs: Vec<AttributePair>,
 }
@@ -96,7 +126,9 @@ pub struct Attributes {
 /// Single attribute key/value pair, ordered to keep serialization stable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttributePair {
+    /// Attribute name.
     pub key: String,
+    /// Attribute value.
     pub value: String,
 }
 

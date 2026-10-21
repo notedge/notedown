@@ -12,27 +12,91 @@ use std::collections::{HashMap, HashSet};
 /// Single invariant violation on the document graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationIssue {
-    DuplicateNodeId { id: NodeId },
-    DuplicateAssetId { id: AssetId },
-    DuplicateLinkId { id: LinkId },
-    UnknownNode { id: NodeId },
-    UnknownSectionChild { section: NodeId, child: NodeId },
-    UnknownListChild { list: NodeId, child: NodeId },
-    UnknownInlineReference { from: NodeId, target: NodeId },
-    UnknownInlineLinkTarget { from: NodeId, target: RelationEndpoint },
-    UnknownInlineImageAsset { from: NodeId, asset: AssetId },
-    EmptyInlineLabel { from: NodeId, kind: String },
-    UnknownRelationEndpoint { link: LinkId },
-    ContainmentCycle { from: NodeId, to: NodeId },
+    /// Duplicate semantic node id.
+    DuplicateNodeId {
+        /// Repeated node id.
+        id: NodeId,
+    },
+    /// Duplicate asset id.
+    DuplicateAssetId {
+        /// Repeated asset id.
+        id: AssetId,
+    },
+    /// Duplicate relation id.
+    DuplicateLinkId {
+        /// Repeated relation id.
+        id: LinkId,
+    },
+    /// Reference to a missing node.
+    UnknownNode {
+        /// Missing node id.
+        id: NodeId,
+    },
+    /// Section child id not present in the block list.
+    UnknownSectionChild {
+        /// Section node id.
+        section: NodeId,
+        /// Missing child id.
+        child: NodeId,
+    },
+    /// List child id not present in the block list.
+    UnknownListChild {
+        /// List node id.
+        list: NodeId,
+        /// Missing child id.
+        child: NodeId,
+    },
+    /// Inline reference targets a missing node.
+    UnknownInlineReference {
+        /// Source node id.
+        from: NodeId,
+        /// Missing target node id.
+        target: NodeId,
+    },
+    /// Inline link targets a missing endpoint.
+    UnknownInlineLinkTarget {
+        /// Source node id.
+        from: NodeId,
+        /// Invalid link target.
+        target: RelationEndpoint,
+    },
+    /// Inline image references an unregistered asset.
+    UnknownInlineImageAsset {
+        /// Source node id.
+        from: NodeId,
+        /// Missing asset id.
+        asset: AssetId,
+    },
+    /// Note or citation inline is missing its label/key.
+    EmptyInlineLabel {
+        /// Source node id.
+        from: NodeId,
+        /// Inline kind name for diagnostics.
+        kind: String,
+    },
+    /// Relation endpoint refers to a missing node or asset.
+    UnknownRelationEndpoint {
+        /// Relation id with the invalid endpoint.
+        link: LinkId,
+    },
+    /// Structural containment cycle detected.
+    ContainmentCycle {
+        /// Cycle source node.
+        from: NodeId,
+        /// Cycle target node.
+        to: NodeId,
+    },
 }
 
 /// Collected validation result.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValidationReport {
+    /// Recorded invariant violations.
     pub issues: Vec<ValidationIssue>,
 }
 
 impl ValidationReport {
+    /// Whether no invariant violations were recorded.
     pub fn is_valid(&self) -> bool {
         self.issues.is_empty()
     }

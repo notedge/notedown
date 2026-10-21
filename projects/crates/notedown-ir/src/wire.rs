@@ -10,7 +10,9 @@ pub const SCHEMA_VERSION: &str = "notedown-ir/v1";
 /// Versioned document payload for stable round-trip and tooling probes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DocumentEnvelope {
+    /// Wire schema identifier for `document`.
     pub schema_version: String,
+    /// Serialized document graph payload.
     pub document: DocumentGraph,
 }
 
@@ -34,5 +36,11 @@ impl DocumentEnvelope {
 /// Wire-format contract failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireError {
-    UnsupportedSchema { found: String, expected: String },
+    /// Schema version in the envelope is not supported by this build.
+    UnsupportedSchema {
+        /// Version string found in the payload.
+        found: String,
+        /// Version string expected by this build.
+        expected: String,
+    },
 }

@@ -5,28 +5,48 @@ use crate::id::{AssetId, DocumentId, LinkId, NodeId};
 /// Directed semantic relation between endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelationKind {
+    /// Structural parent/child containment.
     Contains,
+    /// One-way reference from source to target.
     References,
+    /// Explicit bidirectional association.
     Bidirectional,
+    /// Bibliographic or scholarly citation.
     Cites,
+    /// Embedded or included resource.
     Embeds,
+    /// Indexed backlink edge pointing at a target.
     Backlink,
 }
 
+/// Semantic target of a relation edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelationEndpoint {
+    /// In-document block node.
     Node(NodeId),
+    /// Another document identity.
     Document(DocumentId),
+    /// Registered asset identity.
     Asset(AssetId),
+    /// External URI outside the document graph.
     ExternalUri(String),
-    Unresolved { label: String },
+    /// Unresolved label kept as a first-class endpoint.
+    Unresolved {
+        /// Authored or imported label text.
+        label: String,
+    },
 }
 
+/// Directed relation edge between semantic endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Relation {
+    /// Stable relation identity.
     pub id: LinkId,
+    /// Relation semantics.
     pub kind: RelationKind,
+    /// Source endpoint.
     pub source: RelationEndpoint,
+    /// Target endpoint.
     pub target: RelationEndpoint,
 }
 

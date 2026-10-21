@@ -73,8 +73,7 @@ pub fn inspect_docx_bytes(
         return Err(FormatError::invalid_input("input is not a ZIP-based DOCX package"));
     }
 
-    let package =
-        OpcPackage::open(label.to_string(), bytes.to_vec()).map_err(map_docx_error)?;
+    let package = OpcPackage::open(label.to_string(), bytes.to_vec()).map_err(map_docx_error)?;
     let paths = match part_filter {
         Some(path) => vec![acorn_docx::normalize_part_path(path)],
         None => package.part_paths(),
@@ -83,11 +82,8 @@ pub fn inspect_docx_bytes(
         return Err(FormatError::budget("docx", "container member budget exhausted"));
     }
 
-    let limits = Budget {
-        max_decoded_bytes: budget.max_decoded_bytes,
-        max_container_members: budget.max_container_members,
-        ..Budget::default()
-    };
+    let limits =
+        Budget { max_decoded_bytes: budget.max_decoded_bytes, max_container_members: budget.max_container_members, ..Budget::default() };
     let mut ledger = BudgetTracker::new(limits);
     let mut decoded_total = 0u64;
     let mut parts = Vec::with_capacity(paths.len());

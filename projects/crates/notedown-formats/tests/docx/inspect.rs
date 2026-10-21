@@ -72,8 +72,7 @@ fn minimal_docx_zip() -> Vec<u8> {
 
 #[test]
 fn inspect_lists_package_parts_without_decoding() {
-    let inspect = inspect_docx_bytes("sample.docx", &minimal_docx_zip(), None, false, InspectBudget::default())
-        .expect("inspect docx");
+    let inspect = inspect_docx_bytes("sample.docx", &minimal_docx_zip(), None, false, InspectBudget::default()).expect("inspect docx");
     assert_eq!(inspect.format, "docx");
     assert_eq!(inspect.outer, "zip");
     assert_eq!(inspect.inner, "opc");
@@ -85,22 +84,15 @@ fn inspect_lists_package_parts_without_decoding() {
 
 #[test]
 fn inspect_decodes_package_parts() {
-    let inspect = inspect_docx_bytes("sample.docx", &minimal_docx_zip(), None, true, InspectBudget::default())
-        .expect("decode docx");
+    let inspect = inspect_docx_bytes("sample.docx", &minimal_docx_zip(), None, true, InspectBudget::default()).expect("decode docx");
     assert_eq!(inspect.parts.len(), 1);
     assert!(inspect.parts[0].decoded_size.is_some_and(|size| size > 0));
 }
 
 #[test]
 fn inspect_decodes_single_part_filter() {
-    let inspect = inspect_docx_bytes(
-        "sample.docx",
-        &minimal_docx_zip(),
-        Some("word/document.xml"),
-        true,
-        InspectBudget::default(),
-    )
-    .expect("decode docx");
+    let inspect =
+        inspect_docx_bytes("sample.docx", &minimal_docx_zip(), Some("word/document.xml"), true, InspectBudget::default()).expect("decode docx");
     assert_eq!(inspect.parts.len(), 1);
     assert_eq!(inspect.parts[0].path, "word/document.xml");
 }
@@ -114,7 +106,6 @@ fn inspect_reports_budget_exhaustion() {
 
 #[test]
 fn inspect_rejects_non_zip_input() {
-    let error = inspect_docx_bytes("sample.docx", b"not a package", None, false, InspectBudget::default())
-        .expect_err("invalid");
+    let error = inspect_docx_bytes("sample.docx", b"not a package", None, false, InspectBudget::default()).expect_err("invalid");
     assert!(matches!(error, FormatError::InvalidInput { .. }));
 }

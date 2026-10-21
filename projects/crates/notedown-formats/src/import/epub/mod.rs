@@ -1,0 +1,14 @@
+//! EPUB import via Acorn OCF and `oak-html` XHTML lowering.
+
+mod assets;
+mod ast_lowering;
+mod navigation;
+mod oak_html_util;
+mod reader;
+mod xhtml;
+
+pub use reader::{import_epub, import_epub_bytes};
+
+pub(crate) fn map_ocf_error(error: acorn_epub::OcfError) -> crate::FormatError {
+    crate::FormatError::parse("epub", error.to_string())
+}

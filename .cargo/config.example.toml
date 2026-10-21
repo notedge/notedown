@@ -1,5 +1,5 @@
-# Copy to `config.toml` (gitignored) and replace `<your-path>` with your local absolute path.
-# Committed `Cargo.toml` uses git `branch = "dev"` so CI and fresh clones resolve from remote.
+# Copy to `config.toml` (git ignored) and replace `<your-path>` with your local absolute path.
+# Committed `Cargo.toml` uses git `branch = "dev"` with `rev` pins where listed.
 
 [target.wasm32-unknown-unknown]
 runner = 'wasm-bindgen-test-runner'

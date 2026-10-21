@@ -12,6 +12,12 @@ default-members = [
 ]
 exclude = []
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Aster <192607617@qq.com>"]
+license = "MPL-2.0"
+
 [workspace.dependencies]
 # Boost dependencies
 boost-benchmark = { git = "https://github.com/oovm/rust-boost", branch = "dev" }
@@ -33,6 +39,14 @@ oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", branch
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats" }
 notedown-fixtures = { path = "projects/crates/notedown-fixtures" }
+
+# External dependencies
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+cfb = "0.15.0"
+
+# Benchmark Only dependencies
+flate2 = "1.1.10"
 
 [profile.release]
 lto = true

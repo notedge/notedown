@@ -60,9 +60,8 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             write_inlines(out, title)?;
             write!(out, "</h{}>", level).map_err(format_error)?;
             for child_id in children {
-                let child = graph.block(*child_id).ok_or_else(|| {
-                    FormatError::invalid_input(format!("section child `{child_id:?}` is missing"))
-                })?;
+                let child =
+                    graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("section child `{child_id:?}` is missing")))?;
                 write_node(out, graph, child.id, &child.block)?;
             }
         }
@@ -121,9 +120,7 @@ fn write_list(out: &mut String, graph: &DocumentGraph, ordered: bool, items: &[L
         out.push_str("<li>");
         write_inlines(out, &item.content)?;
         for child_id in &item.children {
-            let child = graph.block(*child_id).ok_or_else(|| {
-                FormatError::invalid_input(format!("list child `{child_id:?}` is missing"))
-            })?;
+            let child = graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("list child `{child_id:?}` is missing")))?;
             write_node(out, graph, child.id, &child.block)?;
         }
         out.push_str("</li>");
@@ -198,7 +195,8 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) -> Result<(), FormatError
                 write!(out, "</{}>", tag).map_err(format_error)?;
             }
             Inline::Link { target, display, title } => {
-                let RelationEndpoint::ExternalUri(url) = target else {
+                let RelationEndpoint::ExternalUri(url) = target
+                else {
                     return Err(FormatError::unsupported("html", format!("link target `{target:?}` has no HTML destination mapping")));
                 };
                 out.push_str(r#"<a href=""#);

@@ -1,13 +1,11 @@
 //! Source-text to IR semantic probes.
 //!
-//! Each probe asserts the lowered semantic objects, relations, and assets instead of
-//! matching writer output substrings, so a reader regression cannot hide behind an
-//! unchanged round trip.
+//! Each probe asserts the lowered semantic objects, relations, and assets
+//! instead of matching writer output substrings, so a reader regression cannot
+//! hide behind an unchanged round trip.
 
 use notedown_formats::import::notedown::import_notedown_bytes;
-use notedown_ir::{
-    Block, DocumentGraph, Inline, ListItem, RelationEndpoint, RelationKind, SemanticStatus,
-};
+use notedown_ir::{Block, DocumentGraph, Inline, ListItem, RelationEndpoint, RelationKind, SemanticStatus};
 
 fn import(source: &str) -> DocumentGraph {
     let graph = import_notedown_bytes("probe.nd", source).expect("lower notedown source");
@@ -27,7 +25,8 @@ fn heading_projects_a_section_without_its_marker() {
     let graph = import("# Title\n");
 
     let node = graph.blocks.first().expect("section block");
-    let Block::Section { level, title, children } = &node.block else {
+    let Block::Section { level, title, children } = &node.block
+    else {
         panic!("expected section, got {:?}", node.block);
     };
     assert_eq!(*level, 1);
@@ -48,11 +47,7 @@ fn inline_code_projects_a_code_inline_without_its_delimiters() {
 
     assert_eq!(
         paragraph_inlines(&graph.blocks[0].block),
-        [
-            Inline::Text { text: "Use ".into() },
-            Inline::InlineCode { text: "cargo test".into() },
-            Inline::Text { text: " now.".into() },
-        ]
+        [Inline::Text { text: "Use ".into() }, Inline::InlineCode { text: "cargo test".into() }, Inline::Text { text: " now.".into() },]
     );
 }
 
@@ -71,7 +66,8 @@ fn strikethrough_projects_a_strike_style_without_its_delimiters() {
 fn unordered_list_projects_items_in_authored_order() {
     let graph = import("- Alpha\n- Beta\n");
 
-    let Block::List { ordered, items } = &graph.blocks[0].block else {
+    let Block::List { ordered, items } = &graph.blocks[0].block
+    else {
         panic!("expected list, got {:?}", graph.blocks[0].block);
     };
     assert!(!ordered);
@@ -84,21 +80,26 @@ fn unordered_list_projects_items_in_authored_order() {
 fn ordered_list_projects_an_ordered_list_block() {
     let graph = import("1. Alpha\n2. Beta\n");
 
-    let Block::List { ordered, items } = &graph.blocks[0].block else {
+    let Block::List { ordered, items } = &graph.blocks[0].block
+    else {
         panic!("expected list, got {:?}", graph.blocks[0].block);
     };
     assert!(ordered);
-    assert_eq!(items, &vec![
-        ListItem { content: vec![Inline::Text { text: "Alpha".into() }], children: Vec::new() },
-        ListItem { content: vec![Inline::Text { text: "Beta".into() }], children: Vec::new() },
-    ]);
+    assert_eq!(
+        items,
+        &vec![
+            ListItem { content: vec![Inline::Text { text: "Alpha".into() }], children: Vec::new() },
+            ListItem { content: vec![Inline::Text { text: "Beta".into() }], children: Vec::new() },
+        ]
+    );
 }
 
 #[test]
 fn table_projects_header_and_body_rows_without_the_separator() {
     let graph = import("| H1 | H2 |\n|----|----|\n| C1 | C2 |\n");
 
-    let Block::Table { rows } = &graph.blocks[0].block else {
+    let Block::Table { rows } = &graph.blocks[0].block
+    else {
         panic!("expected table, got {:?}", graph.blocks[0].block);
     };
     assert_eq!(rows.len(), 2, "separator row must not become body content: {rows:?}");
@@ -150,7 +151,8 @@ fn image_projects_a_bound_asset_and_embed_relation() {
 fn fenced_code_projects_language_and_content() {
     let graph = import("```rust\nfn main() {}\n```\n");
 
-    let Block::Code { language, content } = &graph.blocks[0].block else {
+    let Block::Code { language, content } = &graph.blocks[0].block
+    else {
         panic!("expected code block, got {:?}", graph.blocks[0].block);
     };
     assert_eq!(language.as_deref(), Some("rust"));
@@ -176,7 +178,8 @@ fn strong_and_emphasis_project_distinct_styled_inlines() {
 fn blockquote_projects_a_quote_block() {
     let graph = import("> Quoted line\n");
 
-    let Block::Quote { content } = &graph.blocks[0].block else {
+    let Block::Quote { content } = &graph.blocks[0].block
+    else {
         panic!("expected quote, got {:?}", graph.blocks[0].block);
     };
     assert!(content.iter().map(Inline::plain_text).collect::<String>().contains("Quoted line"));
@@ -186,7 +189,8 @@ fn blockquote_projects_a_quote_block() {
 fn thematic_break_projects_a_partial_opaque_block() {
     let graph = import("---\n");
 
-    let Block::Opaque { kind, status, .. } = &graph.blocks[0].block else {
+    let Block::Opaque { kind, status, .. } = &graph.blocks[0].block
+    else {
         panic!("expected opaque block, got {:?}", graph.blocks[0].block);
     };
     assert_eq!(kind, "thematic_break");

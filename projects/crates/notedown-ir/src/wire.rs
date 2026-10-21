@@ -17,21 +17,16 @@ pub struct DocumentEnvelope {
 impl DocumentEnvelope {
     /// Wrap a graph with the current schema version.
     pub fn new(document: DocumentGraph) -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION.to_string(),
-            document,
-        }
+        Self { schema_version: SCHEMA_VERSION.to_string(), document }
     }
 
     /// Reject unknown major wire contracts before loading semantic data.
     pub fn ensure_supported(&self) -> Result<(), WireError> {
         if self.schema_version == SCHEMA_VERSION {
             Ok(())
-        } else {
-            Err(WireError::UnsupportedSchema {
-                found: self.schema_version.clone(),
-                expected: SCHEMA_VERSION.to_string(),
-            })
+        }
+        else {
+            Err(WireError::UnsupportedSchema { found: self.schema_version.clone(), expected: SCHEMA_VERSION.to_string() })
         }
     }
 }

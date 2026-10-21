@@ -79,10 +79,7 @@ pub fn build_minimal_opc_package(
         ("word/document.xml", document_xml.as_bytes()),
     ];
     if include_numbering {
-        entries.insert(
-            3,
-            ("word/numbering.xml", super::numbering::NUMBERING_XML.as_bytes()),
-        );
+        entries.insert(3, ("word/numbering.xml", super::numbering::NUMBERING_XML.as_bytes()));
     }
     if let Some(footnotes_xml) = footnotes_xml {
         entries.push(("word/footnotes.xml", footnotes_xml.as_bytes()));
@@ -97,11 +94,18 @@ pub fn build_minimal_opc_package(
 }
 
 fn root_rels_xml(include_metadata: bool) -> String {
-    let metadata = if include_metadata { "\n  <Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>" } else { "" };
-    format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let metadata = if include_metadata {
+        "\n  <Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>"
+    }
+    else {
+        ""
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>{metadata}
-</Relationships>"#)
+</Relationships>"#
+    )
 }
 
 fn content_types_xml(include_numbering: bool, image_extensions: &[String], include_footnotes: bool, include_metadata: bool) -> String {
@@ -119,7 +123,9 @@ fn content_types_xml(include_numbering: bool, image_extensions: &[String], inclu
         xml.push_str("\n  <Override PartName=\"/word/footnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/>");
     }
     if include_metadata {
-        xml.push_str("\n  <Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>");
+        xml.push_str(
+            "\n  <Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
+        );
     }
     for extension in image_extensions {
         let content_type = image_content_type(extension);

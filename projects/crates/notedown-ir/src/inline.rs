@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{AssetId, NodeId};
-use crate::relation::RelationEndpoint;
+use crate::{
+    id::{AssetId, NodeId},
+    relation::RelationEndpoint,
+};
 
 /// Inline semantic content inside a block.
 ///
@@ -108,9 +110,10 @@ impl Attributes {
 impl Inline {
     /// Flattened text content for consumers that can only render text.
     ///
-    /// This is not a semantic projection: style, target identity, asset binding,
-    /// and attributes are dropped. Formats that understand the node must read
-    /// its fields directly instead of relying on this projection.
+    /// This is not a semantic projection: style, target identity, asset
+    /// binding, and attributes are dropped. Formats that understand the
+    /// node must read its fields directly instead of relying on this
+    /// projection.
     pub fn plain_text(&self) -> String {
         match self {
             Self::Text { text } | Self::InlineCode { text } => text.clone(),

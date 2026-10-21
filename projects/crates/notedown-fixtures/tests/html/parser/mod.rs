@@ -8,8 +8,6 @@ fn html_parser_matches_fixtures() -> Result<(), oak_core::OakError> {
     let fixtures = here.join("tests/html/parser");
     let language = HtmlLanguage::default();
     let parser = HtmlParser::new(&language);
-    let test_runner = ParserTester::new(fixtures)
-        .with_extension("html")
-        .with_timeout(Duration::from_secs(5));
+    let test_runner = ParserTester::new(fixtures).with_extension("html").with_timeout(Duration::from_secs(5));
     test_runner.run_tests(&parser)
 }

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::id::NodeId;
-use crate::status::{LossMarker, SemanticStatus};
+use crate::{
+    id::NodeId,
+    status::{LossMarker, SemanticStatus},
+};
 
 /// Provenance for a semantic node (zero, one, or many sources per node).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, fmt::Write as _};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write as _,
+};
 
 use notedown_ir::{Block, BreakKind, DocumentGraph, Inline, ListItem, NodeId, RelationEndpoint, TableRow};
 
@@ -9,11 +12,9 @@ pub fn export_markdown(graph: &DocumentGraph) -> Result<String, FormatError> {
     export_markdown_with_image_urls(graph, None)
 }
 
-/// Export Markdown while rewriting inline image destinations through `image_urls`.
-pub fn export_markdown_with_image_urls(
-    graph: &DocumentGraph,
-    image_urls: Option<&HashMap<String, String>>,
-) -> Result<String, FormatError> {
+/// Export Markdown while rewriting inline image destinations through
+/// `image_urls`.
+pub fn export_markdown_with_image_urls(graph: &DocumentGraph, image_urls: Option<&HashMap<String, String>>) -> Result<String, FormatError> {
     export_markdown_with_image_urls_for_roots(graph, None, image_urls)
 }
 
@@ -174,10 +175,7 @@ fn write_list(
                     write_list(out, graph, *nested_ordered, nested_items, indent + 2, image_urls)?;
                 }
                 else {
-                    return Err(FormatError::unsupported(
-                        "markdown",
-                        format!("nested list child `{child_id:?}` is not representable yet"),
-                    ));
+                    return Err(FormatError::unsupported("markdown", format!("nested list child `{child_id:?}` is not representable yet")));
                 }
             }
         }
@@ -264,7 +262,10 @@ fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<S
             out.push('$');
         }
         Inline::Reference { target, .. } => {
-            return Err(FormatError::unsupported("markdown", format!("semantic reference target `{target:?}` has no stable Markdown anchor mapping")));
+            return Err(FormatError::unsupported(
+                "markdown",
+                format!("semantic reference target `{target:?}` has no stable Markdown anchor mapping"),
+            ));
         }
         Inline::Link { target, display, title } => {
             let url = markdown_link_destination(target, title.as_deref())?;
@@ -333,10 +334,7 @@ fn markdown_link_destination<'a>(target: &'a RelationEndpoint, title: Option<&st
     ensure_markdown_inline_title(title)?;
     match target {
         RelationEndpoint::ExternalUri(url) => Ok(url),
-        other => Err(FormatError::unsupported(
-            "markdown",
-            format!("link target `{other:?}` has no stable Markdown destination mapping"),
-        )),
+        other => Err(FormatError::unsupported("markdown", format!("link target `{other:?}` has no stable Markdown destination mapping"))),
     }
 }
 

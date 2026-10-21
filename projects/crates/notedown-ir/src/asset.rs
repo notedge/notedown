@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::id::AssetId;
-use crate::status::SemanticStatus;
+use crate::{id::AssetId, status::SemanticStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssetKind {
@@ -22,7 +21,8 @@ pub struct Asset {
     pub source: Option<String>,
     pub media_type: Option<String>,
     pub status: SemanticStatus,
-    /// Embedded payload when the import layer materialized bytes (e.g. OPC part body).
+    /// Embedded payload when the import layer materialized bytes (e.g. OPC part
+    /// body).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<Vec<u8>>,
 }

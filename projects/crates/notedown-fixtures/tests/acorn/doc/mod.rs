@@ -1,10 +1,13 @@
-use std::io::{Cursor, Write};
-use std::path::Path;
+use std::{
+    io::{Cursor, Write},
+    path::Path,
+};
 
 use acorn_doc::extract_text_from_bytes;
-use notedown_formats::export::markdown_project::export_markdown_project;
-use notedown_formats::import::doc::import_doc_bytes;
-use notedown_formats::import::markdown::import_markdown_bytes;
+use notedown_formats::{
+    export::markdown_project::export_markdown_project,
+    import::{doc::import_doc_bytes, markdown::import_markdown_bytes},
+};
 use notedown_ir::{Block, Inline};
 
 pub(crate) fn minimal_legacy_doc_bytes(text: &str) -> Vec<u8> {
@@ -23,9 +26,7 @@ pub(crate) fn minimal_legacy_doc_bytes(text: &str) -> Vec<u8> {
     {
         let mut compound = OracleCompoundFile::create(&mut buffer).expect("create compound file");
         {
-            let mut stream = compound
-                .create_stream("/WordDocument")
-                .expect("WordDocument stream");
+            let mut stream = compound.create_stream("/WordDocument").expect("WordDocument stream");
             stream.write_all(&word_document).expect("write WordDocument");
         }
         {
@@ -38,8 +39,7 @@ pub(crate) fn minimal_legacy_doc_bytes(text: &str) -> Vec<u8> {
 
 #[test]
 fn acorn_doc_extracts_legacy_plain_fixture() {
-    let extracted = extract_text_from_bytes(notedown_fixtures::acorn::doc::LEGACY_PLAIN_DOC)
-        .expect("extract fixture");
+    let extracted = extract_text_from_bytes(notedown_fixtures::acorn::doc::LEGACY_PLAIN_DOC).expect("extract fixture");
     assert!(extracted.text.contains("Hello legacy DOC"));
     assert!(extracted.text.contains("Second paragraph"));
     assert!(!extracted.complex);
@@ -48,8 +48,7 @@ fn acorn_doc_extracts_legacy_plain_fixture() {
 
 #[test]
 fn doc_exports_markdown_project_with_reopened_paragraphs() {
-    let graph = import_doc_bytes("sample.doc", notedown_fixtures::acorn::doc::LEGACY_PLAIN_DOC)
-        .expect("import doc");
+    let graph = import_doc_bytes("sample.doc", notedown_fixtures::acorn::doc::LEGACY_PLAIN_DOC).expect("import doc");
     let project = export_markdown_project(&graph).expect("export markdown project");
 
     assert!(project.chapters.is_empty());

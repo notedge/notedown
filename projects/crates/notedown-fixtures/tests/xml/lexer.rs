@@ -12,10 +12,7 @@ fn generate_baseline() {
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_dir = here.join("tests/xml/lexer");
     let source_path = fixture_dir.join("basic.xml");
-    let source_text = fs::read_to_string(source_path)
-        .expect("Failed to read source")
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
+    let source_text = fs::read_to_string(source_path).expect("Failed to read source").replace("\r\n", "\n").replace('\r', "\n");
     let source = SourceText::new(source_text);
     let language = XmlLanguage::default();
     let lexer = XmlLexer::new(&language);
@@ -53,10 +50,6 @@ fn xml_lexer_matches_fixtures() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/xml/lexer");
     let language = XmlLanguage::default();
     let lexer = XmlLexer::new(&language);
-    let test_runner = LexerTester::new(fixtures)
-        .with_extension("xml")
-        .with_timeout(Duration::from_secs(5));
-    test_runner
-        .run_tests::<XmlLanguage, _>(&lexer)
-        .expect("oak-xml lexer fixtures");
+    let test_runner = LexerTester::new(fixtures).with_extension("xml").with_timeout(Duration::from_secs(5));
+    test_runner.run_tests::<XmlLanguage, _>(&lexer).expect("oak-xml lexer fixtures");
 }

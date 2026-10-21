@@ -1,6 +1,6 @@
 use notedown_ir::{
-    Asset, AssetId, AssetKind, Attributes, AttributePair, Block, BreakKind, DocumentEnvelope,
-    DocumentGraph, DocumentId, Inline, LinkId, RelationEndpoint, SemanticStatus, ValidationIssue,
+    Asset, AssetId, AssetKind, AttributePair, Attributes, Block, BreakKind, DocumentEnvelope, DocumentGraph, DocumentId, Inline, LinkId,
+    RelationEndpoint, SemanticStatus, ValidationIssue,
 };
 
 fn paragraph(graph: &mut DocumentGraph, content: Vec<Inline>) -> notedown_ir::NodeId {
@@ -13,21 +13,19 @@ fn link_keeps_display_separate_from_destination_and_allows_unresolved_target() {
     paragraph(
         &mut graph,
         vec![Inline::Link {
-            target: RelationEndpoint::Unresolved {
-                label: "[[missing]]".to_string(),
-            },
-            display: vec![Inline::Text {
-                text: "missing".to_string(),
-            }],
+            target: RelationEndpoint::Unresolved { label: "[[missing]]".to_string() },
+            display: vec![Inline::Text { text: "missing".to_string() }],
             title: Some("tooltip".to_string()),
         }],
     );
 
     assert!(graph.validate().is_valid());
-    let Block::Paragraph { content } = &graph.blocks[0].block else {
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
         panic!("expected paragraph");
     };
-    let Inline::Link { target, display, title } = &content[0] else {
+    let Inline::Link { target, display, title } = &content[0]
+    else {
         panic!("expected link");
     };
     assert_eq!(display, &vec![Inline::Text { text: "missing".to_string() }]);
@@ -37,27 +35,15 @@ fn link_keeps_display_separate_from_destination_and_allows_unresolved_target() {
 
 #[test]
 fn link_reports_unknown_semantic_target_instead_of_dropping_it() {
-    for target in [
-        RelationEndpoint::Node(notedown_ir::NodeId(99)),
-        RelationEndpoint::Asset(AssetId(99)),
-        RelationEndpoint::Document(DocumentId(2)),
-    ] {
+    for target in
+        [RelationEndpoint::Node(notedown_ir::NodeId(99)), RelationEndpoint::Asset(AssetId(99)), RelationEndpoint::Document(DocumentId(2))]
+    {
         let mut graph = DocumentGraph::new(DocumentId(1));
-        paragraph(
-            &mut graph,
-            vec![Inline::Link {
-                target: target.clone(),
-                display: Vec::new(),
-                title: None,
-            }],
-        );
+        paragraph(&mut graph, vec![Inline::Link { target: target.clone(), display: Vec::new(), title: None }]);
 
         let report = graph.validate();
         assert!(
-            report
-                .issues
-                .iter()
-                .any(|issue| matches!(issue, ValidationIssue::UnknownInlineLinkTarget { .. })),
+            report.issues.iter().any(|issue| matches!(issue, ValidationIssue::UnknownInlineLinkTarget { .. })),
             "expected unresolved endpoint for {target:?}"
         );
     }
@@ -77,11 +63,7 @@ fn link_to_existing_asset_and_document_endpoints_is_valid() {
     });
     paragraph(
         &mut graph,
-        vec![Inline::Link {
-            target: RelationEndpoint::Asset(asset_id),
-            display: vec![Inline::Text { text: "data".to_string() }],
-            title: None,
-        }],
+        vec![Inline::Link { target: RelationEndpoint::Asset(asset_id), display: vec![Inline::Text { text: "data".to_string() }], title: None }],
     );
 
     assert!(graph.validate().is_valid());
@@ -113,18 +95,9 @@ fn image_asset_binding_is_validated_without_faking_a_location() {
     let mut unbound = DocumentGraph::new(DocumentId(2));
     paragraph(
         &mut unbound,
-        vec![Inline::Image {
-            source: "assets/diagram.png".to_string(),
-            alt: Vec::new(),
-            title: None,
-            asset: Some(AssetId(7)),
-        }],
+        vec![Inline::Image { source: "assets/diagram.png".to_string(), alt: Vec::new(), title: None, asset: Some(AssetId(7)) }],
     );
-    assert!(unbound
-        .validate()
-        .issues
-        .iter()
-        .any(|issue| matches!(issue, ValidationIssue::UnknownInlineImageAsset { .. })));
+    assert!(unbound.validate().issues.iter().any(|issue| matches!(issue, ValidationIssue::UnknownInlineImageAsset { .. })));
 }
 
 #[test]
@@ -132,27 +105,11 @@ fn note_and_citation_require_a_non_empty_label() {
     let mut graph = DocumentGraph::new(DocumentId(1));
     paragraph(
         &mut graph,
-        vec![
-            Inline::Note {
-                label: "  ".to_string(),
-                display: None,
-            },
-            Inline::Citation {
-                key: String::new(),
-                display: None,
-            },
-        ],
+        vec![Inline::Note { label: "  ".to_string(), display: None }, Inline::Citation { key: String::new(), display: None }],
     );
 
     let report = graph.validate();
-    assert_eq!(
-        report
-            .issues
-            .iter()
-            .filter(|issue| matches!(issue, ValidationIssue::EmptyInlineLabel { .. }))
-            .count(),
-        2
-    );
+    assert_eq!(report.issues.iter().filter(|issue| matches!(issue, ValidationIssue::EmptyInlineLabel { .. })).count(), 2);
 }
 
 #[test]
@@ -162,18 +119,11 @@ fn note_and_citation_validate_their_optional_display_content() {
         &mut graph,
         vec![Inline::Note {
             label: "1".to_string(),
-            display: Some(vec![Inline::Reference {
-                target: notedown_ir::NodeId(42),
-                display: "missing".to_string(),
-            }]),
+            display: Some(vec![Inline::Reference { target: notedown_ir::NodeId(42), display: "missing".to_string() }]),
         }],
     );
 
-    assert!(graph
-        .validate()
-        .issues
-        .iter()
-        .any(|issue| matches!(issue, ValidationIssue::UnknownInlineReference { .. })));
+    assert!(graph.validate().issues.iter().any(|issue| matches!(issue, ValidationIssue::UnknownInlineReference { .. })));
 }
 
 #[test]
@@ -185,29 +135,21 @@ fn attributed_children_are_validated_and_carry_stable_order_attributes() {
             attributes: Attributes {
                 id: Some("intro".to_string()),
                 classes: vec!["lead".to_string(), "wide".to_string()],
-                pairs: vec![AttributePair {
-                    key: "data-role".to_string(),
-                    value: "summary".to_string(),
-                }],
+                pairs: vec![AttributePair { key: "data-role".to_string(), value: "summary".to_string() }],
             },
-            children: vec![Inline::Link {
-                target: RelationEndpoint::Node(notedown_ir::NodeId(9)),
-                display: Vec::new(),
-                title: None,
-            }],
+            children: vec![Inline::Link { target: RelationEndpoint::Node(notedown_ir::NodeId(9)), display: Vec::new(), title: None }],
         }],
     );
 
     let report = graph.validate();
-    assert!(report
-        .issues
-        .iter()
-        .any(|issue| matches!(issue, ValidationIssue::UnknownInlineLinkTarget { .. })));
+    assert!(report.issues.iter().any(|issue| matches!(issue, ValidationIssue::UnknownInlineLinkTarget { .. })));
 
-    let Block::Paragraph { content } = &graph.blocks[0].block else {
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
         panic!("expected paragraph");
     };
-    let Inline::Attributed { attributes, .. } = &content[0] else {
+    let Inline::Attributed { attributes, .. } = &content[0]
+    else {
         panic!("expected attributed inline");
     };
     assert_eq!(attributes.id.as_deref(), Some("intro"));
@@ -221,17 +163,12 @@ fn break_kinds_are_distinct_semantics() {
     let mut graph = DocumentGraph::new(DocumentId(1));
     paragraph(
         &mut graph,
-        vec![
-            Inline::Text {
-                text: "a".to_string(),
-            },
-            Inline::Break { kind: BreakKind::Soft },
-            Inline::Break { kind: BreakKind::Hard },
-        ],
+        vec![Inline::Text { text: "a".to_string() }, Inline::Break { kind: BreakKind::Soft }, Inline::Break { kind: BreakKind::Hard }],
     );
 
     assert!(graph.validate().is_valid());
-    let Block::Paragraph { content } = &graph.blocks[0].block else {
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
         panic!("expected paragraph");
     };
     assert_eq!(content[1], Inline::Break { kind: BreakKind::Soft });
@@ -261,20 +198,10 @@ fn inline_semantics_round_trip_through_the_wire_without_losing_identity() {
                 title: None,
                 asset: Some(asset_id),
             },
-            Inline::Note {
-                label: "1".to_string(),
-                display: None,
-            },
-            Inline::Citation {
-                key: "knuth1984".to_string(),
-                display: Some(vec![Inline::Text { text: "Knuth".to_string() }]),
-            },
+            Inline::Note { label: "1".to_string(), display: None },
+            Inline::Citation { key: "knuth1984".to_string(), display: Some(vec![Inline::Text { text: "Knuth".to_string() }]) },
             Inline::Attributed {
-                attributes: Attributes {
-                    id: None,
-                    classes: vec!["aside".to_string()],
-                    pairs: Vec::new(),
-                },
+                attributes: Attributes { id: None, classes: vec!["aside".to_string()], pairs: Vec::new() },
                 children: vec![Inline::Break { kind: BreakKind::Hard }],
             },
         ],
@@ -294,18 +221,13 @@ fn inline_semantics_round_trip_through_the_wire_without_losing_identity() {
     assert_eq!(decoded.document, graph);
     assert!(decoded.document.validate().is_valid());
 
-    let Block::Paragraph { content } = &decoded.document.blocks[0].block else {
+    let Block::Paragraph { content } = &decoded.document.blocks[0].block
+    else {
         panic!("expected paragraph");
     };
     let inline_json = serde_json::to_string(content).expect("serialize inline content");
-    assert!(
-        !inline_json.contains("\"title\""),
-        "empty optional link/image titles should not be serialized: {inline_json}"
-    );
-    assert!(
-        inline_json.contains(r#""Note":{"label":"1"}"#),
-        "an omitted note display should not be serialized: {inline_json}"
-    );
+    assert!(!inline_json.contains("\"title\""), "empty optional link/image titles should not be serialized: {inline_json}");
+    assert!(inline_json.contains(r#""Note":{"label":"1"}"#), "an omitted note display should not be serialized: {inline_json}");
     assert!(
         inline_json.contains(r#""attributes":{"classes":["aside"]}"#),
         "empty attribute identity and pairs should be omitted: {inline_json}"

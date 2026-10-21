@@ -8,8 +8,6 @@ fn html_lexer_matches_fixtures() -> Result<(), oak_core::OakError> {
     let fixtures = here.join("tests/html/lexer");
     let language = HtmlLanguage::default();
     let lexer = HtmlLexer::new(&language);
-    let test_runner = LexerTester::new(fixtures)
-        .with_extension("html")
-        .with_timeout(Duration::from_secs(5));
+    let test_runner = LexerTester::new(fixtures).with_extension("html").with_timeout(Duration::from_secs(5));
     test_runner.run_tests(&lexer)
 }

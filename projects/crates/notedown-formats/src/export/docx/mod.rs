@@ -1,8 +1,8 @@
 //! Conservative DOCX export from `notedown-ir`.
 
 mod footnotes;
-mod package;
 mod numbering;
+mod package;
 mod rels;
 mod writer;
 
@@ -29,12 +29,30 @@ fn metadata_xml(graph: &DocumentGraph) -> Option<String> {
     if metadata.title.is_none() && metadata.language.is_none() && metadata.authors.is_empty() && metadata.tags.is_empty() {
         return None;
     }
-    let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">"#);
-    if let Some(title) = &metadata.title { xml.push_str("<dc:title>"); xml.push_str(&escape_xml(title)); xml.push_str("</dc:title>"); }
-    if let Some(author) = metadata.authors.first() { xml.push_str("<dc:creator>"); xml.push_str(&escape_xml(author)); xml.push_str("</dc:creator>"); }
-    if let Some(language) = &metadata.language { xml.push_str("<dc:language>"); xml.push_str(&escape_xml(language)); xml.push_str("</dc:language>"); }
-    if !metadata.tags.is_empty() { xml.push_str("<cp:keywords>"); xml.push_str(&escape_xml(&metadata.tags.join(", "))); xml.push_str("</cp:keywords>"); }
+    let mut xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">"#,
+    );
+    if let Some(title) = &metadata.title {
+        xml.push_str("<dc:title>");
+        xml.push_str(&escape_xml(title));
+        xml.push_str("</dc:title>");
+    }
+    if let Some(author) = metadata.authors.first() {
+        xml.push_str("<dc:creator>");
+        xml.push_str(&escape_xml(author));
+        xml.push_str("</dc:creator>");
+    }
+    if let Some(language) = &metadata.language {
+        xml.push_str("<dc:language>");
+        xml.push_str(&escape_xml(language));
+        xml.push_str("</dc:language>");
+    }
+    if !metadata.tags.is_empty() {
+        xml.push_str("<cp:keywords>");
+        xml.push_str(&escape_xml(&metadata.tags.join(", ")));
+        xml.push_str("</cp:keywords>");
+    }
     xml.push_str("</cp:coreProperties>");
     Some(xml)
 }
@@ -46,10 +64,6 @@ fn escape_xml(value: &str) -> String {
 /// Export a document graph to DOCX bytes on disk.
 pub fn export_docx(graph: &DocumentGraph, path: impl AsRef<std::path::Path>) -> Result<(), FormatError> {
     let bytes = export_docx_bytes(graph)?;
-    std::fs::write(path.as_ref(), bytes).map_err(|error| {
-        FormatError::invalid_input(format!(
-            "failed to write {}: {error}",
-            path.as_ref().display()
-        ))
-    })
+    std::fs::write(path.as_ref(), bytes)
+        .map_err(|error| FormatError::invalid_input(format!("failed to write {}: {error}", path.as_ref().display())))
 }

@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
 use notedown_ir::{Block, DocumentGraph};
 
@@ -9,12 +8,7 @@ use crate::FormatError;
 pub fn collect_footnote_catalog(graph: &DocumentGraph) -> HashMap<u32, String> {
     let mut catalog = HashMap::new();
     for node in &graph.blocks {
-        if let Block::Opaque {
-            kind,
-            payload_hint,
-            ..
-        } = &node.block
-        {
+        if let Block::Opaque { kind, payload_hint, .. } = &node.block {
             if kind == "footnote_definition" {
                 if let Some((id, body)) = parse_footnote_definition(payload_hint) {
                     catalog.insert(id, body);
@@ -34,11 +28,7 @@ pub fn parse_footnote_definition(payload: &str) -> Option<(u32, String)> {
     let close = trimmed.find(']')?;
     let id_text = trimmed[2..close].trim();
     let id = id_text.parse().ok()?;
-    let body = trimmed
-        .get(close + 1..)
-        .and_then(|rest| rest.strip_prefix(':'))
-        .map(str::trim)
-        .filter(|body| !body.is_empty())?;
+    let body = trimmed.get(close + 1..).and_then(|rest| rest.strip_prefix(':')).map(str::trim).filter(|body| !body.is_empty())?;
     Some((id, body.to_string()))
 }
 

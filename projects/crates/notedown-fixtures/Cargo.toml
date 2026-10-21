@@ -1,12 +1,12 @@
 [package]
 name = "notedown-fixtures"
 publish = false
-version = "0.1.0"
-authors = ["Aster <192607617@qq.com>"]
+version.workspace = true
+authors.workspace = true
 description = "Downstream Oak language conformance fixtures for Notedown and Panduck"
 readme = "readme.md"
-license = "MPL-2.0"
-edition = "2021"
+license.workspace = true
+edition.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -20,13 +20,13 @@ oak-org-mode = { workspace = true, features = ["serde"] }
 oak-testing = { workspace = true }
 oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
 acorn-doc = { workspace = true }
-notedown-formats = { path = "../notedown-formats", default-features = false, features = ["doc", "markdown", "notedown"] }
-notedown-ir = { path = "../notedown-ir" }
-serde_json = "1.0"
+notedown-formats = { workspace = true, default-features = false, features = ["doc", "markdown", "notedown"] }
+notedown-ir = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 boost-benchmark = { workspace = true }
-cfb = "0.7.3"
+cfb = { workspace = true }
 markdown = "1.0.0"
 pulldown-cmark = "0.13.1"
 html5ever = "0.38.0"

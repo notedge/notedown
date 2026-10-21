@@ -2,7 +2,8 @@
 //! Notedown document semantic IR.
 //!
 //! Stable identities, block semantics, relations, assets, and provenance.
-//! Independent from Oak AST, text parsers, Acorn binary views, and Panduck writers.
+//! Independent from Oak AST, text parsers, Acorn binary views, and Panduck
+//! writers.
 
 mod asset;
 mod block;
@@ -24,4 +25,4 @@ pub use relation::{Relation, RelationEndpoint, RelationKind};
 pub use source::{CoverageReport, SourceKind, SourceRef};
 pub use status::{LossMarker, SemanticStatus};
 pub use validate::{ValidationIssue, ValidationReport};
-pub use wire::{DocumentEnvelope, WireError, SCHEMA_VERSION};
+pub use wire::{DocumentEnvelope, SCHEMA_VERSION, WireError};

@@ -144,14 +144,19 @@ fn write_list_at_level(
     }
     let num_id = if ordered { ORDERED_NUM_ID } else { UNORDERED_NUM_ID };
     for item in items {
-        write!(out, "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{num_id}\"/></w:numPr></w:pPr>").map_err(map_fmt_error)?;
+        write!(out, "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{num_id}\"/></w:numPr></w:pPr>")
+            .map_err(map_fmt_error)?;
         write_inlines(out, &item.content, graph, rels)?;
         out.push_str("</w:p>");
         for child_id in &item.children {
-            let Some(child) = graph.block(*child_id) else { continue };
+            let Some(child) = graph.block(*child_id)
+            else {
+                continue;
+            };
             if let Block::List { ordered, items } = &child.block {
                 write_list_at_level(out, *ordered, items, graph, rels, level + 1)?;
-            } else {
+            }
+            else {
                 write_block(out, &child.block, graph, rels)?;
             }
         }
@@ -172,7 +177,9 @@ fn collect_nested_ids(block: &Block, ids: &mut HashSet<NodeId>, graph: &Document
         Block::Section { children, .. } => {
             for child in children {
                 if ids.insert(*child) {
-                    if let Some(node) = graph.block(*child) { collect_nested_ids(&node.block, ids, graph); }
+                    if let Some(node) = graph.block(*child) {
+                        collect_nested_ids(&node.block, ids, graph);
+                    }
                 }
             }
         }
@@ -180,7 +187,9 @@ fn collect_nested_ids(block: &Block, ids: &mut HashSet<NodeId>, graph: &Document
             for item in items {
                 for child in &item.children {
                     if ids.insert(*child) {
-                        if let Some(node) = graph.block(*child) { collect_nested_ids(&node.block, ids, graph); }
+                        if let Some(node) = graph.block(*child) {
+                            collect_nested_ids(&node.block, ids, graph);
+                        }
                     }
                 }
             }
@@ -218,11 +227,21 @@ fn write_inline(out: &mut String, inline: &Inline, graph: &DocumentGraph, rels: 
     write_inline_with_properties(out, inline, graph, rels, "")
 }
 
-fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &DocumentGraph, rels: &mut DocumentRelsRegistry, properties: &str) -> Result<(), FormatError> {
+fn write_inline_with_properties(
+    out: &mut String,
+    inline: &Inline,
+    graph: &DocumentGraph,
+    rels: &mut DocumentRelsRegistry,
+    properties: &str,
+) -> Result<(), FormatError> {
     match inline {
         Inline::Text { text } => {
-            if properties.is_empty() { write_text_with_footnotes(out, text)?; }
-            else { write_run_with_properties(out, text, properties)?; }
+            if properties.is_empty() {
+                write_text_with_footnotes(out, text)?;
+            }
+            else {
+                write_run_with_properties(out, text, properties)?;
+            }
         }
         Inline::Styled { style, children } => match style.as_str() {
             style if style.strip_prefix("color:").is_some() => {
@@ -232,7 +251,9 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
                 }
                 let property = format!("<w:color w:val=\"{value}\"/>");
                 let combined = if properties.contains(&property) { properties.to_owned() } else { format!("{properties}{property}") };
-                for child in children { write_inline_with_properties(out, child, graph, rels, &combined)?; }
+                for child in children {
+                    write_inline_with_properties(out, child, graph, rels, &combined)?;
+                }
             }
             style if style.strip_prefix("font-size:").is_some() => {
                 let value = style.strip_prefix("font-size:").unwrap_or_default();
@@ -241,7 +262,9 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
                 }
                 let property = format!("<w:sz w:val=\"{value}\"/><w:szCs w:val=\"{value}\"/>");
                 let combined = format!("{properties}{property}");
-                for child in children { write_inline_with_properties(out, child, graph, rels, &combined)?; }
+                for child in children {
+                    write_inline_with_properties(out, child, graph, rels, &combined)?;
+                }
             }
             style if style.strip_prefix("font-family:").is_some() => {
                 let value = style.strip_prefix("font-family:").unwrap_or_default();
@@ -251,7 +274,9 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
                 let escaped = escape_xml_attr(value);
                 let property = format!("<w:rFonts w:ascii=\"{escaped}\" w:hAnsi=\"{escaped}\"/>");
                 let combined = format!("{properties}{property}");
-                for child in children { write_inline_with_properties(out, child, graph, rels, &combined)?; }
+                for child in children {
+                    write_inline_with_properties(out, child, graph, rels, &combined)?;
+                }
             }
             style if style.strip_prefix("highlight:").is_some() => {
                 let value = style.strip_prefix("highlight:").unwrap_or_default();
@@ -260,7 +285,9 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
                 }
                 let property = format!("<w:highlight w:val=\"{}\"/>", escape_xml_attr(value));
                 let combined = format!("{properties}{property}");
-                for child in children { write_inline_with_properties(out, child, graph, rels, &combined)?; }
+                for child in children {
+                    write_inline_with_properties(out, child, graph, rels, &combined)?;
+                }
             }
             "bold" | "italic" | "underline" | "strike" | "superscript" | "subscript" => {
                 let property = match style.as_str() {
@@ -273,7 +300,9 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
                     _ => unreachable!(),
                 };
                 let combined = if properties.contains(property) { properties.to_owned() } else { format!("{properties}{property}") };
-                for child in children { write_inline_with_properties(out, child, graph, rels, &combined)?; }
+                for child in children {
+                    write_inline_with_properties(out, child, graph, rels, &combined)?;
+                }
             }
             other => {
                 return Err(FormatError::unsupported(
@@ -289,7 +318,8 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
             return Err(FormatError::unsupported("docx", "inline type is not supported by the conservative DOCX exporter yet"));
         }
         Inline::Link { target, display, title: _ } => {
-            let RelationEndpoint::ExternalUri(url) = target else {
+            let RelationEndpoint::ExternalUri(url) = target
+            else {
                 return Err(FormatError::unsupported("docx", format!("link target `{target:?}` has no DOCX hyperlink mapping")));
             };
             let rel_id = rels.id_for_hyperlink(url);
@@ -319,10 +349,7 @@ fn write_inline_with_properties(out: &mut String, inline: &Inline, graph: &Docum
             BreakKind::Soft => write_run_with_properties(out, " ", properties)?,
         },
         Inline::Citation { .. } | Inline::Attributed { .. } => {
-            return Err(FormatError::unsupported(
-                "docx",
-                "inline semantic node is not representable by the conservative DOCX exporter yet",
-            ));
+            return Err(FormatError::unsupported("docx", "inline semantic node is not representable by the conservative DOCX exporter yet"));
         }
     }
     Ok(())
@@ -343,12 +370,15 @@ fn write_image_drawing(out: &mut String, rel_id: &str, alt: &str, extent: (u64, 
 fn image_extent(bytes: &[u8]) -> Result<(u64, u64), FormatError> {
     let dimensions = if bytes.starts_with(b"\x89PNG") {
         png_dimensions(bytes)
-    } else if bytes.starts_with(&[0xff, 0xd8]) {
+    }
+    else if bytes.starts_with(&[0xff, 0xd8]) {
         jpeg_dimensions(bytes)
-    } else {
+    }
+    else {
         return Ok((4_680_000, 3_000_000));
     };
-    let (pixel_width, pixel_height) = dimensions.filter(|(width, height)| *width > 0 && *height > 0)
+    let (pixel_width, pixel_height) = dimensions
+        .filter(|(width, height)| *width > 0 && *height > 0)
         .ok_or_else(|| FormatError::unsupported("docx", "image has invalid or unsupported PNG/JPEG dimensions"))?;
     let natural_width = u64::from(pixel_width) * 9_525;
     let natural_height = u64::from(pixel_height) * 9_525;
@@ -357,25 +387,42 @@ fn image_extent(bytes: &[u8]) -> Result<(u64, u64), FormatError> {
 }
 
 fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.get(8..12)? != 13u32.to_be_bytes() || bytes.get(12..16)? != b"IHDR" || bytes.len() < 33 { return None; }
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.get(8..12)? != 13u32.to_be_bytes() || bytes.get(12..16)? != b"IHDR" || bytes.len() < 33
+    {
+        return None;
+    }
     Some((u32::from_be_bytes(bytes.get(16..20)?.try_into().ok()?), u32::from_be_bytes(bytes.get(20..24)?.try_into().ok()?)))
 }
 
 fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let mut cursor = 2;
     while cursor + 3 < bytes.len() {
-        if bytes[cursor] != 0xff { return None; }
-        while bytes.get(cursor) == Some(&0xff) { cursor += 1; }
+        if bytes[cursor] != 0xff {
+            return None;
+        }
+        while bytes.get(cursor) == Some(&0xff) {
+            cursor += 1;
+        }
         let marker = *bytes.get(cursor)?;
         cursor += 1;
-        if marker == 0x01 { continue; }
-        if matches!(marker, 0xd0..=0xda | 0x00) { return None; }
+        if marker == 0x01 {
+            continue;
+        }
+        if matches!(marker, 0xd0..=0xda | 0x00) {
+            return None;
+        }
         let length = u16::from_be_bytes(bytes.get(cursor..cursor + 2)?.try_into().ok()?) as usize;
-        if length < 2 || cursor.checked_add(length)? > bytes.len() { return None; }
+        if length < 2 || cursor.checked_add(length)? > bytes.len() {
+            return None;
+        }
         if matches!(marker, 0xc0 | 0xc1 | 0xc2) {
-            if length < 8 || bytes[cursor + 2] != 8 { return None; }
+            if length < 8 || bytes[cursor + 2] != 8 {
+                return None;
+            }
             let components = usize::from(bytes[cursor + 7]);
-            if components == 0 || length != 8 + components * 3 { return None; }
+            if components == 0 || length != 8 + components * 3 {
+                return None;
+            }
             let height = u16::from_be_bytes(bytes.get(cursor + 3..cursor + 5)?.try_into().ok()?) as u32;
             let width = u16::from_be_bytes(bytes.get(cursor + 5..cursor + 7)?.try_into().ok()?) as u32;
             return Some((width, height));
@@ -385,14 +432,14 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-/// Resolve image bytes through the bound asset identity first, then the location.
+/// Resolve image bytes through the bound asset identity first, then the
+/// location.
 ///
 /// A bound asset keeps its bytes when the storage location is renamed, so the
 /// identity has to win over the authored `source` string.
 fn image_bytes_for_inline(graph: &DocumentGraph, source: &str, asset: Option<AssetId>) -> Result<Vec<u8>, FormatError> {
-    if let Some(bytes) = asset
-        .and_then(|asset_id| graph.assets.iter().find(|candidate| candidate.id == asset_id))
-        .and_then(|asset| asset.bytes.clone())
+    if let Some(bytes) =
+        asset.and_then(|asset_id| graph.assets.iter().find(|candidate| candidate.id == asset_id)).and_then(|asset| asset.bytes.clone())
     {
         return Ok(bytes);
     }
@@ -448,11 +495,15 @@ fn write_run_with_properties(out: &mut String, text: &str, properties: &str) -> 
         return Ok(());
     }
     out.push_str("<w:r>");
-    if !properties.is_empty() { write!(out, "<w:rPr>{properties}</w:rPr>").map_err(map_fmt_error)?; }
+    if !properties.is_empty() {
+        write!(out, "<w:rPr>{properties}</w:rPr>").map_err(map_fmt_error)?;
+    }
     let mut segment_start = 0;
     let mut characters = text.char_indices().peekable();
     while let Some((position, character)) = characters.next() {
-        if !matches!(character, '\n' | '\r' | '\t') { continue; }
+        if !matches!(character, '\n' | '\r' | '\t') {
+            continue;
+        }
         if segment_start < position {
             out.push_str("<w:t xml:space=\"preserve\">");
             write_xml_text(out, &text[segment_start..position])?;

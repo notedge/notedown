@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::asset::Asset;
-use crate::block::{Block, BlockNode};
-use crate::id::{AssetId, DocumentId, LinkId, NodeId};
-use crate::relation::{Relation, RelationEndpoint, RelationKind};
-use crate::source::{CoverageReport, SourceRef};
-use crate::status::LossMarker;
+use crate::{
+    asset::Asset,
+    block::{Block, BlockNode},
+    id::{AssetId, DocumentId, LinkId, NodeId},
+    relation::{Relation, RelationEndpoint, RelationKind},
+    source::{CoverageReport, SourceRef},
+    status::LossMarker,
+};
 
 /// Document-level metadata (title is not document identity).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,7 +18,8 @@ pub struct DocumentMetadata {
     pub tags: Vec<String>,
 }
 
-/// Semantic document graph — import layers construct this, export layers consume it.
+/// Semantic document graph — import layers construct this, export layers
+/// consume it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DocumentGraph {
     pub id: DocumentId,
@@ -37,20 +40,12 @@ impl DocumentGraph {
         Self {
             id,
             revision: 0,
-            metadata: DocumentMetadata {
-                title: None,
-                language: None,
-                authors: Vec::new(),
-                tags: Vec::new(),
-            },
+            metadata: DocumentMetadata { title: None, language: None, authors: Vec::new(), tags: Vec::new() },
             blocks: Vec::new(),
             relations: Vec::new(),
             assets: Vec::new(),
             sources: Vec::new(),
-            coverage: CoverageReport {
-                complete: true,
-                loss: Vec::new(),
-            },
+            coverage: CoverageReport { complete: true, loss: Vec::new() },
             next_node: 0,
         }
     }
@@ -74,7 +69,8 @@ impl DocumentGraph {
         id
     }
 
-    /// Append a block with an explicit id (import adapters with stable foreign ids).
+    /// Append a block with an explicit id (import adapters with stable foreign
+    /// ids).
     pub fn push_block_with_id(&mut self, id: NodeId, block: Block) {
         if id.0 > self.next_node {
             self.next_node = id.0;
@@ -102,7 +98,8 @@ impl DocumentGraph {
 
     /// Update asset storage location while preserving logical identity.
     pub fn set_asset_source(&mut self, id: AssetId, source: Option<String>) -> bool {
-        let Some(asset) = self.assets.iter_mut().find(|asset| asset.id == id) else {
+        let Some(asset) = self.assets.iter_mut().find(|asset| asset.id == id)
+        else {
             return false;
         };
         asset.source = source;
@@ -127,28 +124,17 @@ impl DocumentGraph {
 
     /// Relations whose source endpoint matches `endpoint`.
     pub fn relations_from(&self, endpoint: &RelationEndpoint) -> Vec<&Relation> {
-        self.relations
-            .iter()
-            .filter(|relation| relation.source.matches(endpoint))
-            .collect()
+        self.relations.iter().filter(|relation| relation.source.matches(endpoint)).collect()
     }
 
     /// Relations whose target endpoint matches `endpoint`.
     pub fn relations_to(&self, endpoint: &RelationEndpoint) -> Vec<&Relation> {
-        self.relations
-            .iter()
-            .filter(|relation| relation.target.matches(endpoint))
-            .collect()
+        self.relations.iter().filter(|relation| relation.target.matches(endpoint)).collect()
     }
 
     /// Indexed backlink edges pointing at `target`.
     pub fn backlinks_to(&self, target: &RelationEndpoint) -> Vec<&Relation> {
-        self.relations
-            .iter()
-            .filter(|relation| {
-                relation.kind == RelationKind::Backlink && relation.target.matches(target)
-            })
-            .collect()
+        self.relations.iter().filter(|relation| relation.kind == RelationKind::Backlink && relation.target.matches(target)).collect()
     }
 }
 

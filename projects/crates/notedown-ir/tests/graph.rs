@@ -1,6 +1,4 @@
-use notedown_ir::{
-    Block, DocumentGraph, IdAllocator, Inline, LossMarker, SemanticStatus, SourceKind, SourceRef,
-};
+use notedown_ir::{Block, DocumentGraph, IdAllocator, Inline, LossMarker, SemanticStatus, SourceKind, SourceRef};
 
 #[test]
 fn construct_document_without_parser() {
@@ -8,17 +6,9 @@ fn construct_document_without_parser() {
     let doc_id = ids.document_id();
     let mut graph = DocumentGraph::new(doc_id);
 
-    let paragraph = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "Hello".to_string(),
-        }],
-    });
+    let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "Hello".to_string() }] });
 
-    graph.attach_source(SourceRef {
-        node: paragraph,
-        kind: SourceKind::Manual,
-        precision: SemanticStatus::Resolved,
-    });
+    graph.attach_source(SourceRef { node: paragraph, kind: SourceKind::Manual, precision: SemanticStatus::Resolved });
 
     let json = serde_json::to_string(&graph).expect("serialize");
     let restored: DocumentGraph = serde_json::from_str(&json).expect("deserialize");

@@ -13,10 +13,7 @@ fn collect_elements(node: RedNode<MarkdownLanguage>, source: &SourceText, result
 #[test]
 fn math_inline_is_a_single_node_and_does_not_consume_following_text() {
     let source = SourceText::new("before $x + y$ after");
-    let language = MarkdownLanguage {
-        allow_math: true,
-        ..MarkdownLanguage::common_mark()
-    };
+    let language = MarkdownLanguage { allow_math: true, ..MarkdownLanguage::common_mark() };
     let parser = MarkdownParser::new(&language);
     let mut cache = ParseSession::<MarkdownLanguage>::default();
     let tree = parser.parse(&source, &[], &mut cache).result.expect("parse");
@@ -31,10 +28,7 @@ fn math_inline_is_a_single_node_and_does_not_consume_following_text() {
 #[test]
 fn footnote_reference_is_a_single_node_between_surrounding_text() {
     let source = SourceText::new("before[^1] after");
-    let language = MarkdownLanguage {
-        allow_footnotes: true,
-        ..MarkdownLanguage::common_mark()
-    };
+    let language = MarkdownLanguage { allow_footnotes: true, ..MarkdownLanguage::common_mark() };
     let parser = MarkdownParser::new(&language);
     let mut cache = ParseSession::<MarkdownLanguage>::default();
     let tree = parser.parse(&source, &[], &mut cache).result.expect("parse");

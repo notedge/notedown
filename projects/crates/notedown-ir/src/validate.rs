@@ -1,10 +1,12 @@
 //! Structural validation for semantic graph invariants.
 
-use crate::block::Block;
-use crate::graph::DocumentGraph;
-use crate::id::{AssetId, DocumentId, LinkId, NodeId};
-use crate::inline::Inline;
-use crate::relation::{RelationEndpoint, RelationKind};
+use crate::{
+    block::Block,
+    graph::DocumentGraph,
+    id::{AssetId, DocumentId, LinkId, NodeId},
+    inline::Inline,
+    relation::{RelationEndpoint, RelationKind},
+};
 use std::collections::{HashMap, HashSet};
 
 /// Single invariant violation on the document graph.
@@ -37,7 +39,8 @@ impl ValidationReport {
 }
 
 impl DocumentGraph {
-    /// Check identity uniqueness, endpoint existence, and local reference integrity.
+    /// Check identity uniqueness, endpoint existence, and local reference
+    /// integrity.
     pub fn validate(&self) -> ValidationReport {
         let mut report = ValidationReport::default();
         let node_ids = self.collect_node_ids(&mut report);
@@ -69,26 +72,17 @@ impl DocumentGraph {
         seen
     }
 
-    fn check_relations(
-        &self,
-        node_ids: &HashSet<NodeId>,
-        asset_ids: &HashSet<AssetId>,
-        report: &mut ValidationReport,
-    ) {
+    fn check_relations(&self, node_ids: &HashSet<NodeId>, asset_ids: &HashSet<AssetId>, report: &mut ValidationReport) {
         let mut seen_links = HashSet::new();
         for relation in &self.relations {
             if !seen_links.insert(relation.id) {
-                report
-                    .issues
-                    .push(ValidationIssue::DuplicateLinkId { id: relation.id });
+                report.issues.push(ValidationIssue::DuplicateLinkId { id: relation.id });
             }
 
             if !endpoint_exists(&relation.source, self.id, node_ids, asset_ids)
                 || !endpoint_exists(&relation.target, self.id, node_ids, asset_ids)
             {
-                report.issues.push(ValidationIssue::UnknownRelationEndpoint {
-                    link: relation.id,
-                });
+                report.issues.push(ValidationIssue::UnknownRelationEndpoint { link: relation.id });
             }
         }
     }
@@ -96,34 +90,20 @@ impl DocumentGraph {
     fn check_sources(&self, node_ids: &HashSet<NodeId>, report: &mut ValidationReport) {
         for source in &self.sources {
             if !node_ids.contains(&source.node) {
-                report
-                    .issues
-                    .push(ValidationIssue::UnknownNode { id: source.node });
+                report.issues.push(ValidationIssue::UnknownNode { id: source.node });
             }
         }
     }
 
-    fn check_block_refs(
-        &self,
-        node_ids: &HashSet<NodeId>,
-        asset_ids: &HashSet<AssetId>,
-        report: &mut ValidationReport,
-    ) {
-        let context = InlineContext {
-            document_id: self.id,
-            node_ids,
-            asset_ids,
-        };
+    fn check_block_refs(&self, node_ids: &HashSet<NodeId>, asset_ids: &HashSet<AssetId>, report: &mut ValidationReport) {
+        let context = InlineContext { document_id: self.id, node_ids, asset_ids };
         for node in &self.blocks {
             match &node.block {
                 Block::Section { title, children, .. } => {
                     check_inline_refs(node.id, title, &context, report);
                     for child in children {
                         if !node_ids.contains(child) {
-                            report.issues.push(ValidationIssue::UnknownSectionChild {
-                                section: node.id,
-                                child: *child,
-                            });
+                            report.issues.push(ValidationIssue::UnknownSectionChild { section: node.id, child: *child });
                         }
                     }
                 }
@@ -135,10 +115,7 @@ impl DocumentGraph {
                         check_inline_refs(node.id, &item.content, &context, report);
                         for child in &item.children {
                             if !node_ids.contains(child) {
-                                report.issues.push(ValidationIssue::UnknownListChild {
-                                    list: node.id,
-                                    child: *child,
-                                });
+                                report.issues.push(ValidationIssue::UnknownListChild { list: node.id, child: *child });
                             }
                         }
                     }
@@ -169,9 +146,7 @@ impl DocumentGraph {
         }
         for relation in &self.relations {
             if relation.kind == RelationKind::Contains {
-                if let (RelationEndpoint::Node(parent), RelationEndpoint::Node(child)) =
-                    (&relation.source, &relation.target)
-                {
+                if let (RelationEndpoint::Node(parent), RelationEndpoint::Node(child)) = (&relation.source, &relation.target) {
                     children_by_node.entry(*parent).or_default().push(*child);
                 }
             }
@@ -212,12 +187,7 @@ impl DocumentGraph {
     }
 }
 
-fn endpoint_exists(
-    endpoint: &RelationEndpoint,
-    document_id: DocumentId,
-    node_ids: &HashSet<NodeId>,
-    asset_ids: &HashSet<AssetId>,
-) -> bool {
+fn endpoint_exists(endpoint: &RelationEndpoint, document_id: DocumentId, node_ids: &HashSet<NodeId>, asset_ids: &HashSet<AssetId>) -> bool {
     match endpoint {
         RelationEndpoint::Node(id) => node_ids.contains(id),
         RelationEndpoint::Document(id) => *id == document_id,
@@ -237,26 +207,18 @@ fn check_inline_refs(from: NodeId, inlines: &[Inline], context: &InlineContext<'
     for inline in inlines {
         match inline {
             Inline::Reference { target, .. } if !context.node_ids.contains(target) => {
-                report.issues.push(ValidationIssue::UnknownInlineReference {
-                    from,
-                    target: *target,
-                });
+                report.issues.push(ValidationIssue::UnknownInlineReference { from, target: *target });
             }
             Inline::Link { target, display, .. } => {
                 if !endpoint_exists(target, context.document_id, context.node_ids, context.asset_ids) {
-                    report.issues.push(ValidationIssue::UnknownInlineLinkTarget {
-                        from,
-                        target: target.clone(),
-                    });
+                    report.issues.push(ValidationIssue::UnknownInlineLinkTarget { from, target: target.clone() });
                 }
                 check_inline_refs(from, display, context, report);
             }
             Inline::Image { alt, asset, .. } => {
                 if let Some(asset) = asset {
                     if !context.asset_ids.contains(asset) {
-                        report
-                            .issues
-                            .push(ValidationIssue::UnknownInlineImageAsset { from, asset: *asset });
+                        report.issues.push(ValidationIssue::UnknownInlineImageAsset { from, asset: *asset });
                     }
                 }
                 check_inline_refs(from, alt, context, report);
@@ -283,9 +245,6 @@ fn check_inline_refs(from: NodeId, inlines: &[Inline], context: &InlineContext<'
 
 fn check_label(from: NodeId, kind: &str, label: &str, report: &mut ValidationReport) {
     if label.trim().is_empty() {
-        report.issues.push(ValidationIssue::EmptyInlineLabel {
-            from,
-            kind: kind.to_string(),
-        });
+        report.issues.push(ValidationIssue::EmptyInlineLabel { from, kind: kind.to_string() });
     }
 }

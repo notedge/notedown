@@ -1,4 +1,7 @@
-//! Embedded conformance fixtures for Notedown, Panduck, and downstream Acorn probes.
+#![warn(missing_docs)]
+
+//! Embedded conformance fixtures for Notedown, Panduck, and downstream Acorn
+//! probes.
 
 /// Acorn binary format fixtures.
 pub mod acorn {

@@ -8,11 +8,7 @@ fn test_markdown_lexer() -> Result<(), oak_core::OakError> {
     let tests = here.join("tests/markdown/lexer");
 
     // 使用 Box::leak 来满足 LexerTester 对 'static 的潜在要求
-    let language = MarkdownLanguage {
-        allow_math: true,
-        allow_footnotes: true,
-        ..MarkdownLanguage::github_flavored()
-    };
+    let language = MarkdownLanguage { allow_math: true, allow_footnotes: true, ..MarkdownLanguage::github_flavored() };
     let lexer = MarkdownLexer::new(&language);
 
     let test_runner = LexerTester::new(tests).with_extension("markdown").with_timeout(Duration::from_secs(5));

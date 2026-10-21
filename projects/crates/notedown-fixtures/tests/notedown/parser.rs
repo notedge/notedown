@@ -1,5 +1,4 @@
-use oak_core::parser::session::ParseSession;
-use oak_core::{Parser, RedNode, RedTree, SourceText};
+use oak_core::{Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
 use oak_notedown::{NoteElementType, NoteLanguage, NoteParser};
 
 fn block_kinds(source: &str) -> Vec<NoteElementType> {
@@ -61,18 +60,8 @@ fn parses_blockquote_blocks() {
 #[test]
 fn parses_multiline_blockquote_as_single_block() {
     let kinds = block_kinds("> Line one\n> Line two\n\nBody.\n");
-    assert_eq!(
-        kinds
-            .iter()
-            .filter(|kind| *kind == &NoteElementType::Blockquote)
-            .count(),
-        1,
-        "expected one blockquote block, got {kinds:?}"
-    );
-    assert!(
-        kinds.contains(&NoteElementType::Paragraph),
-        "expected trailing paragraph, got {kinds:?}"
-    );
+    assert_eq!(kinds.iter().filter(|kind| *kind == &NoteElementType::Blockquote).count(), 1, "expected one blockquote block, got {kinds:?}");
+    assert!(kinds.contains(&NoteElementType::Paragraph), "expected trailing paragraph, got {kinds:?}");
 
     let source = SourceText::new("> Line one\n> Line two\n");
     let language = NoteLanguage::default();
@@ -109,10 +98,7 @@ fn parses_fenced_code_block() {
 fn parses_pipe_table_blocks() {
     let source = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |\n";
     let kinds = block_kinds(source);
-    assert!(
-        kinds.contains(&NoteElementType::Table),
-        "expected Table block, got {kinds:?}"
-    );
+    assert!(kinds.contains(&NoteElementType::Table), "expected Table block, got {kinds:?}");
 
     let language = NoteLanguage::default();
     let text = SourceText::new(source);
@@ -145,9 +131,6 @@ fn parses_pipe_table_blocks() {
             _ => None,
         })
         .expect("first row");
-    let cell_count = first_row
-        .children()
-        .filter(|child| matches!(child, RedTree::Node(_)))
-        .count();
+    let cell_count = first_row.children().filter(|child| matches!(child, RedTree::Node(_))).count();
     assert_eq!(cell_count, 3, "expected leading, middle, and trailing pipe cells");
 }

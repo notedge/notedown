@@ -1,9 +1,8 @@
 //! Living `00` acceptance probes — no parser, AST, or source file required.
 
 use notedown_ir::{
-    Asset, AssetId, AssetKind, Block, DocumentEnvelope, DocumentGraph, DocumentMetadata, IdAllocator,
-    Inline, LinkId, NodeId, Relation, RelationEndpoint, RelationKind, SemanticStatus, SourceKind,
-    SourceRef, TableRow,
+    Asset, AssetId, AssetKind, Block, DocumentEnvelope, DocumentGraph, DocumentMetadata, IdAllocator, Inline, LinkId, NodeId, Relation,
+    RelationEndpoint, RelationKind, SemanticStatus, SourceKind, SourceRef, TableRow,
 };
 
 fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
@@ -11,15 +10,7 @@ fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
     let doc_id = ids.document_id();
     let mut graph = DocumentGraph::new(doc_id);
 
-    let table_id = graph.push_block(Block::Table {
-        rows: vec![
-            TableRow {
-                cells: vec![vec![Inline::Text {
-                    text: "cell".to_string(),
-                }]],
-            },
-        ],
-    });
+    let table_id = graph.push_block(Block::Table { rows: vec![TableRow { cells: vec![vec![Inline::Text { text: "cell".to_string() }]] }] });
 
     let asset_id = ids.asset_id();
     graph.push_asset(Asset {
@@ -49,16 +40,12 @@ fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
 
     graph.attach_source(SourceRef {
         node: table_id,
-        kind: SourceKind::PackageMember {
-            path: "word/document.xml".to_string(),
-        },
+        kind: SourceKind::PackageMember { path: "word/document.xml".to_string() },
         precision: SemanticStatus::Resolved,
     });
     graph.attach_source(SourceRef {
         node: table_id,
-        kind: SourceKind::Synthetic {
-            reason: "merged runs".to_string(),
-        },
+        kind: SourceKind::Synthetic { reason: "merged runs".to_string() },
         precision: SemanticStatus::Inferred,
     });
 
@@ -67,15 +54,8 @@ fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
 
 fn same_paragraph_text() -> Vec<Inline> {
     vec![
-        Inline::Text {
-            text: "Hello ".to_string(),
-        },
-        Inline::Styled {
-            style: "emphasis".to_string(),
-            children: vec![Inline::Text {
-                text: "world".to_string(),
-            }],
-        },
+        Inline::Text { text: "Hello ".to_string() },
+        Inline::Styled { style: "emphasis".to_string(), children: vec![Inline::Text { text: "world".to_string() }] },
     ]
 }
 
@@ -99,18 +79,10 @@ fn round_trip_preserves_identity_relations_and_assets() {
     let block = restored.block(table_id).expect("table block");
     assert!(matches!(block.block, Block::Table { .. }));
 
-    let asset = restored
-        .assets
-        .iter()
-        .find(|asset| asset.id == asset_id)
-        .expect("asset");
+    let asset = restored.assets.iter().find(|asset| asset.id == asset_id).expect("asset");
     assert_eq!(asset.content_identity.as_deref(), Some("sha256:abc"));
 
-    let forward = restored
-        .relations
-        .iter()
-        .find(|relation| relation.id == link_id)
-        .expect("forward ref");
+    let forward = restored.relations.iter().find(|relation| relation.id == link_id).expect("forward ref");
     assert_eq!(forward.kind, RelationKind::References);
 }
 
@@ -119,39 +91,25 @@ fn multi_source_and_backlink_queries() {
     let (graph, table_id, asset_id, _) = sample_graph();
 
     assert_eq!(graph.sources_for(table_id).len(), 2);
-    assert_eq!(
-        graph.relations_from(&RelationEndpoint::Node(table_id)).len(),
-        1
-    );
+    assert_eq!(graph.relations_from(&RelationEndpoint::Node(table_id)).len(), 1);
     assert_eq!(graph.backlinks_to(&RelationEndpoint::Node(table_id)).len(), 1);
-    assert_eq!(
-        graph.relations_to(&RelationEndpoint::Asset(asset_id)).len(),
-        1
-    );
+    assert_eq!(graph.relations_to(&RelationEndpoint::Asset(asset_id)).len(), 1);
 }
 
 #[test]
 fn unresolved_target_is_stored_not_absent() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
-    let paragraph = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "see also".to_string(),
-        }],
-    });
+    let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "see also".to_string() }] });
 
     graph.push_relation(Relation {
         id: ids.link_id(),
         kind: RelationKind::References,
         source: RelationEndpoint::Node(paragraph),
-        target: RelationEndpoint::Unresolved {
-            label: "[[missing-note]]".to_string(),
-        },
+        target: RelationEndpoint::Unresolved { label: "[[missing-note]]".to_string() },
     });
 
-    let unresolved = graph.relations_to(&RelationEndpoint::Unresolved {
-        label: "[[missing-note]]".to_string(),
-    });
+    let unresolved = graph.relations_to(&RelationEndpoint::Unresolved { label: "[[missing-note]]".to_string() });
     assert_eq!(unresolved.len(), 1);
     assert!(graph.block(NodeId(999)).is_none());
     assert!(graph.validate().is_valid());
@@ -163,9 +121,7 @@ fn same_semantic_paragraph_can_carry_different_sources() {
     let doc_id = ids.document_id();
 
     let mut from_notedown = DocumentGraph::new(doc_id);
-    let paragraph = from_notedown.push_block(Block::Paragraph {
-        content: same_paragraph_text(),
-    });
+    let paragraph = from_notedown.push_block(Block::Paragraph { content: same_paragraph_text() });
     from_notedown.attach_source(SourceRef {
         node: paragraph,
         kind: SourceKind::TextSpan { start: 0, end: 12 },
@@ -173,21 +129,15 @@ fn same_semantic_paragraph_can_carry_different_sources() {
     });
 
     let mut from_docx = DocumentGraph::new(doc_id);
-    let paragraph = from_docx.push_block(Block::Paragraph {
-        content: same_paragraph_text(),
-    });
+    let paragraph = from_docx.push_block(Block::Paragraph { content: same_paragraph_text() });
     from_docx.attach_source(SourceRef {
         node: paragraph,
-        kind: SourceKind::PackageMember {
-            path: "word/document.xml".to_string(),
-        },
+        kind: SourceKind::PackageMember { path: "word/document.xml".to_string() },
         precision: SemanticStatus::Resolved,
     });
     from_docx.attach_source(SourceRef {
         node: paragraph,
-        kind: SourceKind::Synthetic {
-            reason: "merged w:r".to_string(),
-        },
+        kind: SourceKind::Synthetic { reason: "merged w:r".to_string() },
         precision: SemanticStatus::Resolved,
     });
 
@@ -202,35 +152,23 @@ fn same_semantic_paragraph_can_carry_different_sources() {
 fn provenance_is_optional_and_does_not_define_block_semantics() {
     let mut ids = IdAllocator::default();
     let mut without_source = DocumentGraph::new(ids.document_id());
-    let unprovenanced = without_source.push_block(Block::Paragraph {
-        content: same_paragraph_text(),
-    });
+    let unprovenanced = without_source.push_block(Block::Paragraph { content: same_paragraph_text() });
 
     let mut with_uncertain_source = DocumentGraph::new(ids.document_id());
-    let sourced = with_uncertain_source.push_block(Block::Paragraph {
-        content: same_paragraph_text(),
-    });
+    let sourced = with_uncertain_source.push_block(Block::Paragraph { content: same_paragraph_text() });
     with_uncertain_source.attach_source(SourceRef {
         node: sourced,
-        kind: SourceKind::Synthetic {
-            reason: "source precision is unknown".to_string(),
-        },
+        kind: SourceKind::Synthetic { reason: "source precision is unknown".to_string() },
         precision: SemanticStatus::Unsupported,
     });
 
     assert!(without_source.sources_for(unprovenanced).is_empty());
-    assert_eq!(
-        without_source.block(unprovenanced).expect("block").block,
-        with_uncertain_source.block(sourced).expect("block").block
-    );
+    assert_eq!(without_source.block(unprovenanced).expect("block").block, with_uncertain_source.block(sourced).expect("block").block);
 
     let encoded = serde_json::to_string(&with_uncertain_source).expect("serialize");
     let restored: DocumentGraph = serde_json::from_str(&encoded).expect("deserialize");
     assert_eq!(restored.sources_for(sourced).len(), 1);
-    assert_eq!(
-        restored.sources_for(sourced)[0].precision,
-        SemanticStatus::Unsupported
-    );
+    assert_eq!(restored.sources_for(sourced)[0].precision, SemanticStatus::Unsupported);
 }
 
 #[test]
@@ -239,11 +177,7 @@ fn metadata_and_asset_path_changes_preserve_link_identity() {
     let doc_id = ids.document_id();
     let mut graph = DocumentGraph::new(doc_id);
 
-    let target = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "target".to_string(),
-        }],
-    });
+    let target = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "target".to_string() }] });
     let asset_id = ids.asset_id();
     graph.push_asset(Asset {
         id: asset_id,
@@ -263,28 +197,12 @@ fn metadata_and_asset_path_changes_preserve_link_identity() {
         target: RelationEndpoint::Asset(asset_id),
     });
 
-    graph.set_metadata(DocumentMetadata {
-        title: Some("renamed title".to_string()),
-        language: None,
-        authors: Vec::new(),
-        tags: Vec::new(),
-    });
+    graph.set_metadata(DocumentMetadata { title: Some("renamed title".to_string()), language: None, authors: Vec::new(), tags: Vec::new() });
     assert!(graph.set_asset_source(asset_id, Some("media/new.png".to_string())));
 
-    let relation = graph
-        .relations
-        .iter()
-        .find(|relation| relation.id == link_id)
-        .expect("relation");
+    let relation = graph.relations.iter().find(|relation| relation.id == link_id).expect("relation");
     assert_eq!(relation.target, RelationEndpoint::Asset(asset_id));
-    assert_eq!(
-        graph
-            .assets
-            .iter()
-            .find(|asset| asset.id == asset_id)
-            .and_then(|asset| asset.source.as_deref()),
-        Some("media/new.png")
-    );
+    assert_eq!(graph.assets.iter().find(|asset| asset.id == asset_id).and_then(|asset| asset.source.as_deref()), Some("media/new.png"));
     assert_eq!(graph.metadata.title.as_deref(), Some("renamed title"));
     assert_eq!(graph.id, doc_id);
 }
@@ -293,16 +211,8 @@ fn metadata_and_asset_path_changes_preserve_link_identity() {
 fn bidirectional_relation_is_distinct_from_backlink_index() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
-    let left = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "left".to_string(),
-        }],
-    });
-    let right = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "right".to_string(),
-        }],
-    });
+    let left = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "left".to_string() }] });
+    let right = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "right".to_string() }] });
 
     graph.push_relation(Relation {
         id: ids.link_id(),
@@ -317,11 +227,7 @@ fn bidirectional_relation_is_distinct_from_backlink_index() {
         target: RelationEndpoint::Node(left),
     });
 
-    let explicit = graph
-        .relations
-        .iter()
-        .find(|relation| relation.kind == RelationKind::Bidirectional)
-        .expect("bidirectional");
+    let explicit = graph.relations.iter().find(|relation| relation.kind == RelationKind::Bidirectional).expect("bidirectional");
     assert_eq!(explicit.source, RelationEndpoint::Node(left));
 
     let indexed = graph.backlinks_to(&RelationEndpoint::Node(left));
@@ -333,10 +239,7 @@ fn bidirectional_relation_is_distinct_from_backlink_index() {
 fn math_and_inferred_pdf_layout_keep_explicit_semantics() {
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
 
-    let math = graph.push_block(Block::Math {
-        content: "E = mc^2".to_string(),
-        language: Some("latex".to_string()),
-    });
+    let math = graph.push_block(Block::Math { content: "E = mc^2".to_string(), language: Some("latex".to_string()) });
     let inferred = graph.push_block(Block::Opaque {
         kind: "pdf.reading-order".to_string(),
         payload_hint: "page-3 stream".to_string(),
@@ -348,21 +251,8 @@ fn math_and_inferred_pdf_layout_keep_explicit_semantics() {
     assert!(!matches!(math_block.block, Block::Code { .. }));
 
     let layout = graph.block(inferred).expect("layout");
-    assert!(matches!(
-        layout.block,
-        Block::Opaque {
-            status: SemanticStatus::Inferred,
-            ..
-        }
-    ));
+    assert!(matches!(layout.block, Block::Opaque { status: SemanticStatus::Inferred, .. }));
 
-    graph.attach_source(SourceRef {
-        node: inferred,
-        kind: SourceKind::GlyphRegion { page: 3 },
-        precision: SemanticStatus::Inferred,
-    });
-    assert_eq!(
-        graph.sources_for(inferred)[0].precision,
-        SemanticStatus::Inferred
-    );
+    graph.attach_source(SourceRef { node: inferred, kind: SourceKind::GlyphRegion { page: 3 }, precision: SemanticStatus::Inferred });
+    assert_eq!(graph.sources_for(inferred)[0].precision, SemanticStatus::Inferred);
 }

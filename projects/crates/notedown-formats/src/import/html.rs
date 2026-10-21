@@ -489,7 +489,12 @@ fn push_text(inlines: &mut Vec<Inline>, text: String) {
         return;
     }
     if let Some(Inline::Text { text: previous }) = inlines.last_mut() {
-        previous.push_str(&text);
+        if previous.ends_with(char::is_whitespace) && text.starts_with(char::is_whitespace) {
+            previous.push_str(text.trim_start());
+        }
+        else {
+            previous.push_str(&text);
+        }
     }
     else {
         inlines.push(Inline::Text { text });

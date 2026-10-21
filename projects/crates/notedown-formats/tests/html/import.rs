@@ -34,6 +34,26 @@ fn html_import_keeps_inline_content_under_containers() {
 }
 
 #[test]
+fn html_import_decodes_character_references_and_keeps_word_boundaries() {
+    let graph = import_html_text(
+        "entities.html",
+        "<html><head><title>Case &amp; Title</title></head><body><p>hello <strong>world</strong> again</p></body></html>",
+    )
+    .expect("import html");
+    assert_eq!(graph.metadata.title.as_deref(), Some("Case & Title"));
+    let Some(node) = graph.blocks.iter().find(|node| matches!(node.block, Block::Paragraph { .. }))
+    else {
+        panic!("expected paragraph, got {:?}", graph.blocks)
+    };
+    let Block::Paragraph { content } = &node.block
+    else {
+        unreachable!()
+    };
+    assert!(matches!(content.first(), Some(Inline::Text { text }) if text == "hello "), "{content:?}");
+    assert!(matches!(content.last(), Some(Inline::Text { text }) if text == " again"), "{content:?}");
+}
+
+#[test]
 fn html_import_reports_link_candidates_with_base_and_source_spans() {
     let html = r#"<html><head><base href="/docs/"><script src="/skip.js"></script></head><body><a href="a.html">A</a><img src="i.png" srcset="s1.png 1x, s2.png 2x"><form action="/submit"></form></body></html>"#;
     let import = import_html_with_links("links.html", html).expect("import html");

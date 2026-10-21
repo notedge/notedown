@@ -1,0 +1,30 @@
+[package]
+name = "notedown"
+version.workspace = true
+authors.workspace = true
+description = "Feature-gated facade for the Notedown document IR and format import/export family"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+keywords = ["notedown", "document", "ir", "markdown", "facade"]
+categories = ["text-processing", "parser-implementations"]
+
+[dependencies]
+notedown-ir = { workspace = true, optional = true }
+notedown-formats = { workspace = true, optional = true, default-features = false }
+
+[features]
+default = []
+ir = ["dep:notedown-ir"]
+formats = ["dep:notedown-formats", "dep:notedown-ir"]
+markdown = ["formats", "notedown-formats/markdown"]
+notedown = ["formats", "notedown-formats/notedown"]
+docx = ["formats", "notedown-formats/docx"]
+doc = ["formats", "notedown-formats/doc"]
+pdf = ["formats", "notedown-formats/pdf"]
+epub = ["formats", "notedown-formats/epub"]
+html = ["formats", "notedown-formats/html"]
+
+[package.metadata.docs.rs]
+all-features = true

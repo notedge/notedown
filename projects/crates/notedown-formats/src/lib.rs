@@ -1,4 +1,4 @@
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 //! Document format import and export around `notedown-ir`.
 
 mod capability;

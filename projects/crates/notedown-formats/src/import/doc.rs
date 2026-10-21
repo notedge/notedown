@@ -33,6 +33,7 @@ pub fn import_doc_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, Form
     Ok(graph)
 }
 
+/// Split legacy `.doc` plaintext into non-empty paragraph lines.
 pub fn split_doc_paragraphs(text: &str) -> impl Iterator<Item = &str> {
     text.split('\n').filter(|paragraph| !paragraph.is_empty())
 }

@@ -8,11 +8,13 @@ use oak_html::{
 use super::common::register_image_assets;
 use crate::FormatError;
 
+/// Import HTML from UTF-8 bytes.
 pub fn import_html_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, FormatError> {
     let text = std::str::from_utf8(bytes).map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
     import_html_text(label, text)
 }
 
+/// Import HTML from a UTF-8 string.
 pub fn import_html_text(label: &str, text: &str) -> Result<DocumentGraph, FormatError> {
     let source = SourceText::new(text);
     let builder = HtmlBuilder::new(HtmlLanguage::default());

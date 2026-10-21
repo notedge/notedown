@@ -12,8 +12,11 @@ use crate::FormatError;
 /// One table-of-contents entry from EPUB navigation documents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavEntry {
+    /// Visible navigation label.
     pub label: String,
+    /// Manifest-relative href target.
     pub href: String,
+    /// Nested navigation entries.
     pub children: Vec<NavEntry>,
 }
 

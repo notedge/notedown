@@ -1,18 +1,14 @@
 //! EPUB XHTML block lowering via typed `oak-html` AST and CSS selectors.
 
-use notedown_ir::{
-    Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableRow,
-};
+use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableRow};
 use oak_html::ast::{Element, HtmlDocument, HtmlNode};
 
-use super::assets::register_image_from_src;
-use super::oak_html_util::{
-    attribute_value, child_elements, descendant_text, direct_child_elements, element_is,
-    first_descendant_element, select_css,
-};
-use super::xhtml::{
-    language_from_class, normalize_whitespace, push_inline, quote_block_from_blocks,
-    register_and_image_inline,
+use super::{
+    assets::register_image_from_src,
+    html_extensions::{
+        attribute_value, child_elements, descendant_text, direct_child_elements, element_is, first_descendant_element, select_css,
+    },
+    xhtml::{language_from_class, normalize_whitespace, push_inline, quote_block_from_blocks, register_and_image_inline},
 };
 
 /// Lower a parsed HTML document into semantic blocks and import losses.
@@ -25,14 +21,7 @@ pub fn blocks_from_html_document(
     let mut losses = Vec::new();
     let scope = body_elements(document);
     for element in scope {
-        collect_semantic_blocks(
-            element,
-            &mut blocks,
-            &mut losses,
-            graph,
-            member_path,
-            false,
-        );
+        collect_semantic_blocks(element, &mut blocks, &mut losses, graph, member_path, false);
     }
     (blocks, losses)
 }
@@ -84,12 +73,7 @@ fn collect_semantic_blocks(
     }
 }
 
-fn collect_child_blocks(
-    element: &Element,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<Block> {
+fn collect_child_blocks(element: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> Vec<Block> {
     let mut blocks = Vec::new();
     for child in direct_child_elements(element) {
         collect_semantic_blocks(child, &mut blocks, losses, graph, member_path, false);
@@ -111,71 +95,40 @@ fn lower_semantic_block(
             let plain = descendant_text(element);
             let title = if plain.is_empty() {
                 collect_inlines_from_element(element, graph, member_path, losses)
-            } else {
+            }
+            else {
                 vec![Inline::Text { text: plain }]
             };
-            Some(Block::Section {
-                level,
-                title,
-                children: Vec::new(),
-            })
+            Some(Block::Section { level, title, children: Vec::new() })
         }
         "p" => {
-            let content = non_empty_inlines(
-                collect_inlines_from_element(element, graph, member_path, losses),
-            )
-            .or_else(|| {
+            let content = non_empty_inlines(collect_inlines_from_element(element, graph, member_path, losses)).or_else(|| {
                 let plain = descendant_text(element);
-                if plain.is_empty() {
-                    None
-                } else {
-                    Some(vec![Inline::Text { text: plain }])
-                }
+                if plain.is_empty() { None } else { Some(vec![Inline::Text { text: plain }]) }
             })?;
             Some(Block::Paragraph { content })
         }
         "figcaption" => lower_figcaption_block(element, graph, member_path, losses),
         "ul" | "ol" => {
             let items = collect_list_items(element, graph, member_path, losses);
-            if items.is_empty() {
-                None
-            } else {
-                Some(Block::List {
-                    ordered: tag == "ol",
-                    items,
-                })
-            }
+            if items.is_empty() { None } else { Some(Block::List { ordered: tag == "ol", items }) }
         }
         "blockquote" => {
             let inner = collect_child_blocks(element, graph, member_path, losses);
             if inner.is_empty() {
                 let plain = descendant_text(element);
-                if plain.is_empty() {
-                    None
-                } else {
-                    Some(Block::Quote {
-                        content: vec![Inline::Text { text: plain }],
-                    })
-                }
-            } else {
+                if plain.is_empty() { None } else { Some(Block::Quote { content: vec![Inline::Text { text: plain }] }) }
+            }
+            else {
                 Some(quote_block_from_blocks(inner))
             }
         }
         "pre" => {
             let (language, content) = extract_pre_code_content(element);
-            if content.is_empty() {
-                None
-            } else {
-                Some(Block::Code { language, content })
-            }
+            if content.is_empty() { None } else { Some(Block::Code { language, content }) }
         }
-        "hr" => Some(Block::Opaque {
-            kind: "thematic_break".into(),
-            payload_hint: "---".into(),
-            status: SemanticStatus::Partial,
-        }),
-        "script" | "head" | "meta" | "title" | "html" | "body" | "section"
-        | "article" | "main" | "div" | "nav" | "figure" => None,
+        "hr" => Some(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }),
+        "script" | "head" | "meta" | "title" | "html" | "body" | "section" | "article" | "main" | "div" | "nav" | "figure" => None,
         "style" => {
             losses.push(LossMarker {
                 code: "import.epub.css_inline_block_unsupported".into(),
@@ -198,36 +151,23 @@ fn lower_semantic_block(
         "img" => {
             let src = attribute_value(element, "src").unwrap_or_default();
             let alt = attribute_value(element, "alt").unwrap_or_default();
-            register_and_image_inline(&src, &alt, graph, member_path).map(|inline| {
-                Block::Paragraph {
-                    content: vec![inline],
-                }
-            })
+            register_and_image_inline(&src, &alt, graph, member_path).map(|inline| Block::Paragraph { content: vec![inline] })
         }
         "svg" => extract_svg_image_href(element)
             .and_then(|(href, alt)| {
-                register_and_image_inline(&href, &alt, graph, member_path).map(|inline| {
-                    Block::Paragraph {
-                        content: vec![inline],
-                    }
-                })
+                register_and_image_inline(&href, &alt, graph, member_path).map(|inline| Block::Paragraph { content: vec![inline] })
             })
             .or_else(|| {
                 losses.push(LossMarker {
                     code: "import.epub.svg_inline_unsupported".into(),
-                    message: "inline <svg> without an external <image> reference is not lowered yet"
-                        .into(),
+                    message: "inline <svg> without an external <image> reference is not lowered yet".into(),
                     status: SemanticStatus::Unsupported,
                 });
                 None
             }),
         "table" => {
             let rows = collect_table_rows(element, graph, member_path, losses);
-            if rows.is_empty() {
-                None
-            } else {
-                Some(Block::Table { rows })
-            }
+            if rows.is_empty() { None } else { Some(Block::Table { rows }) }
         }
         _ => {
             losses.push(LossMarker {
@@ -241,11 +181,7 @@ fn lower_semantic_block(
 }
 
 fn non_empty_inlines(inlines: Vec<Inline>) -> Option<Vec<Inline>> {
-    if inlines.is_empty() {
-        None
-    } else {
-        Some(inlines)
-    }
+    if inlines.is_empty() { None } else { Some(inlines) }
 }
 
 fn lower_figcaption_block(
@@ -254,41 +190,18 @@ fn lower_figcaption_block(
     member_path: Option<&str>,
     losses: &mut Vec<LossMarker>,
 ) -> Option<Block> {
-    let content = non_empty_inlines(collect_inlines_from_element(element, graph, member_path, losses))
-        .or_else(|| {
-            let plain = descendant_text(element);
-            if plain.is_empty() {
-                None
-            } else {
-                Some(vec![Inline::Text { text: plain }])
-            }
-        })?;
-    Some(Block::Paragraph {
-        content: vec![Inline::Styled {
-            style: "figcaption".into(),
-            children: content,
-        }],
-    })
+    let content = non_empty_inlines(collect_inlines_from_element(element, graph, member_path, losses)).or_else(|| {
+        let plain = descendant_text(element);
+        if plain.is_empty() { None } else { Some(vec![Inline::Text { text: plain }]) }
+    })?;
+    Some(Block::Paragraph { content: vec![Inline::Styled { style: "figcaption".into(), children: content }] })
 }
 
-fn collect_list_items(
-    element: &Element,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<ListItem> {
-    child_elements(element, "li")
-        .into_iter()
-        .map(|li| lower_list_item(li, graph, member_path, losses))
-        .collect()
+fn collect_list_items(element: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> Vec<ListItem> {
+    child_elements(element, "li").into_iter().map(|li| lower_list_item(li, graph, member_path, losses)).collect()
 }
 
-fn lower_list_item(
-    li: &Element,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> ListItem {
+fn lower_list_item(li: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> ListItem {
     let mut content = Vec::new();
     let mut children = Vec::new();
     for child in &li.children {
@@ -306,27 +219,17 @@ fn lower_list_item(
                     "ul" | "ol" => {
                         let nested = collect_list_items(child_element, graph, member_path, losses);
                         if !nested.is_empty() {
-                            let id = graph.push_block(Block::List {
-                                ordered: tag == "ol",
-                                items: nested,
-                            });
+                            let id = graph.push_block(Block::List { ordered: tag == "ol", items: nested });
                             children.push(id);
                         }
                     }
                     "p" => {
-                        for inline in collect_inlines_from_element(
-                            child_element,
-                            graph,
-                            member_path,
-                            losses,
-                        ) {
+                        for inline in collect_inlines_from_element(child_element, graph, member_path, losses) {
                             push_inline(&mut content, inline);
                         }
                     }
                     _ => {
-                        if let Some(inline) =
-                            lower_inline_element(child_element, graph, member_path, losses)
-                        {
+                        if let Some(inline) = lower_inline_element(child_element, graph, member_path, losses) {
                             push_inline(&mut content, inline);
                         }
                     }
@@ -338,12 +241,7 @@ fn lower_list_item(
     ListItem { content, children }
 }
 
-fn collect_table_rows(
-    element: &Element,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> Vec<TableRow> {
+fn collect_table_rows(element: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> Vec<TableRow> {
     let mut rows = Vec::new();
     walk_table_rows(element, graph, member_path, losses, &mut rows);
     rows
@@ -365,12 +263,7 @@ fn walk_table_rows(
     }
 }
 
-fn collect_table_row(
-    row: &Element,
-    graph: &mut DocumentGraph,
-    member_path: Option<&str>,
-    losses: &mut Vec<LossMarker>,
-) -> TableRow {
+fn collect_table_row(row: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> TableRow {
     let mut cells = Vec::new();
     for child in direct_child_elements(row) {
         let tag = child.tag_name.to_ascii_lowercase();
@@ -398,9 +291,7 @@ fn collect_inlines_from_element(
             }
             HtmlNode::Element(child_element) => {
                 note_inline_style_loss(child_element, losses);
-                if let Some(inline) =
-                    lower_inline_element(child_element, graph, member_path, losses)
-                {
+                if let Some(inline) = lower_inline_element(child_element, graph, member_path, losses) {
                     push_inline(&mut inlines, inline);
                 }
             }
@@ -423,81 +314,55 @@ fn lower_inline_element(
             let alt = attribute_value(element, "alt").unwrap_or_default();
             register_and_image_inline(&src, &alt, graph, member_path)
         }
-        "strong" | "b" => Some(Inline::Styled {
-            style: "bold".into(),
-            children: collect_inlines_from_element(element, graph, member_path, losses),
-        }),
-        "em" | "i" => Some(Inline::Styled {
-            style: "italic".into(),
-            children: collect_inlines_from_element(element, graph, member_path, losses),
-        }),
-        "code" => Some(Inline::InlineCode {
-            text: descendant_text(element),
-        }),
+        "strong" | "b" => {
+            Some(Inline::Styled { style: "bold".into(), children: collect_inlines_from_element(element, graph, member_path, losses) })
+        }
+        "em" | "i" => {
+            Some(Inline::Styled { style: "italic".into(), children: collect_inlines_from_element(element, graph, member_path, losses) })
+        }
+        "code" => Some(Inline::InlineCode { text: descendant_text(element) }),
         "a" => {
             let children = collect_inlines_from_element(element, graph, member_path, losses);
             let href = attribute_value(element, "href").unwrap_or_default();
             if href.is_empty() {
                 children.first().cloned()
-            } else {
+            }
+            else {
                 Some(Inline::Link {
                     target: notedown_ir::RelationEndpoint::ExternalUri(href.clone()),
-                    display: if children.is_empty() {
-                        vec![Inline::Text { text: href }]
-                    } else {
-                        children
-                    },
+                    display: if children.is_empty() { vec![Inline::Text { text: href }] } else { children },
                     title: attribute_value(element, "title"),
                 })
             }
         }
         "br" => Some(Inline::Break { kind: BreakKind::Hard }),
-        "s" | "del" | "strike" => Some(Inline::Styled {
-            style: "strike".into(),
-            children: collect_inlines_from_element(element, graph, member_path, losses),
-        }),
-        "u" => Some(Inline::Styled {
-            style: "underline".into(),
-            children: collect_inlines_from_element(element, graph, member_path, losses),
-        }),
+        "s" | "del" | "strike" => {
+            Some(Inline::Styled { style: "strike".into(), children: collect_inlines_from_element(element, graph, member_path, losses) })
+        }
+        "u" => Some(Inline::Styled { style: "underline".into(), children: collect_inlines_from_element(element, graph, member_path, losses) }),
         "sup" | "sub" => {
             let style = if tag == "sup" { "superscript" } else { "subscript" };
-            Some(Inline::Styled {
-                style: style.into(),
-                children: collect_inlines_from_element(element, graph, member_path, losses),
-            })
+            Some(Inline::Styled { style: style.into(), children: collect_inlines_from_element(element, graph, member_path, losses) })
         }
         "span" => {
             let children = collect_inlines_from_element(element, graph, member_path, losses);
             if children.is_empty() {
                 None
-            } else if children.len() == 1 {
+            }
+            else if children.len() == 1 {
                 children.first().cloned()
-            } else {
-                Some(Inline::Styled {
-                    style: tag,
-                    children,
-                })
+            }
+            else {
+                Some(Inline::Styled { style: tag, children })
             }
         }
         _ => {
             let text = descendant_text(element);
-            if text.is_empty() {
-                None
-            } else {
-                Some(Inline::Text { text })
-            }
+            if text.is_empty() { None } else { Some(Inline::Text { text }) }
         }
     };
     let attributes = inline_attributes(element);
-    if attributes.is_empty() {
-        lowered
-    } else {
-        Some(Inline::Attributed {
-            attributes,
-            children: lowered.into_iter().collect(),
-        })
-    }
+    if attributes.is_empty() { lowered } else { Some(Inline::Attributed { attributes, children: lowered.into_iter().collect() }) }
 }
 
 /// Collect the identity and class attributes of an inline element so authored
@@ -525,14 +390,11 @@ fn note_inline_style_loss(element: &Element, losses: &mut Vec<LossMarker>) {
 
 fn extract_svg_image_href(element: &Element) -> Option<(String, String)> {
     if element_is(element, "image") {
-        let href = attribute_value(element, "href")
-            .or_else(|| attribute_value(element, "xlink:href"))?;
+        let href = attribute_value(element, "href").or_else(|| attribute_value(element, "xlink:href"))?;
         if href.is_empty() {
             return None;
         }
-        let alt = attribute_value(element, "alt")
-            .or_else(|| attribute_value(element, "aria-label"))
-            .unwrap_or_default();
+        let alt = attribute_value(element, "alt").or_else(|| attribute_value(element, "aria-label")).unwrap_or_default();
         return Some((href, alt));
     }
     for child in direct_child_elements(element) {
@@ -545,9 +407,7 @@ fn extract_svg_image_href(element: &Element) -> Option<(String, String)> {
 
 fn extract_pre_code_content(element: &Element) -> (Option<String>, String) {
     if let Some(code) = first_descendant_element(element, "code") {
-        let language = attribute_value(code, "class")
-            .as_deref()
-            .map(language_from_class);
+        let language = attribute_value(code, "class").as_deref().map(language_from_class);
         return (language, descendant_text(code));
     }
     (None, descendant_text(element))
@@ -559,7 +419,8 @@ pub fn register_spine_images_from_document(
     graph: &mut DocumentGraph,
     member_path: Option<&str>,
 ) -> Result<(), crate::FormatError> {
-    let Some(member_path) = member_path else {
+    let Some(member_path) = member_path
+    else {
         return Ok(());
     };
     for img in select_css(document, "img[src]")? {
@@ -568,27 +429,10 @@ pub fn register_spine_images_from_document(
         }
     }
     for image in select_css(document, "svg image")? {
-        let href = attribute_value(image, "href")
-            .or_else(|| attribute_value(image, "xlink:href"));
+        let href = attribute_value(image, "href").or_else(|| attribute_value(image, "xlink:href"));
         if let Some(href) = href {
             register_image_from_src(graph, member_path, &href);
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use super::super::oak_html_util::parse_html_bytes;
-
-    #[test]
-    fn body_selector_scopes_block_lowering() {
-        const XHTML: &str = r#"<html><head><title>Skip</title></head><body><p>Body</p></body></html>"#;
-        let document = parse_html_bytes(XHTML.as_bytes()).expect("parse");
-        let mut graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(0));
-        let (blocks, _) = blocks_from_html_document(&document, &mut graph, None);
-        assert_eq!(blocks.len(), 1);
-        assert!(matches!(blocks[0], Block::Paragraph { .. }));
-    }
 }

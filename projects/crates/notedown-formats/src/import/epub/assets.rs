@@ -1,25 +1,17 @@
 use acorn_core::BudgetTracker;
 use acorn_epub::{ManifestItem, OcfPackage, OpfDocument};
-use notedown_ir::{
-    Asset, AssetId, AssetKind, DocumentGraph, Inline, LossMarker, SemanticStatus,
-};
+use notedown_ir::{Asset, AssetId, AssetKind, DocumentGraph, Inline, LossMarker, SemanticStatus};
 
-/// Locate the EPUB3 cover image manifest item when declared via `properties="cover-image"`.
+/// Locate the EPUB3 cover image manifest item when declared via
+/// `properties="cover-image"`.
 pub fn find_cover_manifest_item(opf: &OpfDocument) -> Option<&ManifestItem> {
     opf.manifest.values().find(|item| {
-        item.properties
-            .as_deref()
-            .map(|properties| properties.split_whitespace().any(|token| token == "cover-image"))
-            .unwrap_or(false)
+        item.properties.as_deref().map(|properties| properties.split_whitespace().any(|token| token == "cover-image")).unwrap_or(false)
     })
 }
 
 /// Register CSS stylesheet members from the OPF manifest.
-pub fn register_stylesheet_assets(
-    graph: &mut DocumentGraph,
-    opf_path: &str,
-    opf: &OpfDocument,
-) {
+pub fn register_stylesheet_assets(graph: &mut DocumentGraph, opf_path: &str, opf: &OpfDocument) {
     for item in opf.manifest.values() {
         if !is_stylesheet_item(item) {
             continue;
@@ -28,21 +20,16 @@ pub fn register_stylesheet_assets(
         register_stylesheet_asset(graph, &member_path, &item.href);
         graph.push_loss(LossMarker {
             code: "import.epub.css_link_unsupported".into(),
-            message: format!(
-                "stylesheet `{member_path}` is registered as a package asset but not applied during import"
-            ),
+            message: format!("stylesheet `{member_path}` is registered as a package asset but not applied during import"),
             status: SemanticStatus::Unsupported,
         });
     }
 }
 
-/// Register a cover asset from the OPF manifest without requiring spine presence.
+/// Register a cover asset from the OPF manifest without requiring spine
+/// presence.
 pub fn register_cover_asset(graph: &mut DocumentGraph, member_path: &str, display_href: &str) {
-    if graph
-        .assets
-        .iter()
-        .any(|asset| asset.source.as_deref() == Some(member_path))
-    {
+    if graph.assets.iter().any(|asset| asset.source.as_deref() == Some(member_path)) {
         return;
     }
     let asset_id = AssetId(graph.assets.len() as u64 + 1);
@@ -58,11 +45,7 @@ pub fn register_cover_asset(graph: &mut DocumentGraph, member_path: &str, displa
 }
 
 /// Register an embedded image asset resolved from a spine XHTML member.
-pub fn register_image_from_src(
-    graph: &mut DocumentGraph,
-    member_path: &str,
-    src: &str,
-) -> Option<AssetId> {
+pub fn register_image_from_src(graph: &mut DocumentGraph, member_path: &str, src: &str) -> Option<AssetId> {
     if src.is_empty() {
         return None;
     }
@@ -70,31 +53,22 @@ pub fn register_image_from_src(
     register_image_asset(graph, &resolved, src)
 }
 
-/// Lower an `<img>` element into a Notedown image inline bound to its package asset.
+/// Lower an `<img>` element into a Notedown image inline bound to its package
+/// asset.
 pub fn image_inline(src: &str, alt: &str, asset: Option<AssetId>) -> Option<Inline> {
     if src.is_empty() {
         return None;
     }
     Some(Inline::Image {
         source: src.to_string(),
-        alt: if alt.is_empty() {
-            Vec::new()
-        } else {
-            vec![Inline::Text {
-                text: alt.to_string(),
-            }]
-        },
+        alt: if alt.is_empty() { Vec::new() } else { vec![Inline::Text { text: alt.to_string() }] },
         title: None,
         asset,
     })
 }
 
 fn register_image_asset(graph: &mut DocumentGraph, member_path: &str, display_href: &str) -> Option<AssetId> {
-    if let Some(existing) = graph
-        .assets
-        .iter()
-        .find(|asset| asset.source.as_deref() == Some(member_path))
-    {
+    if let Some(existing) = graph.assets.iter().find(|asset| asset.source.as_deref() == Some(member_path)) {
         return Some(existing.id);
     }
     let asset_id = AssetId(graph.assets.len() as u64 + 1);
@@ -111,14 +85,11 @@ fn register_image_asset(graph: &mut DocumentGraph, member_path: &str, display_hr
 }
 
 /// Materialize package bytes for registered assets from the OCF package.
-pub fn hydrate_package_assets(
-    graph: &mut DocumentGraph,
-    package: &OcfPackage,
-    ledger: &mut BudgetTracker,
-) {
+pub fn hydrate_package_assets(graph: &mut DocumentGraph, package: &OcfPackage, ledger: &mut BudgetTracker) {
     let mut losses = Vec::new();
     for asset in &mut graph.assets {
-        let Some(source) = asset.source.as_ref() else {
+        let Some(source) = asset.source.as_ref()
+        else {
             continue;
         };
         match package.read_member(source, ledger) {
@@ -141,20 +112,12 @@ pub fn hydrate_package_assets(
 }
 
 /// Materialize embedded image bytes for registered assets from the OCF package.
-pub fn hydrate_image_assets(
-    graph: &mut DocumentGraph,
-    package: &OcfPackage,
-    ledger: &mut BudgetTracker,
-) {
+pub fn hydrate_image_assets(graph: &mut DocumentGraph, package: &OcfPackage, ledger: &mut BudgetTracker) {
     hydrate_package_assets(graph, package, ledger);
 }
 
 fn register_stylesheet_asset(graph: &mut DocumentGraph, member_path: &str, _display_href: &str) {
-    if graph
-        .assets
-        .iter()
-        .any(|asset| asset.source.as_deref() == Some(member_path))
-    {
+    if graph.assets.iter().any(|asset| asset.source.as_deref() == Some(member_path)) {
         return;
     }
     let asset_id = AssetId(graph.assets.len() as u64 + 1);

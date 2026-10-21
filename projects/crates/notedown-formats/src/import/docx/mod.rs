@@ -1,12 +1,12 @@
 //! DOCX import via Acorn OPC and WordprocessingML projection.
 
-mod footnotes;
-mod numbering;
-mod oak_xml_util;
+pub mod footnotes;
+pub mod numbering;
 mod reader;
 mod rels;
 mod table;
-mod xml;
+pub mod xml;
+pub mod xml_extensions;
 
 pub use reader::{import_docx, import_docx_bytes};
 

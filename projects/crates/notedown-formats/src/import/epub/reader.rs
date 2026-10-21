@@ -2,34 +2,27 @@ use std::path::Path;
 
 use acorn_core::{Budget, BudgetTracker};
 use acorn_epub::OcfPackage;
-use notedown_ir::{
-    DocumentGraph, DocumentId, DocumentMetadata, LossMarker, SemanticStatus, SourceKind, SourceRef,
-};
+use notedown_ir::{DocumentGraph, DocumentId, DocumentMetadata, LossMarker, SemanticStatus, SourceKind, SourceRef};
 
-use super::map_ocf_error;
-use super::assets::{
-    find_cover_manifest_item, hydrate_package_assets, register_cover_asset,
-    register_stylesheet_assets,
+use super::{
+    assets::{find_cover_manifest_item, hydrate_package_assets, register_cover_asset, register_stylesheet_assets},
+    map_ocf_error,
+    navigation::{find_nav_manifest_item, parse_nav_toc, push_navigation_toc},
+    xhtml::blocks_from_xhtml_with_context,
 };
-use super::navigation::{find_nav_manifest_item, parse_nav_toc, push_navigation_toc};
-use super::xhtml::blocks_from_xhtml_with_context;
 use crate::FormatError;
 
 /// Import an EPUB file from disk into `notedown-ir`.
 pub fn import_epub(path: impl AsRef<Path>) -> Result<DocumentGraph, FormatError> {
     let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(|error| {
-        FormatError::invalid_input(format!("failed to read {}: {error}", path.display()))
-    })?;
+    let bytes = std::fs::read(path).map_err(|error| FormatError::invalid_input(format!("failed to read {}: {error}", path.display())))?;
     import_epub_bytes(&path.display().to_string(), &bytes)
 }
 
 /// Import EPUB bytes into `notedown-ir`.
 pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, FormatError> {
     if !looks_like_zip(bytes) {
-        return Err(FormatError::invalid_input(
-            "input is not a ZIP-based EPUB package",
-        ));
+        return Err(FormatError::invalid_input("input is not a ZIP-based EPUB package"));
     }
 
     let package = OcfPackage::open(label.to_string(), bytes.to_vec()).map_err(map_ocf_error)?;
@@ -87,19 +80,11 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
         let manifest = opf
             .manifest
             .get(&spine_item.idref)
-            .ok_or_else(|| {
-                FormatError::parse(
-                    "epub",
-                    format!("spine idref `{}` missing from manifest", spine_item.idref),
-                )
-            })?;
+            .ok_or_else(|| FormatError::parse("epub", format!("spine idref `{}` missing from manifest", spine_item.idref)))?;
         if !manifest.media_type.contains("xhtml") && !manifest.media_type.contains("html") {
             graph.push_loss(LossMarker {
                 code: "import.epub.unsupported_manifest_type".into(),
-                message: format!(
-                    "skipped spine item `{}` with media type `{}`",
-                    manifest.id, manifest.media_type
-                ),
+                message: format!("skipped spine item `{}` with media type `{}`", manifest.id, manifest.media_type),
                 status: SemanticStatus::Unsupported,
             });
             continue;
@@ -107,11 +92,7 @@ pub fn import_epub_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, For
 
         let member_path = OcfPackage::resolve_href(package.root_opf_path(), &manifest.href);
         let xhtml = package.read_member(&member_path, &mut ledger).map_err(map_ocf_error)?;
-        let blocks = blocks_from_xhtml_with_context(
-            &xhtml,
-            &mut graph,
-            Some(member_path.as_str()),
-        )?;
+        let blocks = blocks_from_xhtml_with_context(&xhtml, &mut graph, Some(member_path.as_str()))?;
         for block in blocks {
             let node = graph.push_block(block);
             graph.attach_source(SourceRef {

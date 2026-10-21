@@ -12,11 +12,7 @@ pub fn parse_relationship_targets(xml: &[u8]) -> Result<HashMap<String, String>,
 /// Derives the OPC relationships part path for a document part.
 pub fn document_rels_part_path(document_part: &str) -> String {
     let normalized = acorn_docx::normalize_part_path(document_part);
-    if let Some((dir, file)) = normalized.rsplit_once('/') {
-        format!("{dir}/_rels/{file}.rels")
-    } else {
-        format!("_rels/{normalized}.rels")
-    }
+    if let Some((dir, file)) = normalized.rsplit_once('/') { format!("{dir}/_rels/{file}.rels") } else { format!("_rels/{normalized}.rels") }
 }
 
 /// Reads document relationships for the given main document part when present.
@@ -25,7 +21,5 @@ pub fn read_document_relationships(
     document_part: &str,
     ledger: &mut acorn_core::BudgetTracker,
 ) -> Result<HashMap<String, String>, FormatError> {
-    package
-        .read_relationship_targets(&document_rels_part_path(document_part), ledger)
-        .map_err(map_opc_error)
+    package.read_relationship_targets(&document_rels_part_path(document_part), ledger).map_err(map_opc_error)
 }

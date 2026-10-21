@@ -2,10 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use notedown_ir::{Block, DocumentGraph, SemanticStatus};
 
-use super::oak_xml_util::{
-    attribute_value, document_root, element_is, element_text, elements_by_local_name,
-    parse_xml_bytes, u32_attribute,
-};
+use super::xml_extensions::{attribute_value, document_root, element_is, element_text, elements_by_local_name, parse_xml_bytes, u32_attribute};
 use oak_xml::ast::{XmlElement, XmlValue};
 
 /// Resolved footnote bodies keyed by `w:footnote` id.
@@ -20,10 +17,12 @@ pub fn footnotes_part_path() -> &'static str {
 
 /// Parses `word/footnotes.xml` into plain-text footnote bodies.
 pub fn parse_footnotes_xml_lossy(xml: &[u8]) -> FootnoteCatalog {
-    let Ok(value) = parse_xml_bytes(xml) else {
+    let Ok(value) = parse_xml_bytes(xml)
+    else {
         return FootnoteCatalog::new();
     };
-    let Ok(root) = document_root(&value) else {
+    let Ok(root) = document_root(&value)
+    else {
         return FootnoteCatalog::new();
     };
     let mut catalog = FootnoteCatalog::new();
@@ -45,12 +44,7 @@ pub fn parse_footnotes_xml_lossy(xml: &[u8]) -> FootnoteCatalog {
 
 fn footnote_body_text(footnote: &XmlElement) -> String {
     let mut body = String::new();
-    for paragraph in footnote
-        .children
-        .iter()
-        .filter_map(XmlValue::as_element)
-        .filter(|child| element_is(child, "p"))
-    {
+    for paragraph in footnote.children.iter().filter_map(XmlValue::as_element).filter(|child| element_is(child, "p")) {
         let text = paragraph_plain_text(paragraph);
         append_paragraph(&mut body, &text);
     }
@@ -59,12 +53,7 @@ fn footnote_body_text(footnote: &XmlElement) -> String {
 
 fn paragraph_plain_text(paragraph: &XmlElement) -> String {
     let mut text = String::new();
-    for run in paragraph
-        .children
-        .iter()
-        .filter_map(XmlValue::as_element)
-        .filter(|child| element_is(child, "r"))
-    {
+    for run in paragraph.children.iter().filter_map(XmlValue::as_element).filter(|child| element_is(child, "r")) {
         text.push_str(&run_plain_text(run));
     }
     text
@@ -85,17 +74,10 @@ fn run_plain_text(run: &XmlElement) -> String {
     text
 }
 
-/// Appends GFM footnote definition blocks for referenced ids with resolved bodies.
-pub fn append_footnote_definitions(
-    graph: &mut DocumentGraph,
-    catalog: &FootnoteCatalog,
-    referenced: &HashSet<u32>,
-) {
-    let mut ids: Vec<u32> = referenced
-        .iter()
-        .filter(|id| catalog.contains_key(id))
-        .copied()
-        .collect();
+/// Appends GFM footnote definition blocks for referenced ids with resolved
+/// bodies.
+pub fn append_footnote_definitions(graph: &mut DocumentGraph, catalog: &FootnoteCatalog, referenced: &HashSet<u32>) {
+    let mut ids: Vec<u32> = referenced.iter().filter(|id| catalog.contains_key(id)).copied().collect();
     ids.sort_unstable();
     for id in ids {
         let body = catalog.get(&id).expect("filtered above");

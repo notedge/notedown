@@ -22,10 +22,6 @@ pub(crate) fn push_table_block(graph: &mut DocumentGraph, table: TableState) {
     if table.rows.is_empty() {
         return;
     }
-    let rows = table
-        .rows
-        .into_iter()
-        .map(|cells| TableRow { cells })
-        .collect();
+    let rows = table.rows.into_iter().map(|cells| TableRow { cells }).collect();
     graph.push_block(Block::Table { rows });
 }

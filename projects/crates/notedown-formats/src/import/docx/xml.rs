@@ -1,16 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
-use notedown_ir::{Asset, AssetId, AssetKind, Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus};
+use notedown_ir::{
+    Asset, AssetId, AssetKind, Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus,
+};
 use oak_xml::ast::{XmlElement, XmlValue};
 
 use super::{
     footnotes::FootnoteCatalog,
     numbering::NumberingCatalog,
-    oak_xml_util::{
+    table::{TableState, append_cell_paragraph, push_table_block},
+    xml_extensions::{
         attribute_value, bool_from_element, child_element, document_root, element_is, element_text, elements_by_local_name, parse_xml_bytes,
         u32_attribute,
     },
-    table::{TableState, append_cell_paragraph, push_table_block},
 };
 use crate::FormatError;
 
@@ -43,22 +45,30 @@ pub fn parse_document_xml(
     if ["fldChar", "instrText", "delInstrText"].iter().any(|name| !elements_by_local_name(root, name).is_empty()) {
         graph.push_loss(LossMarker {
             code: "reader.docx.fields".into(),
-            message: "field boundaries and field instructions are detected but dynamic field semantics are not represented in notedown-ir".into(),
+            message: "field boundaries and field instructions are detected but dynamic field semantics are not represented in notedown-ir"
+                .into(),
             status: SemanticStatus::Partial,
         });
     }
     if ["object", "oleObject", "pict", "AlternateContent"].iter().any(|name| !elements_by_local_name(root, name).is_empty()) {
         graph.push_loss(LossMarker {
             code: "reader.docx.embedded_objects".into(),
-            message: "embedded OLE objects, legacy VML drawings, or DrawingML alternate content are detected but are not represented in notedown-ir".into(),
+            message:
+                "embedded OLE objects, legacy VML drawings, or DrawingML alternate content are detected but are not represented in notedown-ir"
+                    .into(),
             status: SemanticStatus::Partial,
         });
     }
-    let unsupported_run_properties = elements_by_local_name(root, "rPr").into_iter().flat_map(|r_pr| {
-        r_pr.children.iter().filter_map(XmlValue::as_element).filter(|child| {
-            !["b", "i", "u", "strike", "vertAlign", "color", "sz", "szCs", "rFonts", "highlight"].contains(&super::oak_xml_util::local_name(&child.name))
+    let unsupported_run_properties = elements_by_local_name(root, "rPr")
+        .into_iter()
+        .flat_map(|r_pr| {
+            r_pr.children.iter().filter_map(XmlValue::as_element).filter(|child| {
+                !["b", "i", "u", "strike", "vertAlign", "color", "sz", "szCs", "rFonts", "highlight"]
+                    .contains(&super::xml_extensions::local_name(&child.name))
+            })
         })
-    }).next().is_some();
+        .next()
+        .is_some();
     if unsupported_run_properties {
         graph.push_loss(LossMarker {
             code: "reader.docx.character_properties".into(),
@@ -76,12 +86,15 @@ pub fn parse_document_xml(
     if !elements_by_local_name(root, "pageBreakBefore").is_empty() || !elements_by_local_name(root, "lastRenderedPageBreak").is_empty() {
         graph.push_loss(LossMarker {
             code: "reader.docx.page_breaks".into(),
-            message: "paragraph and layout page-break markers are projected to ordinary content because notedown-ir has no page-break node".into(),
+            message: "paragraph and layout page-break markers are projected to ordinary content because notedown-ir has no page-break node"
+                .into(),
             status: SemanticStatus::Partial,
         });
     }
     if elements_by_local_name(root, "sectPr").iter().any(|element| {
-        ["pgSz", "pgMar", "cols", "docGrid", "headerReference", "footerReference"].iter().any(|name| !elements_by_local_name(element, name).is_empty())
+        ["pgSz", "pgMar", "cols", "docGrid", "headerReference", "footerReference"]
+            .iter()
+            .any(|name| !elements_by_local_name(element, name).is_empty())
     }) {
         graph.push_loss(LossMarker {
             code: "reader.docx.section_layout".into(),
@@ -182,7 +195,8 @@ fn parse_paragraph_element(
             }
         }
         else if element_is(child, "del") {
-            // Deleted text is intentionally omitted while the document-level loss records the revision gap.
+            // Deleted text is intentionally omitted while the document-level
+            // loss records the revision gap.
         }
         else if element_is(child, "footnoteReference") {
             push_footnote_reference(graph, &mut paragraph.inlines, footnotes, referenced_footnotes, u32_attribute(child, "id"));
@@ -203,8 +217,12 @@ fn append_paragraph_run(
     let mut run = parse_run_element(element);
     run.text.clear();
     for child in element.children.iter().filter_map(XmlValue::as_element) {
-        if element_is(child, "t") { run.text.push_str(&element_text(child)); }
-        else if element_is(child, "tab") { run.text.push('\t'); }
+        if element_is(child, "t") {
+            run.text.push_str(&element_text(child));
+        }
+        else if element_is(child, "tab") {
+            run.text.push('\t');
+        }
         else if element_is(child, "br") {
             paragraph.push_run(&run);
             run.text.clear();
@@ -261,9 +279,7 @@ fn parse_run_element(element: &XmlElement) -> RunState {
             run.italic = bool_from_element(Some(italic), true);
         }
         if let Some(underline) = child_element(r_pr, "u") {
-            run.underline = attribute_value(underline, "val")
-                .map(|value| value != "none")
-                .unwrap_or(true);
+            run.underline = attribute_value(underline, "val").map(|value| value != "none").unwrap_or(true);
         }
         if let Some(strike) = child_element(r_pr, "strike") {
             run.strike = bool_from_element(Some(strike), true);
@@ -377,7 +393,10 @@ impl ParagraphState {
                     self.push_hyperlink(&segment, rels, graph);
                     segment.inlines.clear();
                     push_inline(&mut self.inlines, inline.clone());
-                } else { segment.inlines.push(inline.clone()); }
+                }
+                else {
+                    segment.inlines.push(inline.clone());
+                }
             }
             self.push_hyperlink(&segment, rels, graph);
             return;
@@ -389,11 +408,7 @@ impl ParagraphState {
         if let Some(url) = url {
             push_inline(
                 &mut self.inlines,
-                Inline::Link {
-                    target: RelationEndpoint::ExternalUri(url.clone()),
-                    display: link.inlines.clone(),
-                    title: None,
-                },
+                Inline::Link { target: RelationEndpoint::ExternalUri(url.clone()), display: link.inlines.clone(), title: None },
             );
             return;
         }
@@ -612,7 +627,8 @@ fn flush_pending_list(graph: &mut DocumentGraph, body: &mut BodyState, numbering
         });
     }
     let mut cursor = 0;
-    let items = build_nested_items(graph, &list.items, &mut cursor, list.items.first().map_or(0, |item| item.level), list.num_id, ordered, numbering);
+    let items =
+        build_nested_items(graph, &list.items, &mut cursor, list.items.first().map_or(0, |item| item.level), list.num_id, ordered, numbering);
     graph.push_block(Block::List { ordered, items });
 }
 
@@ -628,8 +644,12 @@ fn build_nested_items(
     let mut items = Vec::new();
     while *cursor < pending.len() {
         let current = &pending[*cursor];
-        if current.level < level { break; }
-        if current.level > level { break; }
+        if current.level < level {
+            break;
+        }
+        if current.level > level {
+            break;
+        }
         *cursor += 1;
         let mut item = ListItem { content: current.content.clone(), children: Vec::new() };
         if *cursor < pending.len() && pending[*cursor].level > level {
@@ -697,51 +717,4 @@ fn document_id_for(label: &str) -> DocumentId {
         hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
     }
     DocumentId(hash)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::markdown::export_markdown;
-
-    #[test]
-    fn parses_footnote_reference_inside_run() {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p>
-      <w:r><w:t>See</w:t></w:r>
-      <w:r><w:footnoteReference w:id="1"/></w:r>
-      <w:r><w:t> for details.</w:t></w:r>
-    </w:p>
-  </w:body>
-</w:document>"#;
-        let mut graph = new_graph("footnote");
-        let referenced = parse_document_xml(xml, &HashMap::new(), &NumberingCatalog::default(), &FootnoteCatalog::new(), &mut graph)
-            .expect("parse document");
-        assert!(referenced.contains(&1));
-        let markdown = export_markdown(&graph).expect("export markdown");
-        assert!(markdown.contains("See[^1] for details."), "markdown was: {markdown:?}, blocks: {:?}", graph.blocks);
-        assert!(
-            graph.coverage.loss.iter().any(|loss| { loss.code == "reader.docx.footnote_body" && loss.status == SemanticStatus::Unresolved })
-        );
-    }
-
-    #[test]
-    fn parses_bold_and_italic_runs() {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p>
-      <w:r><w:rPr><w:b/></w:rPr><w:t>Bold</w:t></w:r>
-      <w:r><w:rPr><w:i/></w:rPr><w:t> italic</w:t></w:r>
-    </w:p>
-  </w:body>
-</w:document>"#;
-        let mut graph = new_graph("styled");
-        parse_document_xml(xml, &HashMap::new(), &NumberingCatalog::default(), &FootnoteCatalog::new(), &mut graph).expect("parse document");
-        let markdown = export_markdown(&graph).expect("export markdown");
-        assert!(markdown.contains("**Bold**"));
-        assert!(markdown.contains("* italic*"), "markdown was: {markdown}");
-    }
 }

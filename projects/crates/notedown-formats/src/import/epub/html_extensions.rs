@@ -1,17 +1,15 @@
-use oak_core::parser::session::ParseSession;
-use oak_core::query::QueryBudget;
-use oak_core::{Builder, SourceText};
-use oak_html::ast::{Element, HtmlDocument, HtmlNode, Text};
-use oak_html::query::{select_css_elements, HtmlDocumentView};
-use oak_html::{HtmlBuilder, HtmlLanguage};
+use oak_core::{Builder, SourceText, parser::session::ParseSession, query::QueryBudget};
+use oak_html::{
+    HtmlBuilder, HtmlLanguage,
+    ast::{Element, HtmlDocument, HtmlNode, Text},
+    query::{HtmlDocumentView, select_css_elements},
+};
 
 use crate::FormatError;
 
 /// Parses XHTML or HTML bytes into a typed `oak-html` document.
 pub fn parse_html_bytes(html: &[u8]) -> Result<HtmlDocument, FormatError> {
-    let text = std::str::from_utf8(html).map_err(|error| {
-        FormatError::parse("epub", format!("html is not utf-8: {error}"))
-    })?;
+    let text = std::str::from_utf8(html).map_err(|error| FormatError::parse("epub", format!("html is not utf-8: {error}")))?;
     parse_html_text(text)
 }
 
@@ -22,9 +20,7 @@ pub fn parse_html_text(text: &str) -> Result<HtmlDocument, FormatError> {
     let builder = HtmlBuilder::new(language);
     let mut cache = ParseSession::<HtmlLanguage>::default();
     let built = builder.build(&source, &[], &mut cache);
-    built
-        .result
-        .map_err(|error| FormatError::parse("epub", error.to_string()))
+    built.result.map_err(|error| FormatError::parse("epub", error.to_string()))
 }
 
 /// Returns whether an element's tag name matches `expected` case-insensitively.
@@ -34,30 +30,17 @@ pub fn element_is(element: &Element, expected: &str) -> bool {
 
 /// Reads an attribute by name case-insensitively.
 pub fn attribute_value(element: &Element, expected: &str) -> Option<String> {
-    element
-        .attributes
-        .iter()
-        .find(|attr| attr.name.eq_ignore_ascii_case(expected))
-        .and_then(|attr| attr.value.clone())
+    element.attributes.iter().find(|attr| attr.name.eq_ignore_ascii_case(expected)).and_then(|attr| attr.value.clone())
 }
 
 /// Returns all direct child elements regardless of tag name.
 pub fn direct_child_elements<'a>(element: &'a Element) -> Vec<&'a Element> {
-    element
-        .children
-        .iter()
-        .filter_map(as_element)
-        .collect()
+    element.children.iter().filter_map(as_element).collect()
 }
 
 /// Returns direct child elements whose tag name matches `expected`.
 pub fn child_elements<'a>(element: &'a Element, expected: &str) -> Vec<&'a Element> {
-    element
-        .children
-        .iter()
-        .filter_map(as_element)
-        .filter(|child| element_is(child, expected))
-        .collect()
+    element.children.iter().filter_map(as_element).filter(|child| element_is(child, expected)).collect()
 }
 
 fn as_element(node: &HtmlNode) -> Option<&Element> {
@@ -111,14 +94,10 @@ pub fn first_descendant_element<'a>(element: &'a Element, expected: &str) -> Opt
 }
 
 /// Selects elements in a document using a CSS selector subset.
-pub fn select_css<'a>(
-    document: &'a HtmlDocument,
-    selector: &str,
-) -> Result<Vec<&'a Element>, FormatError> {
+pub fn select_css<'a>(document: &'a HtmlDocument, selector: &str) -> Result<Vec<&'a Element>, FormatError> {
     let view = HtmlDocumentView::from_document(document);
-    let (_, elements) = select_css_elements(&view, selector, QueryBudget::default()).map_err(
-        |error| FormatError::parse("epub", error.to_string()),
-    )?;
+    let (_, elements) =
+        select_css_elements(&view, selector, QueryBudget::default()).map_err(|error| FormatError::parse("epub", error.to_string()))?;
     Ok(elements)
 }
 

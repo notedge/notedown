@@ -7,6 +7,7 @@ Document semantic IR and format import/export for the R-7 stack.
 
 | Crate | Role |
 |-------|------|
+| `notedown` | Feature-gated facade (`notedown::ir`, `notedown::formats`) |
 | `notedown-ir` | Document graph, relations, assets, wire `notedown-ir/v1`, validation |
 | `notedown-formats` | Markdown, DOC, DOCX, EPUB, PDF and HTML import/export via Oak and Acorn |
 

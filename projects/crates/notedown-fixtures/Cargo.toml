@@ -1,0 +1,40 @@
+[package]
+name = "notedown-fixtures"
+publish = false
+version = "0.1.0"
+authors = ["Aster <192607617@qq.com>"]
+description = "Downstream Oak language conformance fixtures for Notedown and Panduck"
+readme = "readme.md"
+license = "MPL-2.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+oak-core = { workspace = true }
+oak-html = { workspace = true, features = ["serde"] }
+oak-markdown = { workspace = true, features = ["serde"] }
+oak-notedown = { workspace = true, features = ["serde", "diagnostic"] }
+oak-org-mode = { workspace = true, features = ["serde"] }
+oak-testing = { workspace = true }
+oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
+acorn-doc = { workspace = true }
+notedown-formats = { path = "../notedown-formats", default-features = false, features = ["doc", "markdown", "notedown"] }
+notedown-ir = { path = "../notedown-ir" }
+serde_json = "1.0"
+
+[dev-dependencies]
+boost-benchmark = { workspace = true }
+cfb = "0.7.3"
+markdown = "1.0.0"
+pulldown-cmark = "0.13.1"
+html5ever = "0.38.0"
+
+[[bench]]
+name = "compare_markdown"
+harness = false
+
+[[bench]]
+name = "compare_html"
+harness = false

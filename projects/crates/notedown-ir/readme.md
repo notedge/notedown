@@ -14,4 +14,4 @@ Serialize with [`DocumentEnvelope`](src/wire.rs) (`notedown-ir/v1`). Call `valid
 
 ## Acceptance
 
-Integration tests in `tests/acceptance.rs` mirror Living `规划设计/notedown/00-文档语义IR独立合同.md`.
+Integration tests under `tests/` are grouped by concern: `contract/`, `graph/`, `inline/`, and `validate/`.

@@ -4,7 +4,7 @@ use notedown_ir::{
 };
 
 #[test]
-fn living_00_v01_unknown_inline_reference() {
+fn unknown_inline_reference() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
     let _allocated = ids.node_id();
@@ -18,7 +18,7 @@ fn living_00_v01_unknown_inline_reference() {
 }
 
 #[test]
-fn living_00_v02_unresolved_relation_target_valid() {
+fn unresolved_relation_target_is_valid() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
     let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "x".to_string() }] });
@@ -34,7 +34,7 @@ fn living_00_v02_unresolved_relation_target_valid() {
 }
 
 #[test]
-fn living_00_v03_duplicate_asset_ids() {
+fn duplicate_asset_ids() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
     let asset_id = ids.asset_id();
@@ -56,7 +56,7 @@ fn living_00_v03_duplicate_asset_ids() {
 }
 
 #[test]
-fn living_00_v04_duplicate_node_and_link_ids() {
+fn duplicate_node_and_link_ids() {
     let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
     graph.push_block_with_id(notedown_ir::NodeId(7), Block::Paragraph { content: Vec::new() });
     graph.push_block_with_id(notedown_ir::NodeId(7), Block::Paragraph { content: Vec::new() });
@@ -81,7 +81,7 @@ fn living_00_v04_duplicate_node_and_link_ids() {
 }
 
 #[test]
-fn living_00_v05_missing_source_and_relation_endpoints() {
+fn missing_source_and_relation_endpoints() {
     let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
     graph.attach_source(SourceRef { node: notedown_ir::NodeId(10), kind: SourceKind::Manual, precision: SemanticStatus::Unresolved });
     for (id, source, target) in [
@@ -101,7 +101,7 @@ fn living_00_v05_missing_source_and_relation_endpoints() {
 }
 
 #[test]
-fn living_00_v06_missing_section_and_list_children() {
+fn missing_section_and_list_children() {
     let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
     graph.push_block(Block::Section { level: 1, title: Vec::new(), children: vec![notedown_ir::NodeId(20)] });
     graph.push_block(Block::List {
@@ -123,7 +123,7 @@ fn living_00_v06_missing_section_and_list_children() {
 }
 
 #[test]
-fn living_00_v07_containment_cycles_rejected_relation_cycles_allowed() {
+fn containment_cycles_rejected_relation_cycles_allowed() {
     let mut cyclic = DocumentGraph::new(notedown_ir::DocumentId(1));
     cyclic.push_block_with_id(notedown_ir::NodeId(1), Block::Section { level: 1, title: Vec::new(), children: vec![notedown_ir::NodeId(2)] });
     cyclic.push_block_with_id(
@@ -155,7 +155,7 @@ fn living_00_v07_containment_cycles_rejected_relation_cycles_allowed() {
 }
 
 #[test]
-fn living_00_v08_deep_containment_without_stack_overflow() {
+fn deep_containment_without_stack_overflow() {
     const NODE_COUNT: u64 = 20_000;
     let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
     for id in 1..=NODE_COUNT {

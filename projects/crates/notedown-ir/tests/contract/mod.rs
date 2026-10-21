@@ -1,4 +1,5 @@
-//! Living `00` acceptance probes — no parser, AST, or source file required.
+//! IR contract probes — graph semantics, wire round-trip, and provenance
+//! boundaries.
 
 use notedown_ir::{
     Asset, AssetId, AssetKind, Block, DocumentEnvelope, DocumentGraph, DocumentMetadata, IdAllocator, Inline, LinkId, NodeId, Relation,

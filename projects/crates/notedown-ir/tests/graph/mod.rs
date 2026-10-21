@@ -18,7 +18,7 @@ fn construct_document_without_parser() {
 }
 
 #[test]
-fn living_00_v09_revision_tracks_semantic_updates() {
+fn revision_tracks_semantic_updates() {
     let mut ids = IdAllocator::default();
     let mut graph = DocumentGraph::new(ids.document_id());
     assert_eq!(graph.revision, 0);

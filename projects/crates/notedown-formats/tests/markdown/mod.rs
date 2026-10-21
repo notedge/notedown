@@ -201,7 +201,7 @@ fn markdown_footnote_reopen_preserves_reference_body_and_following_text() {
 }
 
 #[test]
-fn living_00_07_markdown_export_from_programmatic_ir() {
+fn export_from_programmatic_ir() {
     let mut graph = DocumentGraph::new(DocumentId(42));
     graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "plain ir".into() }] });
     let markdown = export_markdown(&graph).expect("export markdown from programmatic ir");

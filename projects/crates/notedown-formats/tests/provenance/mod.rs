@@ -1,4 +1,4 @@
-//! G-IR-3: provenance lives in the source sidecar and must not affect block
+//! Provenance sidecar isolation — source metadata must not affect block
 //! semantics or export.
 
 use notedown_formats::{export::markdown::export_markdown, import::markdown::import_markdown_bytes};
@@ -9,7 +9,7 @@ fn block_semantics(graph: &DocumentGraph) -> Vec<&Block> {
 }
 
 #[test]
-fn g_ir_3_source_sidecar_does_not_affect_markdown_export() {
+fn source_sidecar_does_not_affect_markdown_export() {
     let source_md = "# Title\n\nShared body text.\n";
     let mut with_text_span = import_markdown_bytes("text-span.md", source_md).expect("import markdown");
     let mut with_package_source = import_markdown_bytes("package.md", source_md).expect("import markdown");
@@ -52,7 +52,7 @@ fn g_ir_3_source_sidecar_does_not_affect_markdown_export() {
 }
 
 #[test]
-fn g_ir_3_unsupported_source_precision_round_trips_in_sidecar_only() {
+fn unsupported_source_precision_round_trips_in_sidecar_only() {
     let mut graph = import_markdown_bytes("probe.md", "Probe paragraph.\n").expect("import");
     let paragraph = graph.blocks[0].id;
     graph.attach_source(SourceRef {

@@ -32,84 +32,118 @@ epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 html = ["dep:oak-core", "dep:oak-html"]
 
 [[test]]
-name = "docx"
-required-features = ["docx", "markdown"]
+name = "capability"
+path = "tests/capability.rs"
 
 [[test]]
-name = "docx_export"
-required-features = ["docx", "markdown"]
+name = "common"
+path = "tests/common/mod.rs"
+required-features = ["markdown"]
 
 [[test]]
-name = "markdown_project_docx"
-required-features = ["docx", "markdown"]
-
-[[test]]
-name = "markdown_project_epub"
-required-features = ["epub", "markdown"]
-
-[[test]]
-name = "epub"
-required-features = ["epub", "markdown"]
-
-[[test]]
-name = "pdf"
-required-features = ["pdf"]
-
-[[test]]
-name = "doc"
-required-features = ["doc"]
-
-[[test]]
-name = "html_import"
-required-features = ["html", "markdown"]
+name = "provenance"
+path = "tests/provenance/mod.rs"
+required-features = ["markdown"]
 
 [[test]]
 name = "markdown"
+path = "tests/markdown/mod.rs"
+required-features = ["markdown"]
+
+[[test]]
+name = "markdown_export_project"
+path = "tests/markdown/export_project.rs"
 required-features = ["markdown"]
 
 [[test]]
 name = "notedown"
+path = "tests/notedown/mod.rs"
 required-features = ["markdown", "notedown"]
 
 [[test]]
-name = "import_common"
-required-features = ["markdown"]
-
-[[test]]
-name = "import_doc"
-required-features = ["doc"]
-
-[[test]]
-name = "import_docx_numbering"
-required-features = ["docx"]
-
-[[test]]
-name = "import_docx_xml_extensions"
-required-features = ["docx"]
-
-[[test]]
-name = "import_docx_xml"
+name = "docx"
+path = "tests/docx/mod.rs"
 required-features = ["docx", "markdown"]
 
 [[test]]
-name = "export_markdown_project"
-required-features = ["markdown"]
+name = "docx_export"
+path = "tests/docx/export.rs"
+required-features = ["docx", "markdown"]
 
 [[test]]
-name = "import_epub_ast_lowering"
-required-features = ["epub"]
+name = "docx_import_numbering"
+path = "tests/docx/import_numbering.rs"
+required-features = ["docx"]
 
 [[test]]
-name = "import_epub_navigation"
-required-features = ["epub"]
+name = "docx_import_xml"
+path = "tests/docx/import_xml.rs"
+required-features = ["docx", "markdown"]
 
 [[test]]
-name = "import_epub_xhtml"
+name = "docx_import_xml_extensions"
+path = "tests/docx/import_xml_extensions.rs"
+required-features = ["docx"]
+
+[[test]]
+name = "doc"
+path = "tests/doc/mod.rs"
+required-features = ["doc"]
+
+[[test]]
+name = "doc_import"
+path = "tests/doc/import.rs"
+required-features = ["doc"]
+
+[[test]]
+name = "epub"
+path = "tests/epub/mod.rs"
 required-features = ["epub", "markdown"]
 
 [[test]]
-name = "import_pdf_internal"
+name = "epub_import_ast_lowering"
+path = "tests/epub/import_ast_lowering.rs"
+required-features = ["epub"]
+
+[[test]]
+name = "epub_import_navigation"
+path = "tests/epub/import_navigation.rs"
+required-features = ["epub"]
+
+[[test]]
+name = "epub_import_xhtml"
+path = "tests/epub/import_xhtml.rs"
+required-features = ["epub", "markdown"]
+
+[[test]]
+name = "pdf"
+path = "tests/pdf/mod.rs"
 required-features = ["pdf"]
+
+[[test]]
+name = "pdf_import_internal"
+path = "tests/pdf/import_internal.rs"
+required-features = ["pdf"]
+
+[[test]]
+name = "html"
+path = "tests/html/mod.rs"
+required-features = ["html", "markdown"]
+
+[[test]]
+name = "html_import"
+path = "tests/html/import.rs"
+required-features = ["html", "markdown"]
+
+[[test]]
+name = "markdown_to_docx"
+path = "tests/integration/markdown_to_docx.rs"
+required-features = ["docx", "markdown"]
+
+[[test]]
+name = "markdown_to_epub"
+path = "tests/integration/markdown_to_epub.rs"
+required-features = ["epub", "markdown"]
 
 [dev-dependencies]
 cfb = { workspace = true }

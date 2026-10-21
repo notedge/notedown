@@ -1,4 +1,7 @@
-use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, RelationEndpoint, SemanticStatus};
+use notedown_ir::{
+    Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, NodeId, RelationEndpoint, SemanticStatus, SourceKind,
+    SourceRef,
+};
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_html::{
     HtmlBuilder, HtmlLanguage,
@@ -87,11 +90,8 @@ pub fn import_html_with_links(label: &str, text: &str) -> Result<HtmlImport, For
         .map(|href| href.trim().to_string())
         .filter(|href| !href.is_empty());
     let links = collect_links(&document);
-    let roots = body_children(&document);
-    for element in roots {
-        for block in lower_blocks(element, &mut graph) {
-            graph.push_block(block);
-        }
+    for (block, span) in lower_children(body_children(&document), &mut graph) {
+        push_block_with_source(&mut graph, block, span);
     }
     register_image_assets(&mut graph);
     collect_unsupported_losses(&document, &mut graph);
@@ -133,12 +133,7 @@ fn collect_element_links(element: &Element, links: &mut Vec<HtmlLink>) {
             push_link(element, "src", HtmlLinkRole::Src, links);
             if let Some(srcset) = element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case("srcset")) {
                 for target in parse_srcset(srcset.value.as_deref().unwrap_or_default()) {
-                    links.push(HtmlLink {
-                        target,
-                        role: HtmlLinkRole::SrcSet,
-                        start: srcset.span.start,
-                        end: srcset.span.end,
-                    });
+                    links.push(HtmlLink { target, role: HtmlLinkRole::SrcSet, start: srcset.span.start, end: srcset.span.end });
                 }
             }
         }
@@ -175,10 +170,64 @@ fn parse_srcset(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn body_children(document: &HtmlDocument) -> Vec<&Element> {
+fn body_children(document: &HtmlDocument) -> &[HtmlNode] {
     let body = document.nodes.iter().filter_map(as_element).find_map(find_body);
-    body.map(|element| element.children.iter().filter_map(as_element).collect())
-        .unwrap_or_else(|| document.nodes.iter().filter_map(as_element).collect())
+    body.map(|element| element.children.as_slice()).unwrap_or_else(|| document.nodes.as_slice())
+}
+
+/// Lower sibling nodes in document order without dropping authored inline
+/// content that sits directly under a container element.
+fn lower_children(children: &[HtmlNode], graph: &mut DocumentGraph) -> Vec<(Block, std::ops::Range<usize>)> {
+    let mut result = Vec::new();
+    let mut pending = Vec::new();
+    let mut pending_span: Option<std::ops::Range<usize>> = None;
+    for child in children {
+        match child {
+            HtmlNode::Element(element) if is_block_element(element) => {
+                flush_inline_run(&mut result, &mut pending, &mut pending_span);
+                result.extend(lower_blocks(element, graph));
+            }
+            HtmlNode::Element(element) if is_unsupported_element(element) => {}
+            HtmlNode::Element(element) => {
+                if pending_span.is_none() {
+                    pending_span = Some(element.span.clone().into());
+                }
+                pending.extend(lower_inline_element(element, graph));
+            }
+            HtmlNode::Text(text) => {
+                if pending_span.is_none() {
+                    pending_span = Some(text.span.clone().into());
+                }
+                push_text(&mut pending, text.content.clone());
+            }
+            HtmlNode::Comment(_) => {}
+        }
+    }
+    flush_inline_run(&mut result, &mut pending, &mut pending_span);
+    result
+}
+
+fn flush_inline_run(result: &mut Vec<(Block, std::ops::Range<usize>)>, pending: &mut Vec<Inline>, span: &mut Option<std::ops::Range<usize>>) {
+    let Some(span) = span.take()
+    else {
+        return;
+    };
+    if pending.iter().all(|inline| matches!(inline, Inline::Text { text } if text.trim().is_empty())) {
+        pending.clear();
+        return;
+    }
+    result.push((Block::Paragraph { content: std::mem::take(pending) }, span));
+}
+
+/// Push a lowered block and record its byte range in the imported text.
+fn push_block_with_source(graph: &mut DocumentGraph, block: Block, span: std::ops::Range<usize>) -> NodeId {
+    let node = graph.push_block(block);
+    graph.attach_source(SourceRef {
+        node,
+        kind: SourceKind::TextSpan { start: span.start as u32, end: span.end as u32 },
+        precision: SemanticStatus::Resolved,
+    });
+    node
 }
 
 fn find_body(element: &Element) -> Option<&Element> {
@@ -229,23 +278,27 @@ fn attribute(element: &Element, name: &str) -> Option<String> {
     element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case(name)).and_then(|attribute| attribute.value.clone())
 }
 
-fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<Block> {
+fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std::ops::Range<usize>)> {
     let tag = element.tag_name.to_ascii_lowercase();
+    let span: std::ops::Range<usize> = element.span.clone().into();
     match tag.as_str() {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            vec![Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph), children: Vec::new() }]
+            vec![(Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph), children: Vec::new() }, span)]
         }
-        "p" => vec![Block::Paragraph { content: lower_inlines(element, graph) }],
-        "blockquote" => vec![Block::Quote { content: lower_inlines(element, graph) }],
-        "pre" => vec![Block::Code {
-            language: element
-                .children
-                .iter()
-                .filter_map(as_element)
-                .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
-                .and_then(|child| attribute(child, "class")),
-            content: text_content(element),
-        }],
+        "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph) }, span)],
+        "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph) }, span)],
+        "pre" => vec![(
+            Block::Code {
+                language: element
+                    .children
+                    .iter()
+                    .filter_map(as_element)
+                    .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                    .and_then(|child| attribute(child, "class")),
+                content: text_content(element),
+            },
+            span,
+        )],
         "ul" | "ol" => {
             let items = element
                 .children
@@ -254,7 +307,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<Block> {
                 .filter(|child| child.tag_name.eq_ignore_ascii_case("li"))
                 .map(|item| lower_list_item(item, graph))
                 .collect();
-            vec![Block::List { ordered: tag == "ol", items }]
+            vec![(Block::List { ordered: tag == "ol", items }, span)]
         }
         "table" => {
             let rows = descendants(element, "tr")
@@ -269,16 +322,10 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<Block> {
                         .collect(),
                 })
                 .collect();
-            vec![Block::Table { rows }]
+            vec![(Block::Table { rows }, span)]
         }
-        "hr" => vec![Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }],
-        "section" | "article" | "main" | "div" | "figure" | "nav" => {
-            let mut blocks = Vec::new();
-            for child in element.children.iter().filter_map(as_element) {
-                blocks.extend(lower_blocks(child, graph));
-            }
-            blocks
-        }
+        "hr" => vec![(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }, span)],
+        "section" | "article" | "main" | "div" | "figure" | "nav" => lower_children(&element.children, graph),
         _ => Vec::new(),
     }
 }
@@ -287,8 +334,8 @@ fn lower_list_item(item: &Element, graph: &mut DocumentGraph) -> notedown_ir::Li
     let mut children = Vec::new();
     for child in item.children.iter().filter_map(as_element) {
         if is_block_element(child) {
-            for block in lower_blocks(child, graph) {
-                children.push(graph.push_block(block));
+            for (block, span) in lower_blocks(child, graph) {
+                children.push(push_block_with_source(graph, block, span));
             }
         }
     }

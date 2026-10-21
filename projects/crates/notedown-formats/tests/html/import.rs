@@ -2,7 +2,36 @@ use notedown_formats::{
     export::html::export_html,
     import::html::{HtmlLinkRole, import_html_text, import_html_with_links},
 };
-use notedown_ir::{Block, BreakKind, Inline, RelationKind, SemanticStatus};
+use notedown_ir::{Block, BreakKind, Inline, RelationKind, SemanticStatus, SourceKind};
+
+#[test]
+fn html_import_records_block_source_spans() {
+    let html = "<body><h1>Title</h1><p>Hello</p></body>";
+    let graph = import_html_text("spans.html", html).expect("import html");
+    assert_eq!(graph.blocks.len(), 2);
+    assert_eq!(graph.sources.len(), 2);
+    for source in &graph.sources {
+        let SourceKind::TextSpan { start, end } = source.kind
+        else {
+            panic!("text span expected, got {:?}", source.kind)
+        };
+        assert!(start < end, "{source:?}");
+        assert!(end as usize <= html.len(), "{source:?}");
+        assert_eq!(source.precision, SemanticStatus::Resolved);
+    }
+}
+
+#[test]
+fn html_import_keeps_inline_content_under_containers() {
+    let graph = import_html_text(
+        "container.html",
+        r#"<body><div>Loose text <img src="a.png" alt="A"> tail</div><figure><img src="b.png" alt="B"></figure></body>"#,
+    )
+    .expect("import html");
+    let paragraphs = graph.blocks.iter().filter(|node| matches!(node.block, Block::Paragraph { .. })).count();
+    assert_eq!(paragraphs, 2, "{:?}", graph.blocks);
+    assert_eq!(graph.assets.len(), 2);
+}
 
 #[test]
 fn html_import_reports_link_candidates_with_base_and_source_spans() {

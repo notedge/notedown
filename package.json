@@ -1,5 +1,5 @@
 {
-    "name": "notedown-workspace",
+    "name": "@notedown/notedown-workspace",
     "private": true,
     "scripts": {
         "build": "cargo build --release -p notedown-ir -p notedown-formats",

@@ -7,10 +7,15 @@ This is a comprehensive test file for the Oak Markdown lexer, covering various M
 ### Different Heading Levels
 
 # Heading 1
+
 ## Heading 2
+
 ### Heading 3
+
 #### Heading 4
+
 ##### Heading 5
+
 ###### Heading 6
 
 ## Text Formatting
@@ -93,12 +98,14 @@ ls -la
 ### Nested Lists
 
 1. First main item
-   - Sub-item A
-   - Sub-item B
+    - Sub-item A
+    - Sub-item B
 2. Second main item
-   - Sub-item C
-   * Alternative sub-bullet
-   + Another style
+    - Sub-item C
+
+    * Alternative sub-bullet
+
+    + Another style
 
 ### Task Lists
 
@@ -147,12 +154,12 @@ ls -la
 ### Blockquote with Other Elements
 
 > ### Heading in Blockquote
-> 
+>
 > This is **bold** text in a blockquote.
-> 
+>
 > - List item in blockquote
 > - Another item
-> 
+>
 > ```
 > Code block in blockquote
 > ```
@@ -170,16 +177,16 @@ ls -la
 
 | Left Aligned | Center Aligned | Right Aligned |
 |:-------------|:--------------:|--------------:|
-| Left         | Center         | Right         |
-| Text         | Text           | Text          |
+| Left         |     Center     |         Right |
+| Text         |      Text      |          Text |
 
 ### Complex Table
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| Lexer   | Tokenizes input | ✅ |
-| Parser  | Builds AST | ✅ |
-| Linter  | Finds issues | 🚧 |
+| Feature | Description     | Status |
+|---------|-----------------|--------|
+| Lexer   | Tokenizes input | ✅     |
+| Parser  | Builds AST      | ✅     |
+| Linter  | Finds issues    | 🚧     |
 
 ## Horizontal Rules
 
@@ -236,7 +243,7 @@ Here's a sentence with a footnote[^1].
 ### Admonitions (if supported)
 
 > **Note:** This is a note admonition.
-> 
+>
 > **Warning:** This is a warning admonition.
 
 ### Math (if supported)
@@ -264,4 +271,5 @@ This is a **code block** that contains Markdown syntax.
 
 ---
 
-*This document serves as a comprehensive test suite for the Oak Markdown lexer, covering all major Markdown syntax elements and edge cases.*
+*This document serves as a comprehensive test suite for the Oak Markdown lexer, covering all major Markdown syntax
+elements and edge cases.*

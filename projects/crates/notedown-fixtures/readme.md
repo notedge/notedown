@@ -2,7 +2,8 @@
 
 Downstream Oak language conformance fixtures for Notedown and Panduck.
 
-Heavy lexer, parser, and diagnostic golden tests for `oak-markdown`, `oak-notedown`, `oak-html`, `oak-xml`, and `oak-org-mode` live here so upstream `oak.rs` CI stays fast.
+Heavy lexer, parser, and diagnostic golden tests for `oak-markdown`, `oak-notedown`, `oak-html`, `oak-xml`, and
+`oak-org-mode` live here so upstream `oak.rs` CI stays fast.
 
 ## Layout
 
@@ -20,15 +21,18 @@ src/
 
 ## Upstream smoke-only contract
 
-| Upstream crate | Upstream tests | Downstream fixtures |
-|---|---|---|
-| `oak-markdown` | `tests/main.rs` smoke only | `tests/markdown/` |
-| `oak-notedown` | `tests/main.rs` smoke only | `tests/notedown/` |
-| `acorn-doc` | `tests/main.rs` smoke only | `tests/acorn/doc/` |
+| Upstream crate | Upstream tests             | Downstream fixtures |
+|----------------|----------------------------|---------------------|
+| `oak-markdown` | `tests/main.rs` smoke only | `tests/markdown/`   |
+| `oak-notedown` | `tests/main.rs` smoke only | `tests/notedown/`   |
+| `acorn-doc`    | `tests/main.rs` smoke only | `tests/acorn/doc/`  |
 
-Checked-in binary fixtures and cross-format golden probes **must not** live in `oak.rs` or `acorn.rs`. Downstream crates (`panduck-convert`, `notedown-formats` integration) consume bytes via `notedown_fixtures::…` (`include_bytes!` in `src/lib.rs`), not crate-local `tests/fixtures/`.
+Checked-in binary fixtures and cross-format golden probes **must not** live in `oak.rs` or `acorn.rs`. Downstream crates
+(`panduck-convert`, `notedown-formats` integration) consume bytes via `notedown_fixtures::…` (`include_bytes!` in
+`src/lib.rs`), not crate-local `tests/fixtures/`.
 
-`acorn-cfb` may keep in-memory oracle tests (programmatic bytes, no checked-in files). Anything that needs a persisted `.doc`/`.docx`/`.epub` sample belongs here.
+`acorn-cfb` may keep in-memory oracle tests (programmatic bytes, no checked-in files). Anything that needs a persisted
+`.doc`/`.docx`/`.epub` sample belongs here.
 
 ## Run
 

@@ -86,6 +86,11 @@ path = "tests/docx/import_xml_extensions.rs"
 required-features = ["docx"]
 
 [[test]]
+name = "docx_inspect"
+path = "tests/docx/inspect.rs"
+required-features = ["docx"]
+
+[[test]]
 name = "doc"
 path = "tests/doc/mod.rs"
 required-features = ["doc"]

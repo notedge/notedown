@@ -5,9 +5,14 @@ mod capability;
 mod error;
 pub mod export;
 pub mod import;
+pub mod inspect;
 
 pub use capability::{FormatCapability, FormatDirection, FormatStatus};
 pub use error::FormatError;
+pub use inspect::{DocumentInspect, InspectBudget, InspectedPart};
+
+#[cfg(feature = "docx")]
+pub use inspect::inspect_docx_bytes;
 
 /// Registered format capabilities for tooling probes.
 pub fn capabilities() -> Vec<FormatCapability> {

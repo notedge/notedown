@@ -1,5 +1,36 @@
-use notedown_formats::{export::html::export_html, import::html::import_html_text};
+use notedown_formats::{
+    export::html::export_html,
+    import::html::{HtmlLinkRole, import_html_text, import_html_with_links},
+};
 use notedown_ir::{Block, BreakKind, Inline, RelationKind, SemanticStatus};
+
+#[test]
+fn html_import_reports_link_candidates_with_base_and_source_spans() {
+    let html = r#"<html><head><base href="/docs/"><script src="/skip.js"></script></head><body><a href="a.html">A</a><img src="i.png" srcset="s1.png 1x, s2.png 2x"><form action="/submit"></form></body></html>"#;
+    let import = import_html_with_links("links.html", html).expect("import html");
+    assert_eq!(import.base_href.as_deref(), Some("/docs/"));
+    let roles = import.links.iter().map(|link| (link.target.as_str(), link.role)).collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec![
+            ("a.html", HtmlLinkRole::Href),
+            ("i.png", HtmlLinkRole::Src),
+            ("s1.png", HtmlLinkRole::SrcSet),
+            ("s2.png", HtmlLinkRole::SrcSet),
+            ("/submit", HtmlLinkRole::FormAction),
+        ]
+    );
+    for link in &import.links {
+        assert!(link.start < link.end, "{link:?}");
+        assert!(link.end <= html.len(), "{link:?}");
+    }
+}
+
+#[test]
+fn html_import_keeps_link_targets_verbatim() {
+    let import = import_html_with_links("verbatim.html", r#"<body><a href=" ../a?x=1#f ">A</a></body>"#).expect("import html");
+    assert_eq!(import.links[0].target, "../a?x=1#f");
+}
 
 #[test]
 fn html_import_lowers_common_blocks_and_reports_partial_surface() {

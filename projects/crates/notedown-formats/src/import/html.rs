@@ -8,14 +8,65 @@ use oak_html::{
 use super::common::register_image_assets;
 use crate::FormatError;
 
+/// Attribute role that produced an HTML link candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HtmlLinkRole {
+    /// Anchor `href`.
+    Href,
+    /// Form `action`.
+    FormAction,
+    /// Image or source `src`.
+    Src,
+    /// Image or source `srcset` entry.
+    SrcSet,
+}
+
+/// Navigation or asset candidate discovered during HTML import.
+///
+/// The target stays exactly as authored. Resolving it against the page URL,
+/// applying navigation policy, and classifying the relation belong to the
+/// consumer, not to the format layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HtmlLink {
+    /// Raw target value from the attribute.
+    pub target: String,
+    /// Attribute role that produced this candidate.
+    pub role: HtmlLinkRole,
+    /// Byte range start of the attribute in the imported text.
+    pub start: usize,
+    /// Byte range end of the attribute in the imported text.
+    pub end: usize,
+}
+
+/// HTML import result with semantic graph and link candidates.
+#[derive(Debug, Clone)]
+pub struct HtmlImport {
+    /// Imported document graph.
+    pub document: DocumentGraph,
+    /// `<base href>` value when the document declares one.
+    pub base_href: Option<String>,
+    /// Link and asset candidates in document order.
+    pub links: Vec<HtmlLink>,
+}
+
 /// Import HTML from UTF-8 bytes.
 pub fn import_html_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, FormatError> {
+    import_html_bytes_with_links(label, bytes).map(|import| import.document)
+}
+
+/// Import HTML from UTF-8 bytes with link candidates.
+pub fn import_html_bytes_with_links(label: &str, bytes: &[u8]) -> Result<HtmlImport, FormatError> {
     let text = std::str::from_utf8(bytes).map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
-    import_html_text(label, text)
+    import_html_with_links(label, text)
 }
 
 /// Import HTML from a UTF-8 string.
 pub fn import_html_text(label: &str, text: &str) -> Result<DocumentGraph, FormatError> {
+    import_html_with_links(label, text).map(|import| import.document)
+}
+
+/// Import HTML from a UTF-8 string with link candidates.
+pub fn import_html_with_links(label: &str, text: &str) -> Result<HtmlImport, FormatError> {
     let source = SourceText::new(text);
     let builder = HtmlBuilder::new(HtmlLanguage::default());
     let mut session = ParseSession::<HtmlLanguage>::default();
@@ -27,6 +78,15 @@ pub fn import_html_text(label: &str, text: &str) -> Result<DocumentGraph, Format
             graph.metadata.title = Some(title);
         }
     }
+    let base_href = document
+        .nodes
+        .iter()
+        .filter_map(as_element)
+        .find_map(|element| find_element(element, "base"))
+        .and_then(|element| attribute(element, "href"))
+        .map(|href| href.trim().to_string())
+        .filter(|href| !href.is_empty());
+    let links = collect_links(&document);
     let roots = body_children(&document);
     for element in roots {
         for block in lower_blocks(element, &mut graph) {
@@ -47,7 +107,72 @@ pub fn import_html_text(label: &str, text: &str) -> Result<DocumentGraph, Format
         message: "HTML import preserves common document blocks and inline links/images, but not CSS layout, scripts, forms, or arbitrary DOM semantics".into(),
         status: SemanticStatus::Partial,
     });
-    Ok(graph)
+    Ok(HtmlImport { document: graph, base_href, links })
+}
+
+/// Collect link and asset candidates from the document in source order.
+fn collect_links(document: &HtmlDocument) -> Vec<HtmlLink> {
+    let mut links = Vec::new();
+    for node in &document.nodes {
+        if let HtmlNode::Element(element) = node {
+            collect_element_links(element, &mut links);
+        }
+    }
+    links
+}
+
+fn collect_element_links(element: &Element, links: &mut Vec<HtmlLink>) {
+    let tag = element.tag_name.to_ascii_lowercase();
+    if is_skipped_subtree_tag(&tag) {
+        return;
+    }
+    match tag.as_str() {
+        "a" => push_link(element, "href", HtmlLinkRole::Href, links),
+        "form" => push_link(element, "action", HtmlLinkRole::FormAction, links),
+        "img" | "source" => {
+            push_link(element, "src", HtmlLinkRole::Src, links);
+            if let Some(srcset) = element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case("srcset")) {
+                for target in parse_srcset(srcset.value.as_deref().unwrap_or_default()) {
+                    links.push(HtmlLink {
+                        target,
+                        role: HtmlLinkRole::SrcSet,
+                        start: srcset.span.start,
+                        end: srcset.span.end,
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+    for child in element.children.iter().filter_map(as_element) {
+        collect_element_links(child, links);
+    }
+}
+
+fn push_link(element: &Element, attribute_name: &str, role: HtmlLinkRole, links: &mut Vec<HtmlLink>) {
+    let Some(attribute) = element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case(attribute_name))
+    else {
+        return;
+    };
+    let target = attribute.value.as_deref().unwrap_or_default().trim();
+    if target.is_empty() {
+        return;
+    }
+    links.push(HtmlLink { target: target.to_string(), role, start: attribute.span.start, end: attribute.span.end });
+}
+
+fn is_skipped_subtree_tag(tag: &str) -> bool {
+    matches!(tag, "script" | "style" | "noscript" | "template")
+}
+
+fn parse_srcset(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .filter_map(|part| {
+            let url = part.trim().split_whitespace().next().unwrap_or("").trim();
+            if url.is_empty() { None } else { Some(url.to_string()) }
+        })
+        .collect()
 }
 
 fn body_children(document: &HtmlDocument) -> Vec<&Element> {

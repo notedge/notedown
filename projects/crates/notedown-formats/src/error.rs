@@ -29,6 +29,13 @@ pub enum FormatError {
         /// Operation that cannot be expressed.
         operation: String,
     },
+    /// Format work exceeded the caller's budget.
+    Budget {
+        /// Format identifier.
+        format: String,
+        /// Budget limit that was exhausted.
+        message: String,
+    },
 }
 
 impl FormatError {
@@ -51,6 +58,11 @@ impl FormatError {
     pub fn unsupported(format: impl Into<String>, operation: impl Into<String>) -> Self {
         Self::Unsupported { format: format.into(), operation: operation.into() }
     }
+
+    /// Build a budget-exhaustion error for a format request.
+    pub fn budget(format: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Budget { format: format.into(), message: message.into() }
+    }
 }
 
 impl Display for FormatError {
@@ -64,6 +76,7 @@ impl Display for FormatError {
             Self::Unsupported { format, operation } => {
                 write!(f, "{format} does not support {operation}")
             }
+            Self::Budget { format, message } => write!(f, "{format} budget exhausted: {message}"),
         }
     }
 }

@@ -4,52 +4,30 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatError {
     /// Format module is not wired yet.
-    NotImplemented {
-        format: String,
-        direction: String,
-    },
+    NotImplemented { format: String, direction: String },
     /// Caller supplied invalid bytes or parameters.
-    InvalidInput {
-        message: String,
-    },
+    InvalidInput { message: String },
     /// Parser or adapter failed while reading a format.
-    Parse {
-        format: String,
-        message: String,
-    },
+    Parse { format: String, message: String },
     /// Requested block or feature cannot be expressed in the target format.
-    Unsupported {
-        format: String,
-        operation: String,
-    },
+    Unsupported { format: String, operation: String },
 }
 
 impl FormatError {
     pub fn not_implemented(format: impl Into<String>, direction: impl Into<String>) -> Self {
-        Self::NotImplemented {
-            format: format.into(),
-            direction: direction.into(),
-        }
+        Self::NotImplemented { format: format.into(), direction: direction.into() }
     }
 
     pub fn invalid_input(message: impl Into<String>) -> Self {
-        Self::InvalidInput {
-            message: message.into(),
-        }
+        Self::InvalidInput { message: message.into() }
     }
 
     pub fn parse(format: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::Parse {
-            format: format.into(),
-            message: message.into(),
-        }
+        Self::Parse { format: format.into(), message: message.into() }
     }
 
     pub fn unsupported(format: impl Into<String>, operation: impl Into<String>) -> Self {
-        Self::Unsupported {
-            format: format.into(),
-            operation: operation.into(),
-        }
+        Self::Unsupported { format: format.into(), operation: operation.into() }
     }
 }
 

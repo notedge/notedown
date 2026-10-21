@@ -27,7 +27,9 @@ fn html_export_preserves_structure_and_escapes_content() {
 #[test]
 fn html_export_preserves_value_carrying_color_style() {
     let mut graph = DocumentGraph::new(DocumentId(60));
-    graph.push_block(Block::Paragraph { content: vec![Inline::Styled { style: "color:ff0000".into(), children: vec![Inline::Text { text: "red".into() }] }] });
+    graph.push_block(Block::Paragraph {
+        content: vec![Inline::Styled { style: "color:ff0000".into(), children: vec![Inline::Text { text: "red".into() }] }],
+    });
     let html = export_html(&graph).expect("html color export");
     assert!(html.contains("<span style=\"color:#ff0000\">red</span>"));
 }

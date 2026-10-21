@@ -1,6 +1,7 @@
-use notedown_formats::export::docx::export_docx_bytes;
-use notedown_formats::export::markdown::export_markdown;
-use notedown_formats::import::docx::import_docx_bytes;
+use notedown_formats::{
+    export::{docx::export_docx_bytes, markdown::export_markdown},
+    import::docx::import_docx_bytes,
+};
 use notedown_ir::{Asset, AssetId, AssetKind, Block, DocumentGraph, DocumentId, Inline, ListItem, NodeId, SemanticStatus};
 
 fn png_header(width: u32, height: u32) -> Vec<u8> {
@@ -16,8 +17,23 @@ fn png_header(width: u32, height: u32) -> Vec<u8> {
 
 fn graph_with_image(bytes: Vec<u8>, target: &str) -> DocumentGraph {
     let mut graph = DocumentGraph::new(DocumentId(50));
-    graph.push_asset(Asset { id: AssetId(1), kind: AssetKind::Image, content_identity: None, source: Some(target.into()), media_type: None, status: SemanticStatus::Resolved, bytes: Some(bytes) });
-    graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: target.into(), alt: vec![Inline::Text { text: "Image".into() }], title: None, asset: Some(AssetId(1)) }] });
+    graph.push_asset(Asset {
+        id: AssetId(1),
+        kind: AssetKind::Image,
+        content_identity: None,
+        source: Some(target.into()),
+        media_type: None,
+        status: SemanticStatus::Resolved,
+        bytes: Some(bytes),
+    });
+    graph.push_block(Block::Paragraph {
+        content: vec![Inline::Image {
+            source: target.into(),
+            alt: vec![Inline::Text { text: "Image".into() }],
+            title: None,
+            asset: Some(AssetId(1)),
+        }],
+    });
     graph
 }
 
@@ -113,7 +129,10 @@ fn docx_export_round_trips_underline_and_strike_styles() {
     graph.push_block(Block::Paragraph {
         content: vec![
             Inline::Styled { style: "underline".into(), children: vec![Inline::Text { text: "under".into() }] },
-            Inline::Styled { style: "strike".into(), children: vec![Inline::Styled { style: "bold".into(), children: vec![Inline::Text { text: " crossed".into() }] }] },
+            Inline::Styled {
+                style: "strike".into(),
+                children: vec![Inline::Styled { style: "bold".into(), children: vec![Inline::Text { text: " crossed".into() }] }],
+            },
         ],
     });
     let exported = export_docx_bytes(&graph).expect("export styles");
@@ -121,9 +140,14 @@ fn docx_export_round_trips_underline_and_strike_styles() {
     assert!(xml.contains("<w:u w:val=\"single\"/>"));
     assert!(xml.contains("<w:strike/>"));
     let reopened = import_docx_bytes("styled-round.docx", &exported).expect("reopen DOCX");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "underline"));
-    assert!(matches!(&content[1], Inline::Styled { style, children } if style == "bold" && matches!(&children[0], Inline::Styled { style, .. } if style == "strike")));
+    assert!(
+        matches!(&content[1], Inline::Styled { style, children } if style == "bold" && matches!(&children[0], Inline::Styled { style, .. } if style == "strike"))
+    );
 }
 
 #[test]
@@ -140,7 +164,10 @@ fn docx_export_round_trips_vertical_alignment_styles() {
     assert!(xml.contains("w:vertAlign w:val=\"superscript\""));
     assert!(xml.contains("w:vertAlign w:val=\"subscript\""));
     let reopened = import_docx_bytes("vertical-round.docx", &exported).expect("reopen vertical alignment");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "superscript"));
     assert!(matches!(&content[1], Inline::Styled { style, .. } if style == "subscript"));
 }
@@ -148,11 +175,16 @@ fn docx_export_round_trips_vertical_alignment_styles() {
 #[test]
 fn docx_export_round_trips_color_style() {
     let mut graph = DocumentGraph::new(DocumentId(57));
-    graph.push_block(Block::Paragraph { content: vec![Inline::Styled { style: "color:ff0000".into(), children: vec![Inline::Text { text: "red".into() }] }] });
+    graph.push_block(Block::Paragraph {
+        content: vec![Inline::Styled { style: "color:ff0000".into(), children: vec![Inline::Text { text: "red".into() }] }],
+    });
     let exported = export_docx_bytes(&graph).expect("export color");
     assert!(String::from_utf8_lossy(&exported).contains("<w:color w:val=\"ff0000\"/>"));
     let reopened = import_docx_bytes("color-round.docx", &exported).expect("reopen color");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "color:ff0000"));
 }
 
@@ -163,10 +195,7 @@ fn docx_export_round_trips_valued_character_styles() {
         style: "font-size:28".into(),
         children: vec![Inline::Styled {
             style: "font-family:Aptos".into(),
-            children: vec![Inline::Styled {
-                style: "highlight:yellow".into(),
-                children: vec![Inline::Text { text: "styled".into() }],
-            }],
+            children: vec![Inline::Styled { style: "highlight:yellow".into(), children: vec![Inline::Text { text: "styled".into() }] }],
         }],
     };
     graph.push_block(Block::Paragraph { content: vec![styled] });
@@ -176,7 +205,10 @@ fn docx_export_round_trips_valued_character_styles() {
     assert!(xml.contains("<w:rFonts w:ascii=\"Aptos\" w:hAnsi=\"Aptos\"/>"));
     assert!(xml.contains("<w:highlight w:val=\"yellow\"/>"));
     let reopened = import_docx_bytes("valued-character-styles-round.docx", &exported).expect("reopen valued styles");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     let rendered = format!("{:?}", content);
     assert!(rendered.contains("font-size:28"), "{rendered}");
     assert!(rendered.contains("font-family:Aptos"), "{rendered}");
@@ -186,7 +218,9 @@ fn docx_export_round_trips_valued_character_styles() {
 #[test]
 fn docx_inline_image_order_survives_ir_edit_and_regeneration() {
     let image = r#"<w:drawing><wp:inline><wp:docPr descr="Logo"/><a:graphic><a:graphicData><a:blip r:embed="rId1"/></a:graphicData></a:graphic></wp:inline></w:drawing>"#;
-    let document = format!(r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Before</w:t>{image}<w:t>After</w:t></w:r><w:del><w:r>{image}</w:r></w:del><w:ins><w:r><w:t>Inserted</w:t>{image}<w:t>Tail</w:t></w:r></w:ins></w:p></w:body></w:document>"#);
+    let document = format!(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Before</w:t>{image}<w:t>After</w:t></w:r><w:del><w:r>{image}</w:r></w:del><w:ins><w:r><w:t>Inserted</w:t>{image}<w:t>Tail</w:t></w:r></w:ins></w:p></w:body></w:document>"#
+    );
     let rels = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.png"/></Relationships>"#;
     let png = png_header(1, 1);
     let zip = stored_zip(&[("word/document.xml", document.as_bytes()), ("word/_rels/document.xml.rels", rels), ("word/media/logo.png", &png)]);
@@ -194,7 +228,10 @@ fn docx_inline_image_order_survives_ir_edit_and_regeneration() {
     let before = export_markdown(&graph).expect("render inline order");
     assert!(before.contains("**Before**![Logo](media/logo.png)**After**Inserted![Logo](media/logo.png)Tail"), "{before}");
     assert_eq!(before.matches("![Logo]").count(), 2);
-    let Block::Paragraph { content } = &mut graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &mut graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     content.push(Inline::Text { text: "Edited".into() });
     let bytes = export_docx_bytes(&graph).expect("generate edited DOCX");
     let reopened = import_docx_bytes("edited.docx", &bytes).expect("reopen edited DOCX");
@@ -325,10 +362,7 @@ fn docx_export_round_trips_hyperlinks() {
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
     Target="https://example.com" TargetMode="External"/>
 </Relationships>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/_rels/document.xml.rels", rels_xml),
-    ]);
+    let zip = stored_zip(&[("word/document.xml", document_xml), ("word/_rels/document.xml.rels", rels_xml)]);
     let graph = import_docx_bytes("links.docx", &zip).expect("import docx");
     let exported = export_docx_bytes(&graph).expect("export docx");
     let payload = String::from_utf8_lossy(&exported);
@@ -362,11 +396,8 @@ fn docx_export_round_trips_footnotes() {
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
     Target="footnotes.xml"/>
 </Relationships>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/_rels/document.xml.rels", rels_xml),
-        ("word/footnotes.xml", footnotes_xml),
-    ]);
+    let zip =
+        stored_zip(&[("word/document.xml", document_xml), ("word/_rels/document.xml.rels", rels_xml), ("word/footnotes.xml", footnotes_xml)]);
     let graph = import_docx_bytes("footnotes.docx", &zip).expect("import docx");
     let exported = export_docx_bytes(&graph).expect("export docx");
     let payload = String::from_utf8_lossy(&exported);
@@ -454,7 +485,10 @@ fn docx_rejects_truncated_or_zero_sized_raster_headers() {
 fn docx_emits_section_and_list_children_in_semantic_order() {
     let mut graph = DocumentGraph::new(DocumentId(51));
     let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "child paragraph".into() }] });
-    let list = graph.push_block(Block::List { ordered: true, items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![paragraph] }] });
+    let list = graph.push_block(Block::List {
+        ordered: true,
+        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![paragraph] }],
+    });
     graph.push_block(Block::Section { level: 1, title: vec![Inline::Text { text: "section heading".into() }], children: vec![list] });
     let exported = export_docx_bytes(&graph).expect("export section children");
     let xml = String::from_utf8_lossy(&exported);
@@ -482,7 +516,10 @@ fn docx_rejects_lists_deeper_than_numbering_definitions() {
     let mut graph = DocumentGraph::new(DocumentId(53));
     let mut children = Vec::new();
     for depth in 0..10 {
-        let list = graph.push_block(Block::List { ordered: false, items: vec![ListItem { content: vec![Inline::Text { text: format!("depth {depth}") }], children }] });
+        let list = graph.push_block(Block::List {
+            ordered: false,
+            items: vec![ListItem { content: vec![Inline::Text { text: format!("depth {depth}") }], children }],
+        });
         children = vec![list];
     }
     assert!(graph.validate().is_valid());

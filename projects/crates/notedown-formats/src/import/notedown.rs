@@ -210,19 +210,18 @@ fn list_marker_ordered(text: &str) -> bool {
     text.trim_start().chars().next().map(|ch| ch.is_ascii_digit()).unwrap_or(false)
 }
 
-/// Remove an authored list marker so list content never carries syntax characters
-/// into the semantic layer.
+/// Remove an authored list marker so list content never carries syntax
+/// characters into the semantic layer.
 fn strip_list_marker(inlines: &mut Vec<Inline>) {
-    let Some(Inline::Text { text }) = inlines.first_mut() else { return; };
+    let Some(Inline::Text { text }) = inlines.first_mut()
+    else {
+        return;
+    };
     let trimmed = text.trim_start();
-    let content = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-        .or_else(|| {
-            let (prefix, rest) = trimmed.split_once(". ")?;
-            (!prefix.is_empty() && prefix.chars().all(|character| character.is_ascii_digit())).then_some(rest)
-        });
+    let content = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")).or_else(|| trimmed.strip_prefix("+ ")).or_else(|| {
+        let (prefix, rest) = trimmed.split_once(". ")?;
+        (!prefix.is_empty() && prefix.chars().all(|character| character.is_ascii_digit())).then_some(rest)
+    });
     if let Some(content) = content {
         *text = content.trim().to_string();
     }
@@ -306,15 +305,8 @@ fn collect_inlines(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Inli
     for child in node.children() {
         match child {
             RedTree::Node(child_node) => {
-                let link_like = matches!(
-                    child_node.element_type(),
-                    NoteElementType::Link | NoteElementType::Image
-                );
-                let trailing = if link_like {
-                    trailing_link_whitespace(&child_node.text(source))
-                } else {
-                    String::new()
-                };
+                let link_like = matches!(child_node.element_type(), NoteElementType::Link | NoteElementType::Image);
+                let trailing = if link_like { trailing_link_whitespace(&child_node.text(source)) } else { String::new() };
                 if let Some(inline) = lower_inline_node(child_node, source) {
                     push_inline(&mut inlines, inline);
                 }
@@ -473,11 +465,7 @@ fn collect_plain_text(node: RedNode<NoteLanguage>, source: &SourceText) -> Strin
 fn parse_inline_link(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<Inline> {
     let raw = node.text(source);
     if let Some((text, url)) = split_markdown_link(raw.as_ref()) {
-        return Some(Inline::Link {
-            target: RelationEndpoint::ExternalUri(url),
-            display: vec![Inline::Text { text }],
-            title: None,
-        });
+        return Some(Inline::Link { target: RelationEndpoint::ExternalUri(url), display: vec![Inline::Text { text }], title: None });
     }
     let text = collect_plain_text(node, source);
     if text.is_empty() { None } else { Some(Inline::Text { text }) }
@@ -486,12 +474,7 @@ fn parse_inline_link(node: RedNode<NoteLanguage>, source: &SourceText) -> Option
 fn parse_inline_image(node: RedNode<NoteLanguage>, source: &SourceText) -> Option<Inline> {
     let raw = node.text(source);
     let (alt, url) = split_markdown_link(raw.as_ref())?;
-    Some(Inline::Image {
-        source: url,
-        alt: vec![Inline::Text { text: alt }],
-        title: None,
-        asset: None,
-    })
+    Some(Inline::Image { source: url, alt: vec![Inline::Text { text: alt }], title: None, asset: None })
 }
 
 fn split_markdown_link(raw: &str) -> Option<(String, String)> {
@@ -508,17 +491,16 @@ fn split_markdown_link(raw: &str) -> Option<(String, String)> {
 }
 
 fn trailing_link_whitespace(raw: &str) -> String {
-    let Some(start) = raw.find("](") else {
+    let Some(start) = raw.find("](")
+    else {
         return String::new();
     };
     let destination = &raw[start + 2..];
-    let Some(close) = link_destination_close(destination) else {
+    let Some(close) = link_destination_close(destination)
+    else {
         return String::new();
     };
-    destination[close + 1..]
-        .chars()
-        .take_while(|character| character.is_whitespace())
-        .collect()
+    destination[close + 1..].chars().take_while(|character| character.is_whitespace()).collect()
 }
 
 fn link_destination_close(destination: &str) -> Option<usize> {

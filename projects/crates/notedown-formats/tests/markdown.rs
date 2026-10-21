@@ -38,7 +38,10 @@ fn markdown_import_lowers_inline_styles_and_links() {
 fn markdown_import_lowers_strikethrough_to_a_strike_style() {
     let source = "This is ~~obsolete~~ text.\n";
     let graph = import_markdown_bytes("strike.md", source).expect("import markdown");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(
         matches!(&content[1], Inline::Styled { style, children } if style == "strike" && children == &[Inline::Text { text: "obsolete".into() }]),
         "{content:?}"
@@ -47,7 +50,10 @@ fn markdown_import_lowers_strikethrough_to_a_strike_style() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("~~obsolete~~"), "{markdown:?}");
     let reopened = import_markdown_bytes("reopened.md", &markdown).expect("reopen markdown");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(
         matches!(&content[1], Inline::Styled { style, children } if style == "strike" && children == &[Inline::Text { text: "obsolete".into() }]),
         "{content:?}"
@@ -60,7 +66,10 @@ fn markdown_reference_links_resolve_definitions_and_reopen_as_inline_links() {
     let graph = import_markdown_bytes("reference.md", source).expect("import markdown");
     let markdown = export_markdown(&graph).expect("export markdown");
     let reopened = import_markdown_bytes("reopened.md", &markdown).expect("re-import markdown");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
     let links = content
         .iter()
         .filter_map(|inline| match inline {
@@ -69,13 +78,8 @@ fn markdown_reference_links_resolve_definitions_and_reopen_as_inline_links() {
         })
         .collect::<Vec<_>>();
     assert_eq!(links.len(), 2, "{content:#?}; output={markdown:?}");
-    assert!(links
-        .iter()
-        .all(|(target, _)| **target == RelationEndpoint::ExternalUri("https://example.com/guide".into())));
-    assert_eq!(
-        links.iter().map(|(_, display)| display[0].plain_text()).collect::<Vec<_>>(),
-        vec!["the guide", "guide"]
-    );
+    assert!(links.iter().all(|(target, _)| **target == RelationEndpoint::ExternalUri("https://example.com/guide".into())));
+    assert_eq!(links.iter().map(|(_, display)| display[0].plain_text()).collect::<Vec<_>>(), vec!["the guide", "guide"]);
     assert!(graph.validate().is_valid());
     assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.markdown.reference_definition_title"));
 }
@@ -86,7 +90,10 @@ fn markdown_shortcut_reference_resolves_and_reopens() {
     let graph = import_markdown_bytes("shortcut.md", source).expect("import markdown");
     let markdown = export_markdown(&graph).expect("export markdown");
     let reopened = import_markdown_bytes("shortcut-output.md", &markdown).expect("reopen markdown");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
     assert!(content.iter().any(|inline| matches!(
         inline,
         Inline::Link { target, display, .. }
@@ -102,7 +109,10 @@ fn markdown_undefined_shortcut_is_literal_without_link_loss() {
     let graph = import_markdown_bytes("literal-brackets.md", source).expect("import markdown");
     assert!(graph.coverage.loss.is_empty(), "{:#?}", graph.coverage.loss);
     assert!(graph.assets.is_empty());
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
     assert!(content.iter().all(|inline| matches!(inline, Inline::Text { .. })));
     let markdown = export_markdown(&graph).expect("export");
     let reopened = import_markdown_bytes("literal-output.md", &markdown).expect("reopen");
@@ -112,7 +122,10 @@ fn markdown_undefined_shortcut_is_literal_without_link_loss() {
 #[test]
 fn markdown_unresolved_reference_links_are_preserved_and_reported() {
     let graph = import_markdown_bytes("unresolved.md", "before [label][missing] after\n\n").expect("import markdown");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
     assert!(content.iter().any(|inline| matches!(inline, Inline::Text { text } if text.contains("[label][missing]"))), "{content:#?}");
     assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.markdown.unresolved_reference_link"));
 }
@@ -148,33 +161,37 @@ fn markdown_round_trip_validates() {
 fn markdown_math_reopen_preserves_semantics_and_following_text() {
     let source = "before $x^2 + y^2$ after\n\n$$E = mc^2$$\n";
     let graph = import_markdown_bytes("math.md", source).expect("import");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph") };
-    assert_eq!(content, &vec![
-        Inline::Text { text: "before ".into() },
-        Inline::InlineMath { content: "x^2 + y^2".into(), language: Some("latex".into()) },
-        Inline::Text { text: " after".into() },
-    ]);
-    assert!(graph.blocks.iter().any(|node| node.block == Block::Math {
-        content: "E = mc^2".into(), language: Some("latex".into()),
-    }));
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
+    assert_eq!(
+        content,
+        &vec![
+            Inline::Text { text: "before ".into() },
+            Inline::InlineMath { content: "x^2 + y^2".into(), language: Some("latex".into()) },
+            Inline::Text { text: " after".into() },
+        ]
+    );
+    assert!(graph.blocks.iter().any(|node| node.block == Block::Math { content: "E = mc^2".into(), language: Some("latex".into()) }));
     let markdown = export_markdown(&graph).expect("export");
     let reopened = import_markdown_bytes("math-round.md", &markdown).expect("reopen");
     assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
-    assert!(reopened.blocks.iter().any(|node| node.block == Block::Math {
-        content: "E = mc^2".into(), language: Some("latex".into()),
-    }));
+    assert!(reopened.blocks.iter().any(|node| node.block == Block::Math { content: "E = mc^2".into(), language: Some("latex".into()) }));
 }
 
 #[test]
 fn markdown_footnote_reopen_preserves_reference_body_and_following_text() {
     let source = "See[^1] after\n\n[^1]: Body.\n";
     let graph = import_markdown_bytes("footnote.md", source).expect("import");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph") };
-    assert_eq!(content, &vec![
-        Inline::Text { text: "See".into() },
-        Inline::Note { label: "1".into(), display: None },
-        Inline::Text { text: " after".into() },
-    ]);
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph")
+    };
+    assert_eq!(
+        content,
+        &vec![Inline::Text { text: "See".into() }, Inline::Note { label: "1".into(), display: None }, Inline::Text { text: " after".into() },]
+    );
     let markdown = export_markdown(&graph).expect("export");
     let reopened = import_markdown_bytes("footnote-round.md", &markdown).expect("reopen");
     assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
@@ -186,11 +203,7 @@ fn markdown_footnote_reopen_preserves_reference_body_and_following_text() {
 #[test]
 fn living_00_07_markdown_export_from_programmatic_ir() {
     let mut graph = DocumentGraph::new(DocumentId(42));
-    graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text {
-            text: "plain ir".into(),
-        }],
-    });
+    graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "plain ir".into() }] });
     let markdown = export_markdown(&graph).expect("export markdown from programmatic ir");
     assert!(markdown.contains("plain ir"));
     let reopened = import_markdown_bytes("plain.md", &markdown).expect("reopen");
@@ -208,22 +221,11 @@ fn markdown_export_does_not_silently_drop_reference_identity() {
 #[test]
 fn markdown_export_preserves_nested_section_content_on_reopen() {
     let mut graph = DocumentGraph::new(DocumentId(9));
-    let lead = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text { text: "lead paragraph".into() }],
-    });
-    let nested_body = graph.push_block(Block::Paragraph {
-        content: vec![Inline::Text { text: "nested body".into() }],
-    });
-    let nested_section = graph.push_block(Block::Section {
-        level: 2,
-        title: vec![Inline::Text { text: "Nested".into() }],
-        children: vec![nested_body],
-    });
-    graph.push_block(Block::Section {
-        level: 1,
-        title: vec![Inline::Text { text: "Root".into() }],
-        children: vec![lead, nested_section],
-    });
+    let lead = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "lead paragraph".into() }] });
+    let nested_body = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "nested body".into() }] });
+    let nested_section =
+        graph.push_block(Block::Section { level: 2, title: vec![Inline::Text { text: "Nested".into() }], children: vec![nested_body] });
+    graph.push_block(Block::Section { level: 1, title: vec![Inline::Text { text: "Root".into() }], children: vec![lead, nested_section] });
 
     let markdown = export_markdown(&graph).expect("export");
     let reopened = import_markdown_bytes("nested.md", &markdown).expect("reopen");
@@ -231,21 +233,23 @@ fn markdown_export_preserves_nested_section_content_on_reopen() {
         .blocks
         .iter()
         .filter_map(|node| match &node.block {
-            Block::Section { title, .. } => Some(title
-                .iter()
-                .filter_map(|inline| match inline {
-                    Inline::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<String>()),
+            Block::Section { title, .. } => Some(
+                title
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        Inline::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>(),
+            ),
             Block::Paragraph { content } => {
                 let text = content
-                .iter()
-                .filter_map(|inline| match inline {
-                    Inline::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<String>();
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        Inline::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>();
                 (!text.is_empty()).then_some(text)
             }
             other => panic!("unexpected reopened block: {other:?}"),
@@ -266,11 +270,14 @@ fn markdown_image_reopen_preserves_asset_relation_and_surrounding_text() {
     let asset = &reopened.assets[0];
     assert_eq!(asset.source.as_deref(), Some("images/diagram.png"));
     assert_eq!(asset.status, SemanticStatus::Unresolved);
-    assert!(reopened.relations.iter().any(|relation| {
-        relation.kind == RelationKind::Embeds
-            && relation.target == RelationEndpoint::Asset(asset.id)
-    }));
-    let Block::Paragraph { content } = &reopened.blocks[0].block else {
+    assert!(
+        reopened
+            .relations
+            .iter()
+            .any(|relation| { relation.kind == RelationKind::Embeds && relation.target == RelationEndpoint::Asset(asset.id) })
+    );
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
         panic!("expected reopened paragraph")
     };
     assert!(matches!(&content[0], Inline::Text { text } if text == "before "));
@@ -281,11 +288,7 @@ fn markdown_image_reopen_preserves_asset_relation_and_surrounding_text() {
 #[test]
 fn markdown_export_rejects_containment_cycles() {
     let mut graph = DocumentGraph::new(DocumentId(10));
-    let section = graph.push_block(Block::Section {
-        level: 1,
-        title: vec![Inline::Text { text: "Cycle".into() }],
-        children: Vec::new(),
-    });
+    let section = graph.push_block(Block::Section { level: 1, title: vec![Inline::Text { text: "Cycle".into() }], children: Vec::new() });
     if let Block::Section { children, .. } = &mut graph.blocks[0].block {
         children.push(section);
     }

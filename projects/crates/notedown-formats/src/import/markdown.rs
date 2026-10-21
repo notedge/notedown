@@ -18,8 +18,8 @@ pub fn import_markdown(path: impl AsRef<Path>) -> Result<DocumentGraph, FormatEr
 /// Oak profile for semantic Markdown import: enable the constructs required by
 /// `notedown-formats` round-trip and markdown-project reopen probes.
 ///
-/// Math and footnotes are part of the import contract, so the profile has to enable them
-/// explicitly instead of leaving every extension at its default.
+/// Math and footnotes are part of the import contract, so the profile has to
+/// enable them explicitly instead of leaving every extension at its default.
 fn markdown_import_language() -> MarkdownLanguage {
     let mut language = MarkdownLanguage::default();
     language.allow_headings = true;
@@ -142,9 +142,11 @@ fn reference_label_close(content: &str) -> Option<usize> {
     for (index, character) in content.char_indices() {
         if escaped {
             escaped = false;
-        } else if character == '\\' {
+        }
+        else if character == '\\' {
             escaped = true;
-        } else if character == ']' {
+        }
+        else if character == ']' {
             return Some(index);
         }
     }
@@ -174,14 +176,17 @@ fn lower_block_node(node: RedNode<MarkdownLanguage>, source: &SourceText, contex
         | MarkdownElementType::Heading3
         | MarkdownElementType::Heading4
         | MarkdownElementType::Heading5
-        | MarkdownElementType::Heading6 => {
-            BlockOutcome::Block(Block::Section { level: heading_level(kind), title: collect_heading_inlines(node, source, context), children: Vec::new() })
-        }
+        | MarkdownElementType::Heading6 => BlockOutcome::Block(Block::Section {
+            level: heading_level(kind),
+            title: collect_heading_inlines(node, source, context),
+            children: Vec::new(),
+        }),
         MarkdownElementType::Paragraph => {
             let text = node.text(source);
             if parse_link_definition(text.trim()).is_some() {
                 BlockOutcome::Skip
-            } else {
+            }
+            else {
                 BlockOutcome::Block(Block::Paragraph { content: collect_inlines(node, source, context) })
             }
         }
@@ -189,10 +194,9 @@ fn lower_block_node(node: RedNode<MarkdownLanguage>, source: &SourceText, contex
             let (language, content) = extract_code_block(node, source);
             BlockOutcome::Block(Block::Code { language, content })
         }
-        MarkdownElementType::MathBlock => BlockOutcome::Block(Block::Math {
-            content: strip_math_delimiters(&node.text(source), "$$"),
-            language: Some("latex".into()),
-        }),
+        MarkdownElementType::MathBlock => {
+            BlockOutcome::Block(Block::Math { content: strip_math_delimiters(&node.text(source), "$$"), language: Some("latex".into()) })
+        }
         MarkdownElementType::FootnoteDefinition => BlockOutcome::Block(Block::Opaque {
             kind: "footnote_definition".into(),
             payload_hint: node.text(source).into_owned(),
@@ -226,10 +230,12 @@ fn collect_heading_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText,
         return inlines;
     }
 
-    let Some(Inline::Text { text }) = inlines.first_mut() else {
+    let Some(Inline::Text { text }) = inlines.first_mut()
+    else {
         return inlines;
     };
-    let Some(rest) = text.strip_prefix(&"#".repeat(marker_length)) else {
+    let Some(rest) = text.strip_prefix(&"#".repeat(marker_length))
+    else {
         return inlines;
     };
     *text = rest.trim_start_matches([' ', '\t']).to_string();
@@ -244,15 +250,8 @@ fn collect_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context
     for child in node.children() {
         match child {
             RedTree::Node(child_node) => {
-                let link_like = matches!(
-                    child_node.element_type(),
-                    MarkdownElementType::Link | MarkdownElementType::Image
-                );
-                let trailing = if link_like {
-                    trailing_link_whitespace(&child_node.text(source))
-                } else {
-                    String::new()
-                };
+                let link_like = matches!(child_node.element_type(), MarkdownElementType::Link | MarkdownElementType::Image);
+                let trailing = if link_like { trailing_link_whitespace(&child_node.text(source)) } else { String::new() };
                 if let Some(inline) = lower_inline_node(child_node, source, context) {
                     push_inline(&mut inlines, inline);
                 }
@@ -287,23 +286,15 @@ fn lower_inline_node(node: RedNode<MarkdownLanguage>, source: &SourceText, conte
         MarkdownElementType::InlineCode => Some(Inline::InlineCode { text: collect_plain_text(node, source) }),
         MarkdownElementType::Link => parse_inline_link(node, source, context),
         MarkdownElementType::Image => parse_inline_image(node, source, context),
-        MarkdownElementType::MathInline => Some(Inline::InlineMath {
-            content: strip_math_delimiters(&node.text(source), "$"),
-            language: Some("latex".into()),
-        }),
+        MarkdownElementType::MathInline => {
+            Some(Inline::InlineMath { content: strip_math_delimiters(&node.text(source), "$"), language: Some("latex".into()) })
+        }
         MarkdownElementType::FootnoteReference => {
             let raw = node.text(source);
-            let label = raw
-                .trim()
-                .strip_prefix("[^")
-                .and_then(|value| value.strip_suffix(']'))
-                .unwrap_or_default()
-                .to_string();
+            let label = raw.trim().strip_prefix("[^").and_then(|value| value.strip_suffix(']')).unwrap_or_default().to_string();
             Some(Inline::Note { label, display: None })
         }
-        MarkdownElementType::Strikethrough => {
-            Some(Inline::Styled { style: "strike".into(), children: collect_inlines(node, source, context) })
-        }
+        MarkdownElementType::Strikethrough => Some(Inline::Styled { style: "strike".into(), children: collect_inlines(node, source, context) }),
         _ => None,
     }
 }
@@ -337,11 +328,7 @@ fn collect_plain_text(node: RedNode<MarkdownLanguage>, source: &SourceText) -> S
 fn parse_inline_link(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Option<Inline> {
     let raw = node.text(source);
     if let Some((text, url)) = resolve_link_destination(raw.as_ref(), context) {
-        return Some(Inline::Link {
-            target: RelationEndpoint::ExternalUri(url),
-            display: vec![Inline::Text { text }],
-            title: None,
-        });
+        return Some(Inline::Link { target: RelationEndpoint::ExternalUri(url), display: vec![Inline::Text { text }], title: None });
     }
     Some(Inline::Text { text: decode_escaped_text(raw.trim_end()) })
 }
@@ -352,15 +339,11 @@ fn parse_inline_image(node: RedNode<MarkdownLanguage>, source: &SourceText, cont
     else {
         return Some(Inline::Text { text: decode_escaped_text(raw.trim_end()) });
     };
-    Some(Inline::Image {
-        source: url,
-        alt: vec![Inline::Text { text: alt }],
-        title: None,
-        asset: None,
-    })
+    Some(Inline::Image { source: url, alt: vec![Inline::Text { text: alt }], title: None, asset: None })
 }
 
-/// Resolve an inline or reference destination, recording explicit unresolved labels.
+/// Resolve an inline or reference destination, recording explicit unresolved
+/// labels.
 fn resolve_link_destination(raw: &str, context: &mut LinkContext) -> Option<(String, String)> {
     if let Some((text, url)) = split_markdown_link(raw) {
         return Some((text, url));
@@ -394,25 +377,20 @@ fn split_markdown_link(raw: &str) -> Option<(String, String)> {
 }
 
 fn strip_math_delimiters(text: &str, delimiter: &str) -> String {
-    text.trim()
-        .strip_prefix(delimiter)
-        .and_then(|value| value.strip_suffix(delimiter))
-        .unwrap_or(text.trim())
-        .to_string()
+    text.trim().strip_prefix(delimiter).and_then(|value| value.strip_suffix(delimiter)).unwrap_or(text.trim()).to_string()
 }
 
 fn trailing_link_whitespace(raw: &str) -> String {
-    let Some(start) = raw.find("](") else {
+    let Some(start) = raw.find("](")
+    else {
         return raw[raw.trim_end_matches([' ', '\t']).len()..].to_string();
     };
     let destination = &raw[start + 2..];
-    let Some(close) = link_destination_close(destination) else {
+    let Some(close) = link_destination_close(destination)
+    else {
         return String::new();
     };
-    destination[close + 1..]
-        .chars()
-        .take_while(|character| character.is_whitespace())
-        .collect()
+    destination[close + 1..].chars().take_while(|character| character.is_whitespace()).collect()
 }
 
 fn link_destination_close(destination: &str) -> Option<usize> {

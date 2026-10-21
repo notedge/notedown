@@ -1,5 +1,4 @@
-use notedown_formats::export::pdf::export_pdf_bytes;
-use notedown_formats::import::pdf::import_pdf_bytes;
+use notedown_formats::{export::pdf::export_pdf_bytes, import::pdf::import_pdf_bytes};
 use notedown_ir::{Asset, AssetId, AssetKind, Block, DocumentGraph, DocumentId, DocumentMetadata, Inline, ListItem, NodeId, SemanticStatus};
 
 fn jpeg_frame_fixture(width: u16, height: u16, components: u8) -> Vec<u8> {
@@ -9,13 +8,15 @@ fn jpeg_frame_fixture(width: u16, height: u16, components: u8) -> Vec<u8> {
     bytes.extend_from_slice(&height.to_be_bytes());
     bytes.extend_from_slice(&width.to_be_bytes());
     bytes.push(components);
-    for component in 0..components { bytes.extend_from_slice(&[component + 1, 0x11, 0]); }
+    for component in 0..components {
+        bytes.extend_from_slice(&[component + 1, 0x11, 0]);
+    }
     bytes.extend_from_slice(&[0xff, 0xd9]);
     bytes
 }
 
 fn png_fixture(width: u32, height: u32, color_type: u8, scanlines: &[u8]) -> Vec<u8> {
-    use flate2::{write::ZlibEncoder, Compression};
+    use flate2::{Compression, write::ZlibEncoder};
     use std::io::Write;
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(scanlines).unwrap();
@@ -28,7 +29,9 @@ fn png_fixture(width: u32, height: u32, color_type: u8, scanlines: &[u8]) -> Vec
         let mut crc = 0xffff_ffffu32;
         for byte in kind.iter().chain(data) {
             crc ^= u32::from(*byte);
-            for _ in 0..8 { crc = if crc & 1 == 1 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 }; }
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
+            }
         }
         output.extend_from_slice(&(crc ^ 0xffff_ffff).to_be_bytes());
     };
@@ -43,7 +46,7 @@ fn png_fixture(width: u32, height: u32, color_type: u8, scanlines: &[u8]) -> Vec
 }
 
 fn flate_image_pdf(predictor: usize, rows: &[&[u8]], encoded_rows: &[u8]) -> Vec<u8> {
-    use flate2::{write::ZlibEncoder, Compression};
+    use flate2::{Compression, write::ZlibEncoder};
     use std::io::Write;
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(encoded_rows).unwrap();
@@ -94,13 +97,20 @@ fn pdf_generation_and_reopen_preserve_text_whitespace_after_editing() {
     graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "  first  words\tend  \n  second line  ".into() }] });
     let bytes = export_pdf_bytes(&graph).expect("generate whitespace PDF");
     let mut reopened = import_pdf_bytes("whitespace.pdf", &bytes).expect("reopen whitespace PDF");
-    let Block::Paragraph { content } = &mut reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &mut reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert_eq!(content, &vec![Inline::Text { text: "  first  words\tend  ".into() }]);
     content.push(Inline::Text { text: " edited  ".into() });
     let edited = export_pdf_bytes(&reopened).expect("generate edited PDF");
     let round = import_pdf_bytes("edited-whitespace.pdf", &edited).expect("reopen edited PDF");
-    assert!(matches!(&round.blocks[0].block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "  first  words\tend   edited  ".into() }]));
-    assert!(matches!(&round.blocks[1].block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "  second line  ".into() }]));
+    assert!(
+        matches!(&round.blocks[0].block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "  first  words\tend   edited  ".into() }])
+    );
+    assert!(
+        matches!(&round.blocks[1].block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "  second line  ".into() }])
+    );
 }
 
 #[test]
@@ -110,10 +120,18 @@ fn pdf_wrapping_preserves_long_tokens_and_spaces() {
     graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: original.clone() }] });
     let bytes = export_pdf_bytes(&graph).expect("generate wrapped PDF");
     let reopened = import_pdf_bytes("wrapped.pdf", &bytes).expect("reopen wrapped PDF");
-    let recovered = reopened.blocks.iter().flat_map(|node| match &node.block {
-        Block::Paragraph { content } => content.as_slice(),
-        _ => &[],
-    }).map(|inline| match inline { Inline::Text { text } => text.as_str(), _ => "" }).collect::<String>();
+    let recovered = reopened
+        .blocks
+        .iter()
+        .flat_map(|node| match &node.block {
+            Block::Paragraph { content } => content.as_slice(),
+            _ => &[],
+        })
+        .map(|inline| match inline {
+            Inline::Text { text } => text.as_str(),
+            _ => "",
+        })
+        .collect::<String>();
     assert_eq!(recovered, original);
 }
 
@@ -144,7 +162,7 @@ fn page_tree_order_wins_over_physical_object_order() {
 
 #[test]
 fn reads_flate_decode_stream_and_tj_array() {
-    use flate2::{write::ZlibEncoder, Compression};
+    use flate2::{Compression, write::ZlibEncoder};
     use std::io::Write;
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(b"BT [(Hello) 20 ( PDF)] TJ ET").unwrap();
@@ -164,7 +182,10 @@ fn pdf_tj_spacing_is_reported_while_text_remains_editable() {
     bytes.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
     let mut graph = import_pdf_bytes("spacing.pdf", &bytes).expect("import spacing PDF");
     assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.pdf.text_spacing"));
-    let Block::Paragraph { content } = &mut graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &mut graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     *content = vec![Inline::Text { text: "Edited".into() }];
     let reopened = import_pdf_bytes("edited-spacing.pdf", &export_pdf_bytes(&graph).expect("generate edited PDF")).expect("reopen edited PDF");
     assert!(format!("{:?}", reopened.blocks[0].block).contains("Edited"));
@@ -174,10 +195,14 @@ fn pdf_tj_spacing_is_reported_while_text_remains_editable() {
 fn imports_pdf_text_line_operators_as_paragraph_boundaries() {
     let bytes = b"%PDF-1.4\n1 0 obj\n<< /Length 42 >>\nstream\nBT (First) Tj T* (Second)' ET\nendstream\nendobj\n%%EOF";
     let graph = import_pdf_bytes("line-operators.pdf", bytes).expect("import PDF line operators");
-    let paragraphs = graph.blocks.iter().filter_map(|node| match &node.block {
-        Block::Paragraph { content } => Some(format!("{content:?}")),
-        _ => None,
-    }).collect::<Vec<_>>();
+    let paragraphs = graph
+        .blocks
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Paragraph { content } => Some(format!("{content:?}")),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(paragraphs.len(), 2);
     assert!(paragraphs[0].contains("First"));
     assert!(paragraphs[1].contains("Second"));
@@ -190,12 +215,25 @@ fn imports_literal_and_hex_quote_operators_through_ir_edit_and_generation() {
     bytes.extend_from_slice(content);
     bytes.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
     let mut graph = import_pdf_bytes("quote-operators.pdf", &bytes).expect("import quote operators");
-    let text = graph.blocks.iter().map(|node| match &node.block {
-        Block::Paragraph { content } => content.iter().map(|inline| match inline { Inline::Text { text } => text.as_str(), _ => panic!("text expected") }).collect::<String>(),
-        _ => panic!("paragraph expected"),
-    }).collect::<Vec<_>>();
+    let text = graph
+        .blocks
+        .iter()
+        .map(|node| match &node.block {
+            Block::Paragraph { content } => content
+                .iter()
+                .map(|inline| match inline {
+                    Inline::Text { text } => text.as_str(),
+                    _ => panic!("text expected"),
+                })
+                .collect::<String>(),
+            _ => panic!("paragraph expected"),
+        })
+        .collect::<Vec<_>>();
     assert_eq!(text, ["First", "Second", "Third", "Fourth"]);
-    let Block::Paragraph { content } = &mut graph.blocks[1].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &mut graph.blocks[1].block
+    else {
+        panic!("paragraph expected")
+    };
     *content = vec![Inline::Text { text: "Edited second".into() }];
     graph.bump_revision();
     let generated = export_pdf_bytes(&graph).expect("generate edited PDF");
@@ -206,7 +244,8 @@ fn imports_literal_and_hex_quote_operators_through_ir_edit_and_generation() {
 
 #[test]
 fn pdf_content_comments_and_operator_suffixes_do_not_create_text() {
-    let content = b"% (Comment) Tj /Im1 Do\nBT (Suffix) TjSuffix (Visible) % (Hidden) Tj\nTj [(Array) % (Ignored) ] TJ\n ( text)] TJ (Invalid) TJ ET";
+    let content =
+        b"% (Comment) Tj /Im1 Do\nBT (Suffix) TjSuffix (Visible) % (Hidden) Tj\nTj [(Array) % (Ignored) ] TJ\n ( text)] TJ (Invalid) TJ ET";
     let mut bytes = format!("%PDF-1.4\n1 0 obj\n<< /Length {} >>\nstream\n", content.len()).into_bytes();
     bytes.extend_from_slice(content);
     bytes.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
@@ -214,7 +253,9 @@ fn pdf_content_comments_and_operator_suffixes_do_not_create_text() {
     let text = format!("{:?}", graph.blocks);
     assert!(text.contains("Visible"), "{text}");
     assert!(text.contains("Array text"), "{text}");
-    for unexpected in ["Comment", "Suffix", "Hidden", "Ignored", "Invalid"] { assert!(!text.contains(unexpected), "{text}"); }
+    for unexpected in ["Comment", "Suffix", "Hidden", "Ignored", "Invalid"] {
+        assert!(!text.contains(unexpected), "{text}");
+    }
 }
 
 #[test]
@@ -229,9 +270,18 @@ fn decodes_type0_text_with_tounicode_cmap() {
 fn imports_surrogate_pair_range_as_ir_text() {
     let content = "BT /F1 12 Tf <010203> Tj ET";
     let cmap = "1 beginbfrange\n<01> <03> <D83DDE00>\nendbfrange";
-    let bytes = format!("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length {} >>\nstream\n{content}\nendstream\nendobj\n7 0 obj\n<< /Type /Font /Subtype /Type0 /ToUnicode 8 0 R >>\nendobj\n8 0 obj\n<< /Length {} >>\nstream\n{cmap}\nendstream\nendobj\n%%EOF", content.len(), cmap.len());
+    let bytes = format!(
+        "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length {} >>\nstream\n{content}\nendstream\nendobj\n7 0 obj\n<< /Type /Font /Subtype /Type0 /ToUnicode 8 0 R >>\nendobj\n8 0 obj\n<< /Length {} >>\nstream\n{cmap}\nendstream\nendobj\n%%EOF",
+        content.len(),
+        cmap.len()
+    );
     let graph = import_pdf_bytes("emoji-range.pdf", bytes.as_bytes()).expect("import surrogate pair range");
-    assert!(graph.blocks.iter().any(|node| matches!(&node.block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "😀😁😂".into() }])));
+    assert!(
+        graph
+            .blocks
+            .iter()
+            .any(|node| matches!(&node.block, Block::Paragraph { content } if content == &vec![Inline::Text { text: "😀😁😂".into() }]))
+    );
 }
 
 #[test]
@@ -283,11 +333,7 @@ fn imports_inline_jpeg_as_ir_asset() {
     bytes.extend_from_slice(b"endstream\nendobj\n%%EOF");
 
     let graph = import_pdf_bytes("inline-image.pdf", &bytes).expect("import inline JPEG");
-    let image = graph
-        .assets
-        .iter()
-        .find(|asset| asset.media_type.as_deref() == Some("image/jpeg"))
-        .expect("inline JPEG asset");
+    let image = graph.assets.iter().find(|asset| asset.media_type.as_deref() == Some("image/jpeg")).expect("inline JPEG asset");
     assert_eq!(image.bytes.as_deref(), Some(&b"\xFF\xD8\x11\xFF\xD9"[..]));
     assert!(graph.blocks.iter().any(|node| format!("{:?}", node.block).contains("pdf-inline-image-")));
 }
@@ -304,12 +350,9 @@ fn jpeg_asset_round_trips_through_pdf_writer() {
         status: SemanticStatus::Resolved,
         bytes: Some(jpeg_frame_fixture(640, 480, 3)),
     });
-    graph.push_block(Block::Paragraph { content: vec![Inline::Image {
-        source: "edited.jpg".into(),
-        alt: Vec::new(),
-        title: None,
-        asset: Some(AssetId(1)),
-    }] });
+    graph.push_block(Block::Paragraph {
+        content: vec![Inline::Image { source: "edited.jpg".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }],
+    });
     let exported = export_pdf_bytes(&graph).expect("export JPEG XObject");
     assert!(String::from_utf8_lossy(&exported).contains("/Subtype /Image"));
     assert!(String::from_utf8_lossy(&exported).contains("/Width 640 /Height 480 /ColorSpace /DeviceRGB"));
@@ -323,8 +366,18 @@ fn jpeg_asset_round_trips_through_pdf_writer() {
 fn multiple_jpeg_assets_keep_their_resource_bindings() {
     let mut graph = DocumentGraph::new(DocumentId(21));
     for (id, source, bytes) in [(1, "z.jpg", jpeg_frame_fixture(640, 480, 3)), (2, "a.jpg", jpeg_frame_fixture(200, 600, 1))] {
-        graph.push_asset(Asset { id: AssetId(id), kind: AssetKind::Image, content_identity: None, source: Some(source.into()), media_type: Some("image/jpeg".into()), status: SemanticStatus::Resolved, bytes: Some(bytes) });
-        graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: source.into(), alt: Vec::new(), title: None, asset: Some(AssetId(id)) }] });
+        graph.push_asset(Asset {
+            id: AssetId(id),
+            kind: AssetKind::Image,
+            content_identity: None,
+            source: Some(source.into()),
+            media_type: Some("image/jpeg".into()),
+            status: SemanticStatus::Resolved,
+            bytes: Some(bytes),
+        });
+        graph.push_block(Block::Paragraph {
+            content: vec![Inline::Image { source: source.into(), alt: Vec::new(), title: None, asset: Some(AssetId(id)) }],
+        });
     }
     let reopened = import_pdf_bytes("multiple-images.pdf", &export_pdf_bytes(&graph).expect("export images")).expect("re-import images");
     let bytes = reopened.assets.iter().filter_map(|asset| asset.bytes.as_deref()).collect::<Vec<_>>();
@@ -336,8 +389,18 @@ fn multiple_jpeg_assets_keep_their_resource_bindings() {
 fn jpeg_writer_rejects_missing_or_unsupported_frame_metadata() {
     for bytes in [vec![0xff, 0xd8, 0xff, 0xd9], jpeg_frame_fixture(10, 10, 4), jpeg_frame_fixture(0, 10, 3)] {
         let mut graph = DocumentGraph::new(DocumentId(22));
-        graph.push_asset(Asset { id: AssetId(1), kind: AssetKind::Image, content_identity: None, source: Some("invalid.jpg".into()), media_type: Some("image/jpeg".into()), status: SemanticStatus::Resolved, bytes: Some(bytes) });
-        graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: "invalid.jpg".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }] });
+        graph.push_asset(Asset {
+            id: AssetId(1),
+            kind: AssetKind::Image,
+            content_identity: None,
+            source: Some("invalid.jpg".into()),
+            media_type: Some("image/jpeg".into()),
+            status: SemanticStatus::Resolved,
+            bytes: Some(bytes),
+        });
+        graph.push_block(Block::Paragraph {
+            content: vec![Inline::Image { source: "invalid.jpg".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }],
+        });
         assert!(export_pdf_bytes(&graph).is_err());
     }
 }
@@ -358,8 +421,15 @@ fn pdf_writer_emits_section_and_list_children_in_ir_order() {
     let mut graph = DocumentGraph::new(DocumentId(27));
     let section_child = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "section child".into() }] });
     let list_child = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "list child".into() }] });
-    let list = graph.push_block(Block::List { ordered: false, items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![list_child] }] });
-    graph.push_block(Block::Section { level: 1, title: vec![Inline::Text { text: "section title".into() }], children: vec![section_child, list] });
+    let list = graph.push_block(Block::List {
+        ordered: false,
+        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![list_child] }],
+    });
+    graph.push_block(Block::Section {
+        level: 1,
+        title: vec![Inline::Text { text: "section title".into() }],
+        children: vec![section_child, list],
+    });
     let bytes = export_pdf_bytes(&graph).expect("export nested PDF graph");
     let pdf = String::from_utf8_lossy(&bytes);
     for text in ["section title", "section child", "list item", "list child"] {
@@ -374,8 +444,18 @@ fn pdf_writer_emits_section_and_list_children_in_ir_order() {
 fn pdf_writer_converts_8bit_png_to_predictor_flate_image() {
     let png = png_fixture(2, 1, 2, &[0, 0xff, 0, 0, 0, 0, 0xff]);
     let mut graph = DocumentGraph::new(DocumentId(24));
-    graph.push_asset(Asset { id: AssetId(1), kind: AssetKind::Image, content_identity: None, source: Some("rgb.png".into()), media_type: Some("image/png".into()), status: SemanticStatus::Resolved, bytes: Some(png.clone()) });
-    graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: "rgb.png".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }] });
+    graph.push_asset(Asset {
+        id: AssetId(1),
+        kind: AssetKind::Image,
+        content_identity: None,
+        source: Some("rgb.png".into()),
+        media_type: Some("image/png".into()),
+        status: SemanticStatus::Resolved,
+        bytes: Some(png.clone()),
+    });
+    graph.push_block(Block::Paragraph {
+        content: vec![Inline::Image { source: "rgb.png".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }],
+    });
     let exported = export_pdf_bytes(&graph).expect("export PNG PDF");
     let text = String::from_utf8_lossy(&exported);
     assert!(text.contains("/Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode"));
@@ -388,11 +468,29 @@ fn pdf_writer_converts_8bit_png_to_predictor_flate_image() {
 #[test]
 fn pdf_writer_rejects_indexed_and_alpha_pngs() {
     for color_type in [3, 4, 6] {
-        let channels = if color_type == 3 { 1 } else if color_type == 4 { 2 } else { 4 };
+        let channels = if color_type == 3 {
+            1
+        }
+        else if color_type == 4 {
+            2
+        }
+        else {
+            4
+        };
         let png = png_fixture(1, 1, color_type, &vec![0; 1 + channels]);
         let mut graph = DocumentGraph::new(DocumentId(25));
-        graph.push_asset(Asset { id: AssetId(1), kind: AssetKind::Image, content_identity: None, source: Some("unsupported.png".into()), media_type: Some("image/png".into()), status: SemanticStatus::Resolved, bytes: Some(png) });
-        graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: "unsupported.png".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }] });
+        graph.push_asset(Asset {
+            id: AssetId(1),
+            kind: AssetKind::Image,
+            content_identity: None,
+            source: Some("unsupported.png".into()),
+            media_type: Some("image/png".into()),
+            status: SemanticStatus::Resolved,
+            bytes: Some(png),
+        });
+        graph.push_block(Block::Paragraph {
+            content: vec![Inline::Image { source: "unsupported.png".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }],
+        });
         assert!(export_pdf_bytes(&graph).is_err());
     }
 }
@@ -400,9 +498,19 @@ fn pdf_writer_rejects_indexed_and_alpha_pngs() {
 #[test]
 fn images_and_text_share_page_height_without_resetting_to_top() {
     let mut graph = DocumentGraph::new(DocumentId(23));
-    graph.push_asset(Asset { id: AssetId(1), kind: AssetKind::Image, content_identity: None, source: Some("photo.jpg".into()), media_type: Some("image/jpeg".into()), status: SemanticStatus::Resolved, bytes: Some(jpeg_frame_fixture(640, 480, 3)) });
+    graph.push_asset(Asset {
+        id: AssetId(1),
+        kind: AssetKind::Image,
+        content_identity: None,
+        source: Some("photo.jpg".into()),
+        media_type: Some("image/jpeg".into()),
+        status: SemanticStatus::Resolved,
+        bytes: Some(jpeg_frame_fixture(640, 480, 3)),
+    });
     for index in 0..3 {
-        graph.push_block(Block::Paragraph { content: vec![Inline::Image { source: "photo.jpg".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }] });
+        graph.push_block(Block::Paragraph {
+            content: vec![Inline::Image { source: "photo.jpg".into(), alt: Vec::new(), title: None, asset: Some(AssetId(1)) }],
+        });
         graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: format!("after image {index}") }] });
     }
     let exported = export_pdf_bytes(&graph).expect("export image layout");
@@ -418,7 +526,9 @@ fn images_and_text_share_page_height_without_resetting_to_top() {
 #[test]
 fn export_splits_long_documents_into_pages() {
     let mut graph = DocumentGraph::new(DocumentId(2));
-    for index in 0..46 { graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: format!("line {index}") }] }); }
+    for index in 0..46 {
+        graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: format!("line {index}") }] });
+    }
     let bytes = export_pdf_bytes(&graph).expect("export PDF");
     assert!(bytes.windows(12).filter(|window| *window == b"/Type /Page ").count() >= 2);
 }
@@ -469,12 +579,21 @@ fn pdf_doc_encoding_body_text_round_trips_through_ir_edit_and_generation() {
     graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "café • € — déjà vu".into() }] });
     let bytes = export_pdf_bytes(&graph).expect("PDFDocEncoding body text");
     let mut imported = import_pdf_bytes("pdfdoc-body.pdf", &bytes).expect("import PDFDocEncoding body text");
-    let Block::Paragraph { content } = &mut imported.blocks[0].block else { panic!("paragraph expected") };
-    let Inline::Text { text } = &mut content[0] else { panic!("text expected") };
+    let Block::Paragraph { content } = &mut imported.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
+    let Inline::Text { text } = &mut content[0]
+    else {
+        panic!("text expected")
+    };
     text.push_str(" edited");
     let reopened = import_pdf_bytes("pdfdoc-body-edited.pdf", &export_pdf_bytes(&imported).expect("export edited PDFDocEncoding body text"))
         .expect("re-import edited PDFDocEncoding body text");
-    let Block::Paragraph { content } = &reopened.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(format!("{:?}", content).contains("café • € — déjà vu edited"));
 }
 
@@ -526,7 +645,10 @@ fn imports_flate_images_with_predictor_one_without_filter_bytes() {
     let encoded = rows.concat();
     let graph = import_pdf_bytes("predictor-one.pdf", &flate_image_pdf(1, &rows, &encoded)).expect("import predictor one image");
     let image = graph.assets.iter().find(|asset| asset.media_type.as_deref() == Some("image/png")).expect("PNG asset");
-    assert_eq!(image.bytes.as_deref(), Some(png_fixture(2, 2, 2, &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0, 0x70, 0x80, 0x90, 0xa0, 0xb0, 0xc0]).as_slice()));
+    assert_eq!(
+        image.bytes.as_deref(),
+        Some(png_fixture(2, 2, 2, &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0, 0x70, 0x80, 0x90, 0xa0, 0xb0, 0xc0]).as_slice())
+    );
 }
 
 #[test]
@@ -541,13 +663,37 @@ fn imports_flate_images_with_all_png_predictor_filters() {
                 let left = if offset >= 3 { raw[offset - 3] } else { 0 };
                 let up = previous[offset];
                 let upper_left = if offset >= 3 { previous[offset - 3] } else { 0 };
-                let prediction = match filter { 1 => left, 2 => up, 3 => ((u16::from(left) + u16::from(up)) / 2) as u8, 4 => { let p = i32::from(left) + i32::from(up) - i32::from(upper_left); let pa = (p - i32::from(left)).abs(); let pb = (p - i32::from(up)).abs(); let pc = (p - i32::from(upper_left)).abs(); if pa <= pb && pa <= pc { left } else if pb <= pc { up } else { upper_left } }, _ => unreachable!() };
+                let prediction = match filter {
+                    1 => left,
+                    2 => up,
+                    3 => ((u16::from(left) + u16::from(up)) / 2) as u8,
+                    4 => {
+                        let p = i32::from(left) + i32::from(up) - i32::from(upper_left);
+                        let pa = (p - i32::from(left)).abs();
+                        let pb = (p - i32::from(up)).abs();
+                        let pc = (p - i32::from(upper_left)).abs();
+                        if pa <= pb && pa <= pc {
+                            left
+                        }
+                        else if pb <= pc {
+                            up
+                        }
+                        else {
+                            upper_left
+                        }
+                    }
+                    _ => unreachable!(),
+                };
                 encoded.push(raw[offset].wrapping_sub(prediction));
             }
             previous.copy_from_slice(raw);
         }
         let graph = import_pdf_bytes("predictor-filter.pdf", &flate_image_pdf(15, &raw_rows, &encoded)).expect("import filtered image");
         let image = graph.assets.iter().find(|asset| asset.media_type.as_deref() == Some("image/png")).expect("PNG asset");
-        assert_eq!(image.bytes.as_deref(), Some(png_fixture(2, 2, 2, &[0, 10, 20, 30, 40, 50, 60, 0, 70, 80, 90, 100, 110, 120]).as_slice()), "filter {filter}");
+        assert_eq!(
+            image.bytes.as_deref(),
+            Some(png_fixture(2, 2, 2, &[0, 10, 20, 30, 40, 50, 60, 0, 70, 80, 90, 100, 110, 120]).as_slice()),
+            "filter {filter}"
+        );
     }
 }

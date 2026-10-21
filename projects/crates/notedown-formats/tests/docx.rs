@@ -1,5 +1,4 @@
-use notedown_formats::export::markdown::export_markdown;
-use notedown_formats::import::docx::import_docx_bytes;
+use notedown_formats::{export::markdown::export_markdown, import::docx::import_docx_bytes};
 use notedown_ir::{Block, BreakKind, Inline};
 
 fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -82,10 +81,7 @@ fn docx_zip(document_xml: &[u8]) -> Vec<u8> {
 }
 
 fn docx_zip_with_footnotes(document_xml: &[u8], footnotes_xml: &[u8]) -> Vec<u8> {
-    stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/footnotes.xml", footnotes_xml),
-    ])
+    stored_zip(&[("word/document.xml", document_xml), ("word/footnotes.xml", footnotes_xml)])
 }
 
 #[test]
@@ -127,11 +123,16 @@ fn docx_imports_underline_and_strike_without_losing_markdown_strike() {
   </w:p></w:body>
 </w:document>"#;
     let graph = import_docx_bytes("character-styles.docx", &docx_zip(document_xml)).expect("import DOCX");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "underline"));
     assert!(matches!(&content[1], Inline::Text { text } if text == " plain"));
     assert!(matches!(&content[2], Inline::Styled { style, .. } if style == "strike"));
-    assert!(matches!(&content[3], Inline::Styled { style, children } if style == "bold" && matches!(&children[0], Inline::Styled { style, children } if style == "italic" && matches!(&children[0], Inline::Styled { style, .. } if style == "underline"))));
+    assert!(
+        matches!(&content[3], Inline::Styled { style, children } if style == "bold" && matches!(&children[0], Inline::Styled { style, children } if style == "italic" && matches!(&children[0], Inline::Styled { style, .. } if style == "underline")))
+    );
     assert!(export_markdown(&graph).is_err(), "Markdown must not silently drop underline");
     let strike_only = notedown_ir::Inline::Styled { style: "strike".into(), children: vec![Inline::Text { text: "crossed".into() }] };
     let mut strike_graph = notedown_ir::DocumentGraph::new(notedown_ir::DocumentId(55));
@@ -168,7 +169,10 @@ fn docx_imports_superscript_and_subscript_runs() {
   <w:body><w:p><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>2</w:t></w:r><w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>i</w:t></w:r></w:p></w:body>
 </w:document>"#;
     let graph = import_docx_bytes("vertical-align.docx", &docx_zip(document_xml)).expect("import vertical alignment");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "superscript"));
     assert!(matches!(&content[1], Inline::Styled { style, .. } if style == "subscript"));
 }
@@ -180,7 +184,10 @@ fn docx_import_lowers_line_breaks_to_a_first_class_inline() {
   <w:body><w:p><w:r><w:t>first</w:t><w:br/><w:t>second</w:t></w:r></w:p></w:body>
 </w:document>"#;
     let graph = import_docx_bytes("break.docx", &docx_zip(document_xml)).expect("import break DOCX");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Text { text } if text == "first"), "{content:?}");
     assert!(matches!(&content[1], Inline::Break { kind: BreakKind::Hard }), "{content:?}");
     assert!(matches!(&content[2], Inline::Text { text } if text == "second"), "{content:?}");
@@ -195,7 +202,8 @@ fn docx_import_reports_unmapped_character_properties() {
     let mut document_xml = document_xml.to_vec();
     let marker = b"</w:body>";
     let insertion = document_xml.windows(marker.len()).position(|window| window == marker).expect("body marker");
-    document_xml.splice(insertion..insertion, br#"<w:p><w:r><w:rPr><w:spacing w:val="20"/></w:rPr><w:t>unsupported</w:t></w:r></w:p>"#.iter().copied());
+    document_xml
+        .splice(insertion..insertion, br#"<w:p><w:r><w:rPr><w:spacing w:val="20"/></w:rPr><w:t>unsupported</w:t></w:r></w:p>"#.iter().copied());
     let graph = import_docx_bytes("character-properties.docx", &docx_zip(&document_xml)).expect("import character properties");
     assert!(graph.coverage.loss.iter().any(|loss| loss.code == "reader.docx.character_properties"));
     assert!(format!("{:?}", graph.blocks).contains("colored text"));
@@ -208,7 +216,10 @@ fn docx_imports_color_as_a_value_carrying_style() {
   <w:body><w:p><w:r><w:rPr><w:color w:val="FF0000"/></w:rPr><w:t>red</w:t></w:r></w:p></w:body>
 </w:document>"#;
     let graph = import_docx_bytes("color.docx", &docx_zip(document_xml)).expect("import color");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     assert!(matches!(&content[0], Inline::Styled { style, .. } if style == "color:ff0000"));
     assert!(!graph.coverage.loss.iter().any(|loss| loss.code == "reader.docx.character_properties"));
 }
@@ -220,7 +231,10 @@ fn docx_imports_font_size_family_and_highlight_styles() {
   <w:body><w:p><w:r><w:rPr><w:sz w:val="28"/><w:rFonts w:ascii="Aptos"/><w:highlight w:val="yellow"/></w:rPr><w:t>styled</w:t></w:r></w:p></w:body>
 </w:document>"#;
     let graph = import_docx_bytes("valued-character-styles.docx", &docx_zip(document_xml)).expect("import valued styles");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     let rendered = format!("{:?}", content);
     assert!(rendered.contains("font-size:28"), "{rendered}");
     assert!(rendered.contains("font-family:Aptos"), "{rendered}");
@@ -247,10 +261,7 @@ fn docx_imports_hyperlinks_from_relationships() {
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
     Target="https://example.com" TargetMode="External"/>
 </Relationships>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/_rels/document.xml.rels", rels_xml),
-    ]);
+    let zip = stored_zip(&[("word/document.xml", document_xml), ("word/_rels/document.xml.rels", rels_xml)]);
     let graph = import_docx_bytes("links.docx", &zip).expect("import docx");
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("[Example](https://example.com)"));
@@ -286,11 +297,8 @@ fn docx_imports_embedded_images() {
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
     Target="media/logo.png"/>
 </Relationships>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/_rels/document.xml.rels", rels_xml),
-        ("media/logo.png", b"\x89PNG\r\n"),
-    ]);
+    let zip =
+        stored_zip(&[("word/document.xml", document_xml), ("word/_rels/document.xml.rels", rels_xml), ("media/logo.png", b"\x89PNG\r\n")]);
     let graph = import_docx_bytes("image.docx", &zip).expect("import docx");
     assert_eq!(graph.assets.len(), 1);
     let markdown = export_markdown(&graph).expect("export markdown");
@@ -324,21 +332,12 @@ fn docx_imports_ordered_lists_from_numbering_xml() {
     </w:p>
   </w:body>
 </w:document>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/numbering.xml", DECIMAL_NUMBERING_XML),
-    ]);
+    let zip = stored_zip(&[("word/document.xml", document_xml), ("word/numbering.xml", DECIMAL_NUMBERING_XML)]);
     let graph = import_docx_bytes("ol.docx", &zip).expect("import docx");
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("1. One"));
     assert!(markdown.contains("2. Two"));
-    assert!(
-        !graph
-            .coverage
-            .loss
-            .iter()
-            .any(|loss| loss.code == "reader.docx.numbering_unresolved")
-    );
+    assert!(!graph.coverage.loss.iter().any(|loss| loss.code == "reader.docx.numbering_unresolved"));
 }
 
 #[test]
@@ -379,13 +378,7 @@ fn docx_imports_unresolved_footnote_references_with_loss() {
     let graph = import_docx_bytes("sample.docx", &zip).expect("import docx");
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("See[^1] for details."));
-    assert!(
-        graph
-            .coverage
-            .loss
-            .iter()
-            .any(|loss| loss.code == "reader.docx.footnote_body")
-    );
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "reader.docx.footnote_body"));
 }
 
 #[test]
@@ -411,13 +404,7 @@ fn docx_imports_footnote_bodies_from_footnotes_xml() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains("See[^1] for details."));
     assert!(markdown.contains("[^1]: Footnote body."));
-    assert!(
-        !graph
-            .coverage
-            .loss
-            .iter()
-            .any(|loss| loss.code == "reader.docx.footnote_body")
-    );
+    assert!(!graph.coverage.loss.iter().any(|loss| loss.code == "reader.docx.footnote_body"));
 }
 
 #[test]

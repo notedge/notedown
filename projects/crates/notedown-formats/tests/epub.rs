@@ -294,7 +294,13 @@ fn epub_missing_image_member_is_unresolved_and_reported() {
     let image = graph.assets.iter().find(|asset| asset.source.as_deref() == Some("OEBPS/images/cover.png")).expect("image asset");
     assert!(image.bytes.is_none());
     assert_eq!(image.status, notedown_ir::SemanticStatus::Unresolved);
-    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.epub.asset_unresolved" && loss.status == notedown_ir::SemanticStatus::Unresolved));
+    assert!(
+        graph
+            .coverage
+            .loss
+            .iter()
+            .any(|loss| loss.code == "import.epub.asset_unresolved" && loss.status == notedown_ir::SemanticStatus::Unresolved)
+    );
     assert!(!graph.coverage.complete);
     assert!(graph.validate().is_valid());
 }
@@ -494,8 +500,14 @@ fn epub_import_preserves_inline_identity_and_classes() {
         ("OEBPS/chapter.xhtml", chapter),
     ]);
     let graph = import_epub_bytes("attributed.epub", &zip).expect("import epub");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
-    let Inline::Attributed { attributes, children } = &content[0] else { panic!("attributed inline expected, got {content:?}") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
+    let Inline::Attributed { attributes, children } = &content[0]
+    else {
+        panic!("attributed inline expected, got {content:?}")
+    };
     assert_eq!(attributes.id.as_deref(), Some("anchor"));
     assert_eq!(attributes.classes, ["lead", "note"]);
     assert_eq!(children, &[Inline::Text { text: "Marked".into() }]);
@@ -533,7 +545,10 @@ fn epub_import_maps_inline_styles_to_canonical_ir_names() {
         ("OEBPS/chapter.xhtml", chapter),
     ]);
     let graph = import_epub_bytes("styles.epub", &zip).expect("import epub");
-    let Block::Paragraph { content } = &graph.blocks[0].block else { panic!("paragraph expected") };
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected")
+    };
     let styles = content
         .iter()
         .filter_map(|inline| match inline {

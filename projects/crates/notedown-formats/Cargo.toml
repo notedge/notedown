@@ -1,15 +1,15 @@
 [package]
 name = "notedown-formats"
-version = "0.1.0"
-authors = ["Aster <192607617@qq.com>"]
+version.workspace = true
+authors.workspace = true
 description = "Notedown document import and export format modules"
 repository = "https://github.com/notedge/notedown"
 readme = "readme.md"
-license = "MPL-2.0"
-edition = "2021"
+license.workspace = true
+edition.workspace = true
 
 [dependencies]
-notedown-ir = { path = "../notedown-ir" }
+notedown-ir = { workspace = true }
 oak-core = { workspace = true, optional = true }
 oak-markdown = { workspace = true, optional = true }
 oak-notedown = { workspace = true, optional = true }
@@ -17,7 +17,7 @@ acorn-core = { workspace = true, optional = true }
 acorn-doc = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
-flate2 = { version = "1.1", optional = true }
+flate2 = { workspace = true, optional = true }
 oak-html = { workspace = true, optional = true }
 oak-xml = { workspace = true, optional = true }
 
@@ -71,8 +71,48 @@ required-features = ["markdown"]
 name = "notedown"
 required-features = ["markdown", "notedown"]
 
+[[test]]
+name = "import_common"
+required-features = ["markdown"]
+
+[[test]]
+name = "import_doc"
+required-features = ["doc"]
+
+[[test]]
+name = "import_docx_numbering"
+required-features = ["docx"]
+
+[[test]]
+name = "import_docx_xml_extensions"
+required-features = ["docx"]
+
+[[test]]
+name = "import_docx_xml"
+required-features = ["docx", "markdown"]
+
+[[test]]
+name = "export_markdown_project"
+required-features = ["markdown"]
+
+[[test]]
+name = "import_epub_ast_lowering"
+required-features = ["epub"]
+
+[[test]]
+name = "import_epub_navigation"
+required-features = ["epub"]
+
+[[test]]
+name = "import_epub_xhtml"
+required-features = ["epub", "markdown"]
+
+[[test]]
+name = "import_pdf_internal"
+required-features = ["pdf"]
+
 [dev-dependencies]
-cfb = "0.7.3"
-serde_json = "1.0"
+cfb = { workspace = true }
+serde_json = { workspace = true }
 oak-core = { workspace = true }
 oak-html = { workspace = true }

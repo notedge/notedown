@@ -21,14 +21,18 @@ fn notedown_import_lowers_heading_and_paragraph() {
 #[test]
 fn notedown_import_lowers_strong_and_emphasis_without_leaking_markers() {
     let graph = import_notedown_bytes("styles.nd", "Body **bold** and *italic*.\n").expect("import notedown");
-    let Block::Paragraph { content } = &graph.blocks[0].block else {
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
         panic!("expected paragraph: {:?}", graph.blocks);
     };
-    assert!(content.iter().any(|inline| matches!(
-        inline,
-        Inline::Styled { style, children }
-            if style == "bold" && children == &[Inline::Text { text: "bold".into() }]
-    )), "{content:?}");
+    assert!(
+        content.iter().any(|inline| matches!(
+            inline,
+            Inline::Styled { style, children }
+                if style == "bold" && children == &[Inline::Text { text: "bold".into() }]
+        )),
+        "{content:?}"
+    );
     assert!(content.iter().any(|inline| matches!(
         inline,
         Inline::Styled { style, children }
@@ -40,18 +44,22 @@ fn notedown_import_lowers_strong_and_emphasis_without_leaking_markers() {
 #[test]
 fn notedown_import_lowers_nested_emphasis() {
     let graph = import_notedown_bytes("nested-styles.nd", "**bold *italic***\n").expect("import notedown");
-    let Block::Paragraph { content } = &graph.blocks[0].block else {
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
         panic!("expected paragraph: {:?}", graph.blocks);
     };
-    assert!(matches!(
-        content.first(),
-        Some(Inline::Styled { style, children })
-            if style == "bold" && children.iter().any(|child| matches!(
-                child,
-                Inline::Styled { style, children }
-                    if style == "italic" && children == &[Inline::Text { text: "italic".into() }]
-            ))
-    ), "{content:?}");
+    assert!(
+        matches!(
+            content.first(),
+            Some(Inline::Styled { style, children })
+                if style == "bold" && children.iter().any(|child| matches!(
+                    child,
+                    Inline::Styled { style, children }
+                        if style == "italic" && children == &[Inline::Text { text: "italic".into() }]
+                ))
+        ),
+        "{content:?}"
+    );
 }
 
 #[test]
@@ -70,20 +78,30 @@ fn notedown_import_lowers_underscore_emphasis() {
 
 #[test]
 fn notedown_table_cells_preserve_emphasis() {
-    let graph = import_notedown_bytes("styled-table.nd", "| Name | Value |\n|------|-------|\n| **Alpha** | *one* |\n").expect("import notedown");
-    let Block::Table { rows } = &graph.blocks[0].block else {
+    let graph =
+        import_notedown_bytes("styled-table.nd", "| Name | Value |\n|------|-------|\n| **Alpha** | *one* |\n").expect("import notedown");
+    let Block::Table { rows } = &graph.blocks[0].block
+    else {
         panic!("expected table: {:?}", graph.blocks);
     };
-    assert!(rows[1].cells[0].iter().any(|inline| matches!(
-        inline,
-        Inline::Styled { style, children }
-            if style == "bold" && children == &[Inline::Text { text: "Alpha".into() }]
-    )), "{:?}", rows[1].cells[0]);
-    assert!(rows[1].cells[1].iter().any(|inline| matches!(
-        inline,
-        Inline::Styled { style, children }
-            if style == "italic" && children == &[Inline::Text { text: "one".into() }]
-    )), "{:?}", rows[1].cells[1]);
+    assert!(
+        rows[1].cells[0].iter().any(|inline| matches!(
+            inline,
+            Inline::Styled { style, children }
+                if style == "bold" && children == &[Inline::Text { text: "Alpha".into() }]
+        )),
+        "{:?}",
+        rows[1].cells[0]
+    );
+    assert!(
+        rows[1].cells[1].iter().any(|inline| matches!(
+            inline,
+            Inline::Styled { style, children }
+                if style == "italic" && children == &[Inline::Text { text: "one".into() }]
+        )),
+        "{:?}",
+        rows[1].cells[1]
+    );
 }
 
 #[test]
@@ -139,11 +157,9 @@ fn notedown_import_lowers_links() {
     let markdown = export_markdown(&graph).expect("export markdown");
     assert!(markdown.contains(r"[home](https://example.com/a\(b\))"), "{markdown:?}, {graph:?}");
     let reopened = import_markdown_bytes("link.md", &markdown).expect("re-import markdown");
-    assert!(
-        markdown.contains(" today."),
-        "trailing paragraph content was lost: {markdown:?}, {graph:?}"
-    );
-    let Block::Paragraph { content } = &reopened.blocks[0].block else {
+    assert!(markdown.contains(" today."), "trailing paragraph content was lost: {markdown:?}, {graph:?}");
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
         panic!("expected paragraph: {:?}", reopened.blocks);
     };
     let link = content
@@ -175,7 +191,8 @@ fn notedown_import_lowers_images_as_semantic_inline_images() {
     assert_eq!(graph.assets[0].media_type.as_deref(), Some("image/png"));
     assert_eq!(graph.relations.len(), 1);
     let authored = graph.blocks[0].block.clone();
-    let Block::Paragraph { content } = &authored else {
+    let Block::Paragraph { content } = &authored
+    else {
         panic!("expected paragraph: {authored:?}");
     };
     assert_eq!(

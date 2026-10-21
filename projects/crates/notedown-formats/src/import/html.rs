@@ -1,17 +1,15 @@
-use notedown_ir::{
-    Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, RelationEndpoint, SemanticStatus,
+use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, RelationEndpoint, SemanticStatus};
+use oak_core::{Builder, SourceText, parser::session::ParseSession};
+use oak_html::{
+    HtmlBuilder, HtmlLanguage,
+    ast::{Element, HtmlDocument, HtmlNode},
 };
-use oak_core::parser::session::ParseSession;
-use oak_core::{Builder, SourceText};
-use oak_html::ast::{Element, HtmlDocument, HtmlNode};
-use oak_html::{HtmlBuilder, HtmlLanguage};
 
 use super::common::register_image_assets;
 use crate::FormatError;
 
 pub fn import_html_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, FormatError> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
+    let text = std::str::from_utf8(bytes).map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
     import_html_text(label, text)
 }
 
@@ -19,17 +17,9 @@ pub fn import_html_text(label: &str, text: &str) -> Result<DocumentGraph, Format
     let source = SourceText::new(text);
     let builder = HtmlBuilder::new(HtmlLanguage::default());
     let mut session = ParseSession::<HtmlLanguage>::default();
-    let document = builder
-        .build(&source, &[], &mut session)
-        .result
-        .map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
+    let document = builder.build(&source, &[], &mut session).result.map_err(|error| FormatError::parse("html", format!("{label}: {error}")))?;
     let mut graph = DocumentGraph::new(DocumentId(1));
-    if let Some(title) = document
-        .nodes
-        .iter()
-        .filter_map(as_element)
-        .find_map(|element| find_element(element, "title"))
-    {
+    if let Some(title) = document.nodes.iter().filter_map(as_element).find_map(|element| find_element(element, "title")) {
         let title = text_content(title).trim().to_string();
         if !title.is_empty() {
             graph.metadata.title = Some(title);
@@ -86,7 +76,10 @@ fn collect_unsupported_losses(document: &HtmlDocument, graph: &mut DocumentGraph
 
 fn collect_unsupported_element_losses(element: &Element, graph: &mut DocumentGraph) {
     let tag = element.tag_name.to_ascii_lowercase();
-    if matches!(tag.as_str(), "script" | "style" | "form" | "input" | "select" | "textarea" | "button" | "canvas" | "video" | "audio" | "iframe") {
+    if matches!(
+        tag.as_str(),
+        "script" | "style" | "form" | "input" | "select" | "textarea" | "button" | "canvas" | "video" | "audio" | "iframe"
+    ) {
         graph.push_loss(LossMarker {
             code: format!("import.html.unsupported_{tag}"),
             message: format!("HTML element `<{tag}>` is not represented in notedown-ir"),
@@ -112,25 +105,43 @@ fn attribute(element: &Element, name: &str) -> Option<String> {
 fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<Block> {
     let tag = element.tag_name.to_ascii_lowercase();
     match tag.as_str() {
-        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => vec![Block::Section {
-            level: tag[1..].parse().unwrap_or(1),
-            title: lower_inlines(element, graph),
-            children: Vec::new(),
-        }],
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+            vec![Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph), children: Vec::new() }]
+        }
         "p" => vec![Block::Paragraph { content: lower_inlines(element, graph) }],
         "blockquote" => vec![Block::Quote { content: lower_inlines(element, graph) }],
         "pre" => vec![Block::Code {
-            language: element.children.iter().filter_map(as_element).find(|child| child.tag_name.eq_ignore_ascii_case("code")).and_then(|child| attribute(child, "class")),
+            language: element
+                .children
+                .iter()
+                .filter_map(as_element)
+                .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                .and_then(|child| attribute(child, "class")),
             content: text_content(element),
         }],
         "ul" | "ol" => {
-            let items = element.children.iter().filter_map(as_element).filter(|child| child.tag_name.eq_ignore_ascii_case("li")).map(|item| lower_list_item(item, graph)).collect();
+            let items = element
+                .children
+                .iter()
+                .filter_map(as_element)
+                .filter(|child| child.tag_name.eq_ignore_ascii_case("li"))
+                .map(|item| lower_list_item(item, graph))
+                .collect();
             vec![Block::List { ordered: tag == "ol", items }]
         }
         "table" => {
-            let rows = descendants(element, "tr").into_iter().map(|row| notedown_ir::TableRow {
-                cells: row.children.iter().filter_map(as_element).filter(|cell| matches!(cell.tag_name.to_ascii_lowercase().as_str(), "td" | "th")).map(|cell| lower_inlines(cell, graph)).collect(),
-            }).collect();
+            let rows = descendants(element, "tr")
+                .into_iter()
+                .map(|row| notedown_ir::TableRow {
+                    cells: row
+                        .children
+                        .iter()
+                        .filter_map(as_element)
+                        .filter(|cell| matches!(cell.tag_name.to_ascii_lowercase().as_str(), "td" | "th"))
+                        .map(|cell| lower_inlines(cell, graph))
+                        .collect(),
+                })
+                .collect();
             vec![Block::Table { rows }]
         }
         "hr" => vec![Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }],
@@ -154,16 +165,30 @@ fn lower_list_item(item: &Element, graph: &mut DocumentGraph) -> notedown_ir::Li
             }
         }
     }
-    notedown_ir::ListItem {
-        content: lower_list_item_inlines(item, graph),
-        children,
-    }
+    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children }
 }
 
 fn is_block_element(element: &Element) -> bool {
     matches!(
         element.tag_name.to_ascii_lowercase().as_str(),
-        "p" | "blockquote" | "pre" | "ul" | "ol" | "table" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "hr" | "section" | "article" | "main" | "div" | "figure" | "nav"
+        "p" | "blockquote"
+            | "pre"
+            | "ul"
+            | "ol"
+            | "table"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "hr"
+            | "section"
+            | "article"
+            | "main"
+            | "div"
+            | "figure"
+            | "nav"
     )
 }
 
@@ -242,12 +267,9 @@ fn lower_inline_element(element: &Element, graph: &mut DocumentGraph) -> Vec<Inl
             let target = attribute(element, "href").unwrap_or_default();
             if target.trim().is_empty() {
                 nested
-            } else {
-                vec![Inline::Link {
-                    target: RelationEndpoint::ExternalUri(target),
-                    display: nested,
-                    title: attribute(element, "title"),
-                }]
+            }
+            else {
+                vec![Inline::Link { target: RelationEndpoint::ExternalUri(target), display: nested, title: attribute(element, "title") }]
             }
         }
         "img" => {
@@ -268,11 +290,7 @@ fn lower_inline_element(element: &Element, graph: &mut DocumentGraph) -> Vec<Inl
         _ => nested,
     };
     let attributes = inline_attributes(element);
-    if attributes.is_empty() {
-        inlines
-    } else {
-        vec![Inline::Attributed { attributes, children: inlines }]
-    }
+    if attributes.is_empty() { inlines } else { vec![Inline::Attributed { attributes, children: inlines }] }
 }
 
 /// Collect the identity and class attributes of an inline element so authored
@@ -293,12 +311,13 @@ fn inline_attributes(element: &Element) -> Attributes {
 }
 
 fn push_text(inlines: &mut Vec<Inline>, text: String) {
-    if text.is_empty() { return; }
+    if text.is_empty() {
+        return;
+    }
     if let Some(Inline::Text { text: previous }) = inlines.last_mut() {
         previous.push_str(&text);
-    } else {
+    }
+    else {
         inlines.push(Inline::Text { text });
     }
 }
-
-

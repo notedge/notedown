@@ -14,11 +14,7 @@ pub fn import_doc_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, Form
     })?;
     let mut graph = DocumentGraph::new(DocumentId(1));
     for paragraph in split_doc_paragraphs(&extracted.text) {
-        graph.push_block(Block::Paragraph {
-            content: vec![Inline::Text {
-                text: paragraph.to_string(),
-            }],
-        });
+        graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: paragraph.to_string() }] });
     }
     graph.push_loss(LossMarker {
         code: "import.doc.partial_coverage".into(),
@@ -37,26 +33,13 @@ pub fn import_doc_bytes(label: &str, bytes: &[u8]) -> Result<DocumentGraph, Form
     Ok(graph)
 }
 
-fn split_doc_paragraphs(text: &str) -> impl Iterator<Item = &str> {
+pub fn split_doc_paragraphs(text: &str) -> impl Iterator<Item = &str> {
     text.split('\n').filter(|paragraph| !paragraph.is_empty())
 }
 
 /// Import a legacy `.doc` file from disk.
 pub fn import_doc(path: impl AsRef<std::path::Path>) -> Result<DocumentGraph, FormatError> {
     let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(|error| {
-        FormatError::invalid_input(format!("failed to read {}: {error}", path.display()))
-    })?;
+    let bytes = std::fs::read(path).map_err(|error| FormatError::invalid_input(format!("failed to read {}: {error}", path.display())))?;
     import_doc_bytes(&path.display().to_string(), &bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::split_doc_paragraphs;
-
-    #[test]
-    fn preserves_leading_and_trailing_spaces_inside_doc_paragraphs() {
-        let paragraphs = split_doc_paragraphs("  leading\ttext  \nnext  ").collect::<Vec<_>>();
-        assert_eq!(paragraphs, ["  leading\ttext  ", "next  "]);
-    }
 }

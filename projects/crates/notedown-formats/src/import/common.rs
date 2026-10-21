@@ -21,9 +21,10 @@ pub(super) fn decode_escaped_text(text: &str) -> String {
 
 /// Register one asset per authored image occurrence and bind the inline to it.
 ///
-/// The binding is written back into `Inline::Image::asset` so the occurrence keeps
-/// a stable logical identity even when the storage location is renamed later.
-pub(super) fn register_image_assets(graph: &mut DocumentGraph) {
+/// The binding is written back into `Inline::Image::asset` so the occurrence
+/// keeps a stable logical identity even when the storage location is renamed
+/// later.
+pub fn register_image_assets(graph: &mut DocumentGraph) {
     let mut references = Vec::new();
     for node in &mut graph.blocks {
         let node_id = node.id;
@@ -101,85 +102,4 @@ fn media_type_for_source(source: &str) -> Option<String> {
         _ => return None,
     };
     Some(media_type.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use notedown_ir::{DocumentId, ListItem, TableRow};
-
-    fn image(source: &str) -> Inline {
-        Inline::Image {
-            source: source.into(),
-            alt: vec![Inline::Text { text: "diagram".into() }],
-            title: None,
-            asset: None,
-        }
-    }
-
-    fn bound_assets(block: &Block) -> Vec<Option<AssetId>> {
-        let (Block::Paragraph { content } | Block::Quote { content }) = block else {
-            return Vec::new();
-        };
-        content
-            .iter()
-            .filter_map(|inline| match inline {
-                Inline::Image { asset, .. } => Some(*asset),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn nested_blocks_register_each_image_occurrence_once() {
-        let mut graph = DocumentGraph::new(DocumentId(1));
-        let paragraph = graph.push_block(Block::Paragraph { content: vec![image("diagram.png")] });
-        let list = graph.push_block(Block::List {
-            ordered: false,
-            items: vec![ListItem { content: Vec::new(), children: vec![paragraph] }],
-        });
-        graph.push_block(Block::Section { level: 1, title: Vec::new(), children: vec![list] });
-
-        register_image_assets(&mut graph);
-
-        assert_eq!(graph.assets.len(), 1);
-        assert_eq!(graph.relations.len(), 1);
-        assert_eq!(graph.relations[0].source, RelationEndpoint::Node(paragraph));
-        assert_eq!(graph.relations[0].target, RelationEndpoint::Asset(graph.assets[0].id));
-        assert_eq!(bound_assets(&graph.blocks[0].block), vec![Some(graph.assets[0].id)]);
-        assert!(graph.validate().is_valid());
-    }
-
-    #[test]
-    fn table_images_keep_separate_occurrence_identity_and_node_endpoint() {
-        let mut graph = DocumentGraph::new(DocumentId(2));
-        let table = graph.push_block(Block::Table {
-            rows: vec![TableRow { cells: vec![vec![image("same.png")], vec![image("same.png")]] }],
-        });
-
-        register_image_assets(&mut graph);
-
-        assert_eq!(graph.assets.len(), 2);
-        assert_ne!(graph.assets[0].id, graph.assets[1].id);
-        assert!(graph.assets.iter().all(|asset| asset.source.as_deref() == Some("same.png")));
-        assert_eq!(graph.relations.len(), 2);
-        assert!(graph.relations.iter().all(|relation| {
-            relation.kind == RelationKind::Embeds && relation.source == RelationEndpoint::Node(table)
-        }));
-        let Block::Table { rows } = &graph.blocks[0].block else {
-            panic!("expected table");
-        };
-        assert_eq!(
-            rows[0]
-                .cells
-                .iter()
-                .map(|cell| match &cell[0] {
-                    Inline::Image { asset, .. } => *asset,
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            vec![Some(graph.assets[0].id), Some(graph.assets[1].id)]
-        );
-        assert!(graph.validate().is_valid());
-    }
 }

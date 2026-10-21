@@ -1,6 +1,7 @@
-use notedown_formats::export::markdown_project::export_markdown_project;
-use notedown_formats::import::docx::import_docx_bytes;
-use notedown_formats::import::markdown::import_markdown_bytes;
+use notedown_formats::{
+    export::markdown_project::export_markdown_project,
+    import::{docx::import_docx_bytes, markdown::import_markdown_bytes},
+};
 use notedown_ir::{Block, Inline};
 
 fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -94,11 +95,8 @@ fn docx_exports_markdown_project_with_materialized_image() {
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
     Target="media/logo.png"/>
 </Relationships>"#;
-    let zip = stored_zip(&[
-        ("word/document.xml", document_xml),
-        ("word/_rels/document.xml.rels", rels_xml),
-        ("word/media/logo.png", b"\x89PNG\r\n"),
-    ]);
+    let zip =
+        stored_zip(&[("word/document.xml", document_xml), ("word/_rels/document.xml.rels", rels_xml), ("word/media/logo.png", b"\x89PNG\r\n")]);
 
     let graph = import_docx_bytes("image.docx", &zip).expect("import docx");
     let project = export_markdown_project(&graph).expect("export markdown project");

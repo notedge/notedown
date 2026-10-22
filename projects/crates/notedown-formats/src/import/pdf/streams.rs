@@ -1,4 +1,4 @@
-use std::io::Read;
+use acorn_codec::{CodecLimits, compression::zlib::Zlib};
 
 use crate::FormatError;
 
@@ -7,6 +7,13 @@ use super::{
     syntax::{dictionary_value, skip_space},
     types::PdfStream,
 };
+
+/// Maximum decoded stream size (32 MiB).
+const MAX_STREAM_BYTES: u64 = 32 * 1024 * 1024;
+
+fn pdf_zlib_limits() -> CodecLimits {
+    CodecLimits::new().with_max_output_bytes(MAX_STREAM_BYTES + 1)
+}
 
 pub(crate) fn stream_contents(bytes: &[u8]) -> Vec<PdfStream<'_>> {
     let mut streams = Vec::new();
@@ -45,14 +52,10 @@ pub(crate) fn stream_contents(bytes: &[u8]) -> Vec<PdfStream<'_>> {
 }
 pub(crate) fn decode_stream(dictionary: &[u8], stream: &[u8]) -> Result<Vec<u8>, FormatError> {
     if dictionary.windows(12).any(|window| window == b"/FlateDecode") {
-        let mut decoder = flate2::read::ZlibDecoder::new(stream);
-        let mut decoded = Vec::new();
-        decoder
-            .by_ref()
-            .take(32 * 1024 * 1024 + 1)
-            .read_to_end(&mut decoded)
+        let facts = Zlib::decode(stream, pdf_zlib_limits())
             .map_err(|error| FormatError::invalid_input(format!("invalid FlateDecode stream: {error}")))?;
-        if decoded.len() > 32 * 1024 * 1024 {
+        let decoded = facts.value;
+        if decoded.len() > MAX_STREAM_BYTES as usize {
             return Err(FormatError::unsupported("pdf", "decoded stream exceeds the 32 MiB limit"));
         }
         return Ok(decoded);

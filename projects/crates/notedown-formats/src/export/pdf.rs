@@ -1,13 +1,17 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::{Read as _, Write as _},
-};
+use std::{collections::{HashMap, HashSet}, io::Write as _};
 
-use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use acorn_codec::{CodecLimits, compression::deflate::DeflateLevel, compression::zlib::Zlib};
 
 use notedown_ir::{AssetId, AssetKind, Block, BreakKind, DocumentGraph, Inline, NodeId};
 
 use crate::FormatError;
+
+/// Maximum scanline buffer size for PNG payload handling (32 MiB).
+const MAX_PNG_SCANLINES: u64 = 32 * 1024 * 1024;
+
+fn png_payload_zlib_limits() -> CodecLimits {
+    CodecLimits::new().with_max_output_bytes(MAX_PNG_SCANLINES + 1)
+}
 
 #[derive(Clone)]
 enum RenderLine {
@@ -450,12 +454,11 @@ fn png_payload(bytes: &[u8]) -> Option<PdfImagePayload> {
     }
     let colors = colors?;
     let expected = usize::try_from(height).ok()?.checked_mul(usize::try_from(width).ok()?.checked_mul(usize::from(colors))?.checked_add(1)?)?;
-    let mut decoder = ZlibDecoder::new(idat.as_slice());
-    if expected > 32 * 1024 * 1024 {
+    if expected as u64 > MAX_PNG_SCANLINES {
         return None;
     }
-    let mut scanlines = Vec::new();
-    decoder.by_ref().take(expected as u64 + 1).read_to_end(&mut scanlines).ok()?;
+    let facts = Zlib::decode(idat.as_slice(), png_payload_zlib_limits()).ok()?;
+    let scanlines = facts.value;
     if scanlines.len() != expected {
         return None;
     }
@@ -463,9 +466,7 @@ fn png_payload(bytes: &[u8]) -> Option<PdfImagePayload> {
     if scanlines.chunks_exact(row_bytes + 1).any(|row| row[0] > 4) {
         return None;
     }
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(&scanlines).ok()?;
-    let stream = encoder.finish().ok()?;
+    let stream = Zlib::encode(&scanlines, DeflateLevel::default());
     Some(PdfImagePayload { stream, frame: JpegFrame { width, height, components: colors }, filter: ImageFilter::Flate { colors } })
 }
 

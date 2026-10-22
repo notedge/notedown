@@ -25,6 +25,7 @@ license = "MPL-2.0"
 # Overlaid by local path `.cargo/config.toml` (git ignored).
 boost-benchmark = { git = "https://github.com/oovm/rust-boost", rev = "465e3e5eb263f1d2b6f7429c426c5e78064182bc" }
 # Binary Readers
+acorn-codec = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996", default-features = false, features = ["compression"] }
 acorn-core = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
 acorn-cfb = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
 acorn-doc = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
@@ -49,7 +50,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 cfb = "0.15.0"
 
-# Benchmark Only dependencies
+# Benchmark comparison only — production path uses acorn-codec.
+# Kept so that comparative benchmarks between flate2 and acorn-codec
+# remain possible. Do NOT add this to any crate's [dependencies]; use as
+# dev-dependency only for benchmark fixtures.
 flate2 = "1.1.10"
 
 [profile.release]

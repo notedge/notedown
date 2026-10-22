@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-};
+use std::collections::HashMap;
+
+use acorn_codec::{CodecLimits, compression::deflate::DeflateLevel, compression::zlib::Zlib};
 
 use crate::FormatError;
 
@@ -10,6 +9,13 @@ use super::{
     syntax::{dictionary_value, skip_space},
     types::{PdfImage, PdfStream},
 };
+
+/// Maximum decoded image size (32 MiB).
+const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+
+fn pdf_image_zlib_limits() -> CodecLimits {
+    CodecLimits::new().with_max_output_bytes(MAX_IMAGE_BYTES + 1)
+}
 
 pub(crate) fn page_images(bytes: &[u8], streams: &[PdfStream<'_>]) -> Result<HashMap<String, PdfImage>, FormatError> {
     let bodies = object_bodies(bytes);
@@ -85,14 +91,10 @@ pub(crate) fn decode_pdf_image_png(dictionary: &[u8], stream: &[u8]) -> Result<V
     if width == 0 || height == 0 || bits != 8 || !matches!(colors, 1 | 3) {
         return Err(FormatError::unsupported("pdf", "Flate image requires non-zero 8-bit grayscale or RGB dimensions"));
     }
-    let mut decoder = flate2::read::ZlibDecoder::new(stream);
-    let mut filtered = Vec::new();
-    decoder
-        .by_ref()
-        .take(32 * 1024 * 1024 + 1)
-        .read_to_end(&mut filtered)
+    let facts = Zlib::decode(stream, pdf_image_zlib_limits())
         .map_err(|error| FormatError::parse("pdf", format!("invalid Flate image: {error}")))?;
-    if filtered.len() > 32 * 1024 * 1024 {
+    let filtered = facts.value;
+    if filtered.len() > MAX_IMAGE_BYTES as usize {
         return Err(FormatError::unsupported("pdf", "decoded image exceeds the 32 MiB limit"));
     }
     let row_bytes = usize::try_from(width)
@@ -168,12 +170,13 @@ fn paeth(left: u8, up: u8, upper_left: u8) -> u8 {
 }
 
 fn encode_png(width: u32, height: u32, colors: u8, raw: &[u8]) -> Vec<u8> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    for row in raw.chunks_exact(width as usize * colors as usize) {
-        let _ = encoder.write_all(&[0]);
-        let _ = encoder.write_all(row);
+    let row_bytes = width as usize * colors as usize;
+    let mut png_data = Vec::with_capacity(raw.len() + height as usize);
+    for row in raw.chunks_exact(row_bytes) {
+        png_data.push(0); // PNG filter type 0 for all rows
+        png_data.extend_from_slice(row);
     }
-    let compressed = encoder.finish().unwrap_or_default();
+    let compressed = Zlib::encode(&png_data, DeflateLevel::default());
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     let mut header = Vec::with_capacity(13);
     header.extend_from_slice(&width.to_be_bytes());

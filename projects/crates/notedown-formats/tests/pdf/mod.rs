@@ -1,3 +1,5 @@
+use acorn_codec::compression::deflate::DeflateLevel;
+use acorn_codec::compression::zlib::Zlib;
 use notedown_formats::{export::pdf::export_pdf_bytes, import::pdf::import_pdf_bytes};
 use notedown_ir::{Asset, AssetId, AssetKind, Block, DocumentGraph, DocumentId, DocumentMetadata, Inline, ListItem, NodeId, SemanticStatus};
 
@@ -16,11 +18,7 @@ fn jpeg_frame_fixture(width: u16, height: u16, components: u8) -> Vec<u8> {
 }
 
 fn png_fixture(width: u32, height: u32, color_type: u8, scanlines: &[u8]) -> Vec<u8> {
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write;
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(scanlines).unwrap();
-    let compressed = encoder.finish().unwrap();
+    let compressed = Zlib::encode(scanlines, DeflateLevel::default());
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     let chunk = |kind: &[u8], data: &[u8], output: &mut Vec<u8>| {
         output.extend_from_slice(&(data.len() as u32).to_be_bytes());
@@ -46,11 +44,7 @@ fn png_fixture(width: u32, height: u32, color_type: u8, scanlines: &[u8]) -> Vec
 }
 
 fn flate_image_pdf(predictor: usize, rows: &[&[u8]], encoded_rows: &[u8]) -> Vec<u8> {
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write;
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(encoded_rows).unwrap();
-    let image = encoder.finish().unwrap();
+    let image = Zlib::encode(encoded_rows, DeflateLevel::default());
     let content = b"q /Im1 Do Q";
     let mut pdf = format!("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /XObject << /Im1 6 0 R >> >> /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length {} >>\nstream\n", content.len()).into_bytes();
     pdf.extend_from_slice(content);
@@ -162,11 +156,7 @@ fn page_tree_order_wins_over_physical_object_order() {
 
 #[test]
 fn reads_flate_decode_stream_and_tj_array() {
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write;
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(b"BT [(Hello) 20 ( PDF)] TJ ET").unwrap();
-    let compressed = encoder.finish().unwrap();
+    let compressed = Zlib::encode(b"BT [(Hello) 20 ( PDF)] TJ ET", DeflateLevel::default());
     let mut bytes = format!("%PDF-1.4\n1 0 obj\n<< /Length {} /Filter /FlateDecode >>\nstream\n", compressed.len()).into_bytes();
     bytes.extend_from_slice(&compressed);
     bytes.extend_from_slice(b"\nendstream\nendobj\n%%EOF");

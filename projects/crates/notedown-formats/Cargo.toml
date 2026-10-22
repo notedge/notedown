@@ -10,6 +10,7 @@ edition.workspace = true
 
 [dependencies]
 notedown-ir = { workspace = true }
+acorn-codec = { workspace = true, optional = true }
 oak-core = { workspace = true, optional = true }
 oak-markdown = { workspace = true, optional = true }
 oak-notedown = { workspace = true, optional = true }
@@ -17,7 +18,6 @@ acorn-core = { workspace = true, optional = true }
 acorn-doc = { workspace = true, optional = true }
 acorn-docx = { workspace = true, optional = true }
 acorn-epub = { workspace = true, optional = true }
-flate2 = { workspace = true, optional = true }
 oak-html = { workspace = true, optional = true }
 oak-xml = { workspace = true, optional = true }
 
@@ -27,7 +27,7 @@ markdown = ["dep:oak-core", "dep:oak-markdown"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-core", "dep:oak-xml"]
 doc = ["dep:acorn-doc"]
-pdf = ["dep:flate2"]
+pdf = ["dep:acorn-codec"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 html = ["dep:oak-core", "dep:oak-html"]
 

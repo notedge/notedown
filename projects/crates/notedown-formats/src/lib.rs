@@ -8,7 +8,7 @@ pub mod import;
 pub mod inspect;
 
 pub use capability::{FormatCapability, FormatDirection, FormatStatus};
-pub use error::FormatError;
+pub use error::{FormatError, NAMESPACE as DIAGNOSTIC_NAMESPACE, codes as diagnostic_codes, from_format_error, origin_formats};
 pub use inspect::{DocumentInspect, InspectBudget, InspectedPart};
 
 #[cfg(feature = "docx")]

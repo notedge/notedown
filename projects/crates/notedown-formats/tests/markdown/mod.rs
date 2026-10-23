@@ -512,3 +512,40 @@ fn markdown_export_chooses_safe_code_delimiters() {
     assert!(markdown.starts_with("``` `a``b` ```\n\n"));
     assert!(markdown.contains("````\nline with ``` inside\n````"));
 }
+
+#[test]
+fn markdown_inline_code_matches_opening_backtick_run() {
+    let source = "Use ``a`b`` here.\n";
+    let graph = import_markdown_bytes("inline-code-multi-backtick.md", source).expect("import markdown");
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(content.iter().filter(|inline| matches!(inline, Inline::InlineCode { .. })).count(), 1, "{content:#?}");
+    assert_eq!(content.len(), 3, "{content:#?}");
+    assert_eq!(content.first(), Some(&Inline::Text { text: "Use ".into() }), "{content:#?}");
+    assert_eq!(content.get(1), Some(&Inline::InlineCode { text: "a`b".into() }), "{content:#?}");
+    assert!(matches!(content.get(2), Some(Inline::Text { text }) if text.starts_with(" here.")), "{content:#?}");
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("``a`b``"), "{markdown:?}");
+    let reopened = import_markdown_bytes("inline-code-multi-backtick-roundtrip.md", &markdown).expect("reopen markdown");
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("reopened paragraph expected: {:#?}", reopened.blocks)
+    };
+    assert_eq!(content.get(1), Some(&Inline::InlineCode { text: "a`b".into() }), "{content:#?}");
+    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>(), "Use a`b here.", "{content:#?}");
+    assert!(reopened.validate().is_valid());
+
+    let padded = "Use `` `a` `` here.\n";
+    let graph = import_markdown_bytes("inline-code-padded.md", padded).expect("import padded markdown");
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("padded paragraph expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(content.get(1), Some(&Inline::InlineCode { text: "`a`".into() }), "{content:#?}");
+    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>(), "Use `a` here.\n", "{content:#?}");
+    assert!(graph.validate().is_valid());
+}

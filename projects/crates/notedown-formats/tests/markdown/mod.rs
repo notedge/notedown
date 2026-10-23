@@ -85,6 +85,44 @@ fn markdown_blockquote_lowers_inline_content() {
 }
 
 #[test]
+fn markdown_fenced_code_keeps_content_and_language() {
+    let source = "```rust\nfn main() {\n    let (x, y) = (1, 2);\n}\n```\n";
+    let graph = import_markdown_bytes("code.md", source).expect("import markdown");
+    let Block::Code { language, content } = &graph.blocks[0].block
+    else {
+        panic!("code block expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(language.as_deref(), Some("rust"));
+    assert_eq!(content, "fn main() {\n    let (x, y) = (1, 2);\n}");
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    let reopened = import_markdown_bytes("code-roundtrip.md", &markdown).expect("reopen markdown");
+    assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
+}
+
+#[test]
+fn markdown_inline_code_strips_backticks() {
+    let source = "Use `code` here.\n";
+    let graph = import_markdown_bytes("inline-code.md", source).expect("import markdown");
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected: {:#?}", graph.blocks)
+    };
+    assert!(content.iter().any(|inline| matches!(inline, Inline::InlineCode { text } if text == "code")), "{content:#?}");
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("`code`"), "{markdown:?}");
+    let reopened = import_markdown_bytes("inline-code-roundtrip.md", &markdown).expect("reopen markdown");
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("reopened paragraph expected: {:#?}", reopened.blocks)
+    };
+    assert!(content.iter().any(|inline| matches!(inline, Inline::InlineCode { text } if text == "code")), "{content:#?}");
+}
+
+#[test]
 fn markdown_import_lowers_heading_and_paragraph() {
     let source = "# Title\n\nHello world.\n";
     let graph = import_markdown_bytes("sample.md", source).expect("import markdown");

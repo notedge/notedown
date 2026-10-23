@@ -290,7 +290,7 @@ fn lower_inline_node(node: RedNode<MarkdownLanguage>, source: &SourceText, conte
         MarkdownElementType::Text | MarkdownElementType::HeadingText => Some(Inline::Text { text: decode_escaped_text(&node.text(source)) }),
         MarkdownElementType::Strong => Some(Inline::Styled { style: "bold".into(), children: collect_inlines(node, source, context) }),
         MarkdownElementType::Emphasis => Some(Inline::Styled { style: "italic".into(), children: collect_inlines(node, source, context) }),
-        MarkdownElementType::InlineCode => Some(Inline::InlineCode { text: collect_plain_text(node, source) }),
+        MarkdownElementType::InlineCode => Some(Inline::InlineCode { text: inline_code_text(&node.text(source)) }),
         MarkdownElementType::Link => parse_inline_link(node, source, context),
         MarkdownElementType::Image => parse_inline_image(node, source, context),
         MarkdownElementType::MathInline => {
@@ -325,18 +325,24 @@ fn push_soft_break(inlines: &mut Vec<Inline>) {
     inlines.push(Inline::Break { kind: BreakKind::Soft });
 }
 
-fn collect_plain_text(node: RedNode<MarkdownLanguage>, source: &SourceText) -> String {
-    let mut text = String::new();
-    for child in node.children() {
-        match child {
-            RedTree::Node(child_node) => text.push_str(&collect_plain_text(child_node, source)),
-            RedTree::Leaf(_) => text.push_str(&child.text(source)),
-        }
+/// Strip CommonMark code-span delimiters: a matching backtick run on both
+/// sides plus the optional single space padding inside the span.
+fn inline_code_text(raw: &str) -> String {
+    let trimmed = raw.trim_end();
+    let opening = trimmed.chars().take_while(|character| *character == '`').count();
+    let closing = trimmed.chars().rev().take_while(|character| *character == '`').count();
+    let delimiter = opening.min(closing);
+    if delimiter == 0 {
+        return trimmed.to_string();
     }
-    if text.is_empty() {
-        text = node.text(source).into_owned();
+    let Some(inner) = trimmed.get(delimiter..trimmed.len().saturating_sub(delimiter))
+    else {
+        return trimmed.to_string();
+    };
+    if inner.len() >= 2 && inner.starts_with(' ') && inner.ends_with(' ') && !inner.trim().is_empty() {
+        return inner[1..inner.len() - 1].to_string();
     }
-    text
+    inner.to_string()
 }
 
 fn parse_inline_link(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Option<Inline> {
@@ -436,21 +442,34 @@ fn extract_code_block(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (
     let mut language = None;
     let mut content = String::new();
     let mut in_content = false;
+    let mut skip_fence_line_end = false;
     for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            match child_node.element_type() {
-                MarkdownElementType::CodeLanguage => {
-                    language = Some(collect_plain_text(child_node, source).trim().to_string());
-                }
-                MarkdownElementType::CodeFence => in_content = !in_content,
-                MarkdownElementType::Text | MarkdownElementType::Whitespace | MarkdownElementType::Newline if in_content => {
-                    content.push_str(&child_node.text(source));
-                }
-                _ => {}
+        match child.kind::<MarkdownElementType>() {
+            MarkdownElementType::CodeFence => {
+                in_content = !in_content;
+                skip_fence_line_end = in_content;
             }
+            MarkdownElementType::CodeLanguage => {
+                let text = child.text(source);
+                let tag = text.trim();
+                if language.is_none() && !tag.is_empty() {
+                    language = Some(tag.to_string());
+                }
+            }
+            MarkdownElementType::Newline if in_content && skip_fence_line_end => {
+                skip_fence_line_end = false;
+            }
+            MarkdownElementType::Text | MarkdownElementType::Whitespace | MarkdownElementType::Newline | MarkdownElementType::Error
+                if in_content =>
+            {
+                skip_fence_line_end = false;
+                content.push_str(&child.text(source));
+            }
+            _ => {}
         }
     }
-    (language.filter(|value| !value.is_empty()), content.trim().to_string())
+    let content = content.trim_end_matches(['\n', '\r']).to_string();
+    (language, content)
 }
 
 fn list_item_marker(node: RedNode<MarkdownLanguage>, source: &SourceText) -> Option<String> {

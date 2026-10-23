@@ -549,3 +549,32 @@ fn markdown_inline_code_matches_opening_backtick_run() {
     assert_eq!(content.iter().map(Inline::plain_text).collect::<String>(), "Use `a` here.\n", "{content:#?}");
     assert!(graph.validate().is_valid());
 }
+
+#[test]
+fn markdown_thematic_break_lowers_to_the_canonical_opaque_block() {
+    let graph = import_markdown_bytes("break.md", "Alpha\n\n---\n\nBeta\n").expect("import markdown");
+    assert_eq!(graph.blocks.len(), 3, "{:#?}", graph.blocks);
+    assert!(matches!(&graph.blocks[0].block, Block::Paragraph { .. }), "{:#?}", graph.blocks[0].block);
+    assert_eq!(
+        graph.blocks[1].block,
+        Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }
+    );
+    assert!(matches!(&graph.blocks[2].block, Block::Paragraph { .. }), "{:#?}", graph.blocks[2].block);
+    assert!(!graph.coverage.loss.iter().any(|loss| loss.code == "import.markdown.horizontal_rule"), "{:#?}", graph.coverage.loss);
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("---"), "{markdown:?}");
+    let reopened = import_markdown_bytes("break-roundtrip.md", &markdown).expect("reopen markdown");
+    assert_eq!(reopened.blocks[1].block, graph.blocks[1].block);
+    assert!(reopened.validate().is_valid());
+}
+
+#[test]
+fn markdown_setext_heading_is_not_a_thematic_break() {
+    let graph = import_markdown_bytes("setext.md", "Title\n---\n").expect("import markdown");
+    assert_eq!(graph.blocks.len(), 1, "{:#?}", graph.blocks);
+    assert_eq!(graph.blocks[0].block, Block::Section { level: 2, title: vec![Inline::Text { text: "Title".into() }], children: Vec::new() });
+    assert!(graph.coverage.loss.is_empty(), "{:#?}", graph.coverage.loss);
+    assert!(graph.validate().is_valid());
+}

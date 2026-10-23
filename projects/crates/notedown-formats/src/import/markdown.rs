@@ -32,6 +32,7 @@ fn markdown_import_language() -> MarkdownLanguage {
     language.allow_blockquotes = true;
     language.allow_fenced_code_blocks = true;
     language.allow_tables = true;
+    language.allow_horizontal_rules = true;
     language
 }
 
@@ -50,22 +51,32 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
     let red_root = RedNode::new(green_tree, 0);
     let mut graph = DocumentGraph::new(document_id_for(label));
     let mut context = LinkContext::default();
-    for child in red_root.children() {
-        if let RedTree::Node(node) = child {
+    let children = red_root.children().collect::<Vec<_>>();
+    for child in &children {
+        if let RedTree::Node(node) = *child {
             register_link_definition_node(node, source, &mut context);
         }
     }
-    for child in red_root.children() {
-        if let RedTree::Node(node) = child {
-            match lower_block_node(node, source, &mut context, &mut graph) {
-                BlockOutcome::Block(block) => {
-                    graph.push_block(block);
-                }
-                BlockOutcome::Loss(marker) => {
-                    graph.push_loss(marker);
-                }
-                BlockOutcome::Skip => {}
+    let mut index = 0;
+    while let Some(child) = children.get(index).copied() {
+        index += 1;
+        let RedTree::Node(node) = child
+        else {
+            continue;
+        };
+        if let Some((offset, heading)) = setext_heading(node, children.get(index..).unwrap_or_default(), source, &mut context) {
+            graph.push_block(heading);
+            index += offset + 1;
+            continue;
+        }
+        match lower_block_node(node, source, &mut context, &mut graph) {
+            BlockOutcome::Block(block) => {
+                graph.push_block(block);
             }
+            BlockOutcome::Loss(marker) => {
+                graph.push_loss(marker);
+            }
+            BlockOutcome::Skip => {}
         }
     }
 
@@ -95,6 +106,54 @@ enum BlockOutcome {
 struct LinkContext {
     definitions: HashMap<String, String>,
     losses: Vec<LossMarker>,
+}
+
+/// Promote a CommonMark setext heading before the underline is lowered as a
+/// thematic break.
+///
+/// `oak-markdown` does not parse setext headings: `Title\n---` becomes a
+/// paragraph followed by a horizontal-rule node, exactly like a thematic break.
+/// The two differ only by adjacency, so the underline must sit on the very next
+/// line of the paragraph; a blank line in between keeps the thematic break.
+fn setext_heading(
+    node: RedNode<MarkdownLanguage>,
+    trailing: &[RedTree<MarkdownLanguage>],
+    source: &SourceText,
+    context: &mut LinkContext,
+) -> Option<(usize, Block)> {
+    if node.element_type() != MarkdownElementType::Paragraph || parse_link_definition(node.text(source).trim()).is_some() {
+        return None;
+    }
+    let mut underline = None;
+    for (offset, child) in trailing.iter().enumerate() {
+        match child {
+            RedTree::Node(candidate) => {
+                underline = Some((offset, *candidate));
+                break;
+            }
+            RedTree::Leaf(leaf) if leaf.text(source).trim().is_empty() => {}
+            RedTree::Leaf(_) => return None,
+        }
+    }
+    let (offset, underline) = underline?;
+    if underline.element_type() != MarkdownElementType::HorizontalRule {
+        return None;
+    }
+    let marker = underline.text(source);
+    let marker = marker.trim();
+    if marker.is_empty() || !marker.bytes().all(|byte| byte == b'-') {
+        return None;
+    }
+    let node_span = node.span();
+    let gap = source.slice((node_span.end..underline.span().start).into());
+    if !gap.is_empty() && gap != "\n" && gap != "\r\n" {
+        return None;
+    }
+    let title = collect_inlines(node, source, context);
+    if title.is_empty() {
+        return None;
+    }
+    Some((offset, Block::Section { level: 2, title, children: Vec::new() }))
 }
 
 fn register_link_definition_node(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) {
@@ -225,11 +284,9 @@ fn lower_block_node(
         }
         MarkdownElementType::Blockquote => BlockOutcome::Block(Block::Quote { content: lower_blockquote_inlines(node, source, context) }),
         MarkdownElementType::Table => BlockOutcome::Block(Block::Table { caption: None, rows: extract_table(node, source, context) }),
-        MarkdownElementType::HorizontalRule => BlockOutcome::Loss(LossMarker {
-            code: "import.markdown.horizontal_rule".into(),
-            message: "horizontal rule lowered to loss marker".into(),
-            status: SemanticStatus::Lossy,
-        }),
+        MarkdownElementType::HorizontalRule => {
+            BlockOutcome::Block(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial })
+        }
         _ => BlockOutcome::Loss(LossMarker {
             code: "import.markdown.unsupported_block".into(),
             message: format!("unsupported markdown block: {kind:?}"),

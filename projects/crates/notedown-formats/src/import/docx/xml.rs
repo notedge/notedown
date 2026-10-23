@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use notedown_ir::{
-    Asset, AssetId, AssetKind, Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus,
+    Asset, AssetId, AssetKind, Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus, TableCell,
 };
 use oak_xml::ast::{XmlElement, XmlValue};
 
@@ -149,7 +149,7 @@ fn parse_table_element(
                     append_cell_paragraph(&mut current_cell, &content);
                 }
             }
-            current_row.push(current_cell);
+            current_row.push(TableCell { content: current_cell, colspan: 1, rowspan: 1 });
         }
         if !current_row.is_empty() {
             table.rows.push(current_row);

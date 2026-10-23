@@ -105,7 +105,7 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
         Block::List { ordered, items } => {
             write_list(out, *ordered, items, graph, rels)?;
         }
-        Block::Table { rows } => {
+        Block::Table { rows, .. } => {
             write_table(out, rows, graph, rels)?;
         }
         Block::Math { .. } => {
@@ -207,7 +207,7 @@ fn write_table(out: &mut String, rows: &[TableRow], graph: &DocumentGraph, rels:
         out.push_str("<w:tr>");
         for cell in &row.cells {
             out.push_str("<w:tc><w:p>");
-            write_inlines(out, cell, graph, rels)?;
+            write_inlines(out, &cell.content, graph, rels)?;
             out.push_str("</w:p></w:tc>");
         }
         out.push_str("</w:tr>");

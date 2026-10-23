@@ -1,6 +1,6 @@
 //! EPUB XHTML block lowering via typed `oak-html` AST and CSS selectors.
 
-use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableRow};
+use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, LossMarker, SemanticStatus, TableCell, TableRow};
 use oak_html::ast::{Element, HtmlDocument, HtmlNode};
 
 use super::{
@@ -167,7 +167,7 @@ fn lower_semantic_block(
             }),
         "table" => {
             let rows = collect_table_rows(element, graph, member_path, losses);
-            if rows.is_empty() { None } else { Some(Block::Table { rows }) }
+            if rows.is_empty() { None } else { Some(Block::Table { caption: None, rows }) }
         }
         _ => {
             losses.push(LossMarker {
@@ -264,14 +264,18 @@ fn walk_table_rows(
 }
 
 fn collect_table_row(row: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> TableRow {
+    let mut is_header = false;
     let mut cells = Vec::new();
     for child in direct_child_elements(row) {
         let tag = child.tag_name.to_ascii_lowercase();
         if tag == "th" || tag == "td" {
-            cells.push(collect_inlines_from_element(child, graph, member_path, losses));
+            if tag == "th" {
+                is_header = true;
+            }
+            cells.push(TableCell { content: collect_inlines_from_element(child, graph, member_path, losses), colspan: 1, rowspan: 1 });
         }
     }
-    TableRow { cells }
+    TableRow { is_header, cells }
 }
 
 fn collect_inlines_from_element(

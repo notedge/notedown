@@ -98,13 +98,15 @@ fn ordered_list_projects_an_ordered_list_block() {
 fn table_projects_header_and_body_rows_without_the_separator() {
     let graph = import("| H1 | H2 |\n|----|----|\n| C1 | C2 |\n");
 
-    let Block::Table { rows } = &graph.blocks[0].block
+    let Block::Table { rows, .. } = &graph.blocks[0].block
     else {
         panic!("expected table, got {:?}", graph.blocks[0].block);
     };
     assert_eq!(rows.len(), 2, "separator row must not become body content: {rows:?}");
-    assert_eq!(rows[0].cells.iter().map(|cell| cell[0].plain_text()).collect::<Vec<_>>(), ["H1", "H2"]);
-    assert_eq!(rows[1].cells.iter().map(|cell| cell[0].plain_text()).collect::<Vec<_>>(), ["C1", "C2"]);
+    assert!(rows[0].is_header);
+    assert!(!rows[1].is_header);
+    assert_eq!(rows[0].cells.iter().map(|cell| cell.content[0].plain_text()).collect::<Vec<_>>(), ["H1", "H2"]);
+    assert_eq!(rows[1].cells.iter().map(|cell| cell.content[0].plain_text()).collect::<Vec<_>>(), ["C1", "C2"]);
 }
 
 #[test]

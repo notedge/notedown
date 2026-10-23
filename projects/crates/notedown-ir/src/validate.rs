@@ -114,6 +114,50 @@ pub enum ValidationIssue {
         /// Observed number.
         found: u32,
     },
+    /// Cell colspan must be at least 1.
+    ZeroColspan {
+        /// Table node id.
+        table: NodeId,
+        /// Zero-based row index.
+        row_index: usize,
+        /// Zero-based cell index in that row.
+        cell_index: usize,
+    },
+    /// Cell rowspan must be at least 1.
+    ZeroRowspan {
+        /// Table node id.
+        table: NodeId,
+        /// Zero-based row index.
+        row_index: usize,
+        /// Zero-based cell index in that row.
+        cell_index: usize,
+    },
+    /// Cell colspan exceeds the table's column count.
+    ColspanOutOfBounds {
+        /// Table node id.
+        table: NodeId,
+        /// Zero-based row index.
+        row_index: usize,
+        /// Zero-based cell index in that row.
+        cell_index: usize,
+        /// Declared colspan value.
+        found: u32,
+        /// Table column count (widest row effective width).
+        max_columns: u32,
+    },
+    /// Cell rowspan would extend past the last table row.
+    RowspanOutOfBounds {
+        /// Table node id.
+        table: NodeId,
+        /// Zero-based row index.
+        row_index: usize,
+        /// Zero-based cell index in that row.
+        cell_index: usize,
+        /// Declared rowspan value.
+        found: u32,
+        /// Actual table row count.
+        total_rows: usize,
+    },
 }
 
 /// Collected validation result.
@@ -213,12 +257,37 @@ impl DocumentGraph {
                         }
                     }
                 }
-                Block::Table { rows } => {
-                    for row in rows {
-                        for cell in &row.cells {
-                            check_inline_refs(node.id, cell, &context, report);
+                Block::Table { rows, .. } => {
+                    let table_id = node.id;
+                    for (row_index, row) in rows.iter().enumerate() {
+                        for (cell_index, cell) in row.cells.iter().enumerate() {
+                            check_inline_refs(table_id, &cell.content, &context, report);
+                            if cell.colspan == 0 {
+                                report.issues.push(ValidationIssue::ZeroColspan {
+                                    table: table_id,
+                                    row_index,
+                                    cell_index,
+                                });
+                            }
+                            if cell.rowspan == 0 {
+                                report.issues.push(ValidationIssue::ZeroRowspan {
+                                    table: table_id,
+                                    row_index,
+                                    cell_index,
+                                });
+                            }
+                            if cell.rowspan > 0 && row_index + cell.rowspan as usize > rows.len() {
+                                report.issues.push(ValidationIssue::RowspanOutOfBounds {
+                                    table: table_id,
+                                    row_index,
+                                    cell_index,
+                                    found: cell.rowspan,
+                                    total_rows: rows.len(),
+                                });
+                            }
                         }
                     }
+                    check_table_colspans(table_id, rows, report);
                 }
                 Block::Code { .. } | Block::Math { .. } | Block::Opaque { .. } => {}
             }
@@ -380,6 +449,31 @@ fn check_list_numbering(list_id: NodeId, ordered: bool, items: &[crate::block::L
                     }
                 }
                 previous = Some(n);
+            }
+        }
+    }
+}
+
+/// The table's base column count is the maximum cell count across rows
+/// (raw `cells.len()`, not expanded via colspan). Individual cells must not
+/// declare a `colspan` larger than that count. Zero colspans are caught in
+/// the caller before we get here.
+fn check_table_colspans(table_id: NodeId, rows: &[crate::block::TableRow], report: &mut ValidationReport) {
+    if rows.is_empty() {
+        return;
+    }
+    let max_columns = rows.iter().map(|row| row.cells.len() as u32).max().unwrap_or(0);
+
+    for (row_index, row) in rows.iter().enumerate() {
+        for (cell_index, cell) in row.cells.iter().enumerate() {
+            if cell.colspan > max_columns {
+                report.issues.push(ValidationIssue::ColspanOutOfBounds {
+                    table: table_id,
+                    row_index,
+                    cell_index,
+                    found: cell.colspan,
+                    max_columns,
+                });
             }
         }
     }

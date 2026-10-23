@@ -62,10 +62,10 @@ fn bind_block_image_assets(node: notedown_ir::NodeId, block: &mut Block, referen
                 bind_inline_image_assets(node, &mut item.content, references);
             }
         }
-        Block::Table { rows } => {
+        Block::Table { rows, .. } => {
             for row in rows {
                 for cell in &mut row.cells {
-                    bind_inline_image_assets(node, cell, references);
+                    bind_inline_image_assets(node, &mut cell.content, references);
                 }
             }
         }

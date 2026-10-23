@@ -80,12 +80,12 @@ fn notedown_import_lowers_underscore_emphasis() {
 fn notedown_table_cells_preserve_emphasis() {
     let graph =
         import_notedown_bytes("styled-table.nd", "| Name | Value |\n|------|-------|\n| **Alpha** | *one* |\n").expect("import notedown");
-    let Block::Table { rows } = &graph.blocks[0].block
+    let Block::Table { rows, .. } = &graph.blocks[0].block
     else {
         panic!("expected table: {:?}", graph.blocks);
     };
     assert!(
-        rows[1].cells[0].iter().any(|inline| matches!(
+        rows[1].cells[0].content.iter().any(|inline| matches!(
             inline,
             Inline::Styled { style, children }
                 if style == "bold" && children == &[Inline::Text { text: "Alpha".into() }]
@@ -94,7 +94,7 @@ fn notedown_table_cells_preserve_emphasis() {
         rows[1].cells[0]
     );
     assert!(
-        rows[1].cells[1].iter().any(|inline| matches!(
+        rows[1].cells[1].content.iter().any(|inline| matches!(
             inline,
             Inline::Styled { style, children }
                 if style == "italic" && children == &[Inline::Text { text: "one".into() }]

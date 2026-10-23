@@ -17,7 +17,7 @@ mod validate;
 mod wire;
 
 pub use asset::{Asset, AssetKind};
-pub use block::{Block, BlockNode, ListItem, TableRow};
+pub use block::{Block, BlockNode, ListItem, TableCell, TableRow};
 pub use graph::{DocumentGraph, DocumentMetadata, IdAllocator};
 pub use id::{AssetId, DocumentId, LinkId, NodeId};
 pub use inline::{AttributePair, Attributes, BreakKind, Inline};

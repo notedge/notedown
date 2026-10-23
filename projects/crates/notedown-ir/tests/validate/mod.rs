@@ -296,3 +296,186 @@ fn nested_ordered_lists_have_independent_numbering() {
     });
     assert!(graph.validate().is_valid());
 }
+
+fn simple_table(is_header: bool) -> Block {
+    Block::Table {
+        caption: None,
+        rows: vec![notedown_ir::TableRow {
+            is_header,
+            cells: vec![
+                notedown_ir::TableCell { content: vec![Inline::Text { text: "A".into() }], colspan: 1, rowspan: 1 },
+                notedown_ir::TableCell { content: vec![Inline::Text { text: "B".into() }], colspan: 1, rowspan: 1 },
+            ],
+        }],
+    }
+}
+
+#[test]
+fn simple_table_passes_validation() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(simple_table(true));
+    graph.push_block(simple_table(false));
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn zero_colspan_is_rejected() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![notedown_ir::TableRow {
+            is_header: false,
+            cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 0, rowspan: 1 }],
+        }],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(issue, ValidationIssue::ZeroColspan { row_index: 0, cell_index: 0, .. })));
+}
+
+#[test]
+fn zero_rowspan_is_rejected() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![notedown_ir::TableRow {
+            is_header: false,
+            cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 0 }],
+        }],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(issue, ValidationIssue::ZeroRowspan { row_index: 0, cell_index: 0, .. })));
+}
+
+#[test]
+fn colspan_out_of_bounds_is_rejected() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    // table has 2 columns (first row), one cell declares colspan=10
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![
+                    notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 1 },
+                    notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 1 },
+                ],
+            },
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 10, rowspan: 1 }],
+            },
+        ],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(
+        issue,
+        ValidationIssue::ColspanOutOfBounds { row_index: 1, cell_index: 0, found: 10, max_columns: 2, .. }
+    )));
+}
+
+#[test]
+fn colspan_equal_to_max_columns_is_ok() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![
+                    notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 1 },
+                    notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 1 },
+                ],
+            },
+            // this row is a single cell spanning exactly 2 columns = OK
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 2, rowspan: 1 }],
+            },
+        ],
+    });
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn rowspan_out_of_bounds_is_rejected() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    // 2 rows total, row 0 cell declares rowspan=5
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 5 }],
+            },
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![notedown_ir::TableCell { content: Vec::new(), colspan: 1, rowspan: 1 }],
+            },
+        ],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(
+        issue,
+        ValidationIssue::RowspanOutOfBounds { row_index: 0, cell_index: 0, found: 5, total_rows: 2, .. }
+    )));
+}
+
+#[test]
+fn table_with_caption_and_spans_roundtrips_via_serde() {
+    use notedown_ir::{DocumentEnvelope, DocumentGraph, IdAllocator};
+
+    let mut ids = IdAllocator::default();
+    let doc_id = ids.document_id();
+    let mut graph = DocumentGraph::new(doc_id);
+
+    graph.push_block(Block::Table {
+        caption: Some("表 1：总体准确率".into()),
+        rows: vec![
+            notedown_ir::TableRow {
+                is_header: true,
+                cells: vec![
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "模型".into() }], colspan: 1, rowspan: 2 },
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "准确率".into() }], colspan: 2, rowspan: 1 },
+                ],
+            },
+            notedown_ir::TableRow {
+                is_header: true,
+                cells: vec![
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "Top-1".into() }], colspan: 1, rowspan: 1 },
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "Top-5".into() }], colspan: 1, rowspan: 1 },
+                ],
+            },
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "ResNet".into() }], colspan: 1, rowspan: 1 },
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "77%".into() }], colspan: 1, rowspan: 1 },
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "93%".into() }], colspan: 1, rowspan: 1 },
+                ],
+            },
+        ],
+    });
+
+    assert!(graph.validate().is_valid());
+
+    let envelope = DocumentEnvelope::new(graph.clone());
+    let json = serde_json::to_string(&envelope).expect("serialize");
+    let restored: DocumentEnvelope = serde_json::from_str(&json).expect("deserialize");
+    restored.ensure_supported().expect("schema");
+    let restored = restored.document;
+
+    let Block::Table { caption, rows } = &restored.blocks[0].block
+    else {
+        panic!("expected table");
+    };
+    assert_eq!(caption.as_deref(), Some("表 1：总体准确率"));
+    assert_eq!(rows.len(), 3);
+    assert!(rows[0].is_header);
+    assert!(rows[1].is_header);
+    assert!(!rows[2].is_header);
+    assert_eq!(rows[0].cells[0].colspan, 1);
+    assert_eq!(rows[0].cells[0].rowspan, 2);
+    assert_eq!(rows[0].cells[1].colspan, 2);
+    assert_eq!(rows[0].cells[1].rowspan, 1);
+    assert_eq!(restored, graph); // full equality including ids
+}

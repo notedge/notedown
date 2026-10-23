@@ -1,5 +1,5 @@
 use notedown_formats::import::register_image_assets;
-use notedown_ir::{AssetId, Block, DocumentGraph, DocumentId, Inline, ListItem, RelationEndpoint, RelationKind, TableRow};
+use notedown_ir::{AssetId, Block, DocumentGraph, DocumentId, Inline, ListItem, RelationEndpoint, RelationKind, TableCell, TableRow};
 
 fn image(source: &str) -> Inline {
     Inline::Image { source: source.into(), alt: vec![Inline::Text { text: "diagram".into() }], title: None, asset: None }
@@ -39,7 +39,16 @@ fn nested_blocks_register_each_image_occurrence_once() {
 #[test]
 fn table_images_keep_separate_occurrence_identity_and_node_endpoint() {
     let mut graph = DocumentGraph::new(DocumentId(2));
-    let table = graph.push_block(Block::Table { rows: vec![TableRow { cells: vec![vec![image("same.png")], vec![image("same.png")]] }] });
+    let table = graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![TableRow {
+            is_header: false,
+            cells: vec![
+                TableCell { content: vec![image("same.png")], colspan: 1, rowspan: 1 },
+                TableCell { content: vec![image("same.png")], colspan: 1, rowspan: 1 },
+            ],
+        }],
+    });
 
     register_image_assets(&mut graph);
 
@@ -50,7 +59,7 @@ fn table_images_keep_separate_occurrence_identity_and_node_endpoint() {
     assert!(
         graph.relations.iter().all(|relation| { relation.kind == RelationKind::Embeds && relation.source == RelationEndpoint::Node(table) })
     );
-    let Block::Table { rows } = &graph.blocks[0].block
+    let Block::Table { rows, .. } = &graph.blocks[0].block
     else {
         panic!("expected table");
     };
@@ -58,7 +67,7 @@ fn table_images_keep_separate_occurrence_identity_and_node_endpoint() {
         rows[0]
             .cells
             .iter()
-            .map(|cell| match &cell[0] {
+            .map(|cell| match &cell.content[0] {
                 Inline::Image { asset, .. } => *asset,
                 _ => None,
             })

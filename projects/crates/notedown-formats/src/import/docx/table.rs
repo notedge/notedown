@@ -1,11 +1,11 @@
-use notedown_ir::{Block, DocumentGraph, Inline, TableRow};
+use notedown_ir::{Block, DocumentGraph, Inline, TableCell, TableRow};
 
 /// Mutable table parse state for `w:tbl`/`w:tr`/`w:tc` walks.
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub(crate) struct TableState {
-    pub rows: Vec<Vec<Vec<Inline>>>,
-    pub current_row: Vec<Vec<Inline>>,
+    pub rows: Vec<Vec<TableCell>>,
+    pub current_row: Vec<TableCell>,
     pub current_cell: Vec<Inline>,
 }
 
@@ -23,6 +23,11 @@ pub(crate) fn push_table_block(graph: &mut DocumentGraph, table: TableState) {
     if table.rows.is_empty() {
         return;
     }
-    let rows = table.rows.into_iter().map(|cells| TableRow { cells }).collect();
-    graph.push_block(Block::Table { rows });
+    let rows = table
+        .rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, cells)| TableRow { is_header: index == 0, cells })
+        .collect();
+    graph.push_block(Block::Table { caption: None, rows });
 }

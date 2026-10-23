@@ -28,7 +28,9 @@ pub enum Block {
     },
     /// Table rows of inline cell content.
     Table {
-        /// Table body rows.
+        /// Optional human-readable caption, such as "表 1：总体准确率".
+        caption: Option<String>,
+        /// Table header and body rows.
         rows: Vec<TableRow>,
     },
     /// Block quotation.
@@ -82,8 +84,21 @@ pub struct ListItem {
 /// One table row of cells.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableRow {
-    /// Row cells, each containing inline content.
-    pub cells: Vec<Vec<Inline>>,
+    /// Whether this row is a header row (`<thead>` / `<th>` 行).
+    pub is_header: bool,
+    /// Row cells, each containing inline content and optional span semantics.
+    pub cells: Vec<TableCell>,
+}
+
+/// One table cell with optional column/row span.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableCell {
+    /// Inline body.
+    pub content: Vec<Inline>,
+    /// Number of columns this cell occupies. Must be at least 1.
+    pub colspan: u32,
+    /// Number of rows this cell occupies. Must be at least 1.
+    pub rowspan: u32,
 }
 
 /// Stored block node with identity.

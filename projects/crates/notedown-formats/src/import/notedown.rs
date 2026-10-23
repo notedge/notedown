@@ -144,7 +144,7 @@ fn lower_block_node(node: RedNode<NoteLanguage>, source: &SourceText, kind: Note
             let (language, content) = extract_code_block(node, source);
             if content.is_empty() { None } else { Some(Block::Code { language, content }) }
         }
-        NoteElementType::Table => Some(Block::Table { rows: extract_table_rows(node, source) }),
+        NoteElementType::Table => Some(Block::Table { caption: None, rows: extract_table_rows(node, source) }),
         NoteElementType::Blockquote => {
             Some(Block::Quote { content: vec![Inline::Text { text: extract_notedown_blockquote_text(node, source) }] })
         }
@@ -274,7 +274,12 @@ fn extract_table_rows(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<T
             if cells.is_empty() || is_gfm_table_separator_row(&cells) {
                 continue;
             }
-            rows.push(TableRow { cells });
+            let is_header = rows.is_empty(); // separator 行已被过滤，首个非分隔行即表头
+            let cells = cells
+                .into_iter()
+                .map(|content| notedown_ir::TableCell { content, colspan: 1, rowspan: 1 })
+                .collect();
+            rows.push(TableRow { is_header, cells });
         }
     }
     rows

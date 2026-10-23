@@ -11,7 +11,13 @@ fn sample_graph() -> (DocumentGraph, NodeId, AssetId, LinkId) {
     let doc_id = ids.document_id();
     let mut graph = DocumentGraph::new(doc_id);
 
-    let table_id = graph.push_block(Block::Table { rows: vec![TableRow { cells: vec![vec![Inline::Text { text: "cell".to_string() }]] }] });
+    let table_id = graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![TableRow {
+            is_header: false,
+            cells: vec![notedown_ir::TableCell { content: vec![Inline::Text { text: "cell".to_string() }], colspan: 1, rowspan: 1 }],
+        }],
+    });
 
     let asset_id = ids.asset_id();
     graph.push_asset(Asset {

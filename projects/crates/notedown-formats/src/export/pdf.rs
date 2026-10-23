@@ -186,9 +186,11 @@ fn render_block(lines: &mut Vec<RenderLine>, graph: &DocumentGraph, block: &Bloc
                 }
             }
         }
-        Block::Table { rows } => {
+        Block::Table { rows, .. } => {
             for row in rows {
-                lines.push(RenderLine::Text(row.cells.iter().map(|cell| inline_text(graph, cell)).collect::<Result<Vec<_>, _>>()?.join(" | ")));
+                let prefix = if row.is_header { "H: " } else { "" };
+                let text = row.cells.iter().map(|cell| inline_text(graph, &cell.content)).collect::<Result<Vec<_>, _>>()?.join(" | ");
+                lines.push(RenderLine::Text(format!("{prefix}{text}")));
             }
         }
         Block::Opaque { kind, .. } => return Err(FormatError::unsupported("pdf", format!("opaque block `{kind}`"))),

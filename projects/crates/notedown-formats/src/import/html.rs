@@ -310,19 +310,36 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
             vec![(Block::List { ordered: tag == "ol", items }, span)]
         }
         "table" => {
+            let caption = element
+                .children
+                .iter()
+                .filter_map(as_element)
+                .find(|child| child.tag_name.eq_ignore_ascii_case("caption"))
+                .map(|cap| lower_inlines(cap, graph).into_iter().filter_map(|inline| match inline {
+                    notedown_ir::Inline::Text { text } => Some(text),
+                    _ => None,
+                }).collect::<String>())
+                .and_then(|cap| if cap.is_empty() { None } else { Some(cap) });
             let rows = descendants(element, "tr")
                 .into_iter()
-                .map(|row| notedown_ir::TableRow {
-                    cells: row
+                .map(|row| {
+                    let mut is_header = false;
+                    let cells: Vec<notedown_ir::TableCell> = row
                         .children
                         .iter()
                         .filter_map(as_element)
                         .filter(|cell| matches!(cell.tag_name.to_ascii_lowercase().as_str(), "td" | "th"))
-                        .map(|cell| lower_inlines(cell, graph))
-                        .collect(),
+                        .map(|cell| {
+                            if cell.tag_name.eq_ignore_ascii_case("th") {
+                                is_header = true;
+                            }
+                            notedown_ir::TableCell { content: lower_inlines(cell, graph), colspan: 1, rowspan: 1 }
+                        })
+                        .collect();
+                    notedown_ir::TableRow { is_header, cells }
                 })
                 .collect();
-            vec![(Block::Table { rows }, span)]
+            vec![(Block::Table { caption, rows }, span)]
         }
         "hr" => vec![(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }, span)],
         "section" | "article" | "main" | "div" | "figure" | "nav" => lower_children(&element.children, graph),

@@ -124,7 +124,7 @@ fn write_block(
             write_list(out, graph, *ordered, items, 0, image_urls)?;
             out.push('\n');
         }
-        Block::Table { rows } => {
+        Block::Table { rows, .. } => {
             write_table(out, rows)?;
             out.push('\n');
         }
@@ -191,11 +191,21 @@ fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
         out.push('|');
         for cell in &row.cells {
             out.push(' ');
-            write_table_cell(out, cell)?;
+            write_table_cell(out, &cell.content)?;
             out.push_str(" |");
         }
         out.push('\n');
-        if index == 0 {
+        if row.is_header {
+            out.push('|');
+            for cell in &row.cells {
+                let dashes = "-".repeat(cell.colspan.max(1) as usize);
+                out.push(' ');
+                out.push_str(&dashes);
+                out.push_str(" |");
+            }
+            out.push('\n');
+        }
+        else if index == 0 {
             out.push('|');
             for _ in &row.cells {
                 out.push_str(" --- |");

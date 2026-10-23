@@ -98,7 +98,7 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             out.push_str("</div>");
         }
         Block::List { ordered, items } => write_list(out, graph, *ordered, items)?,
-        Block::Table { rows } => write_table(out, rows)?,
+        Block::Table { rows, .. } => write_table(out, rows)?,
         Block::Opaque { kind, payload_hint, .. } if kind == "thematic_break" => {
             out.push_str("<hr>");
             if !payload_hint.is_empty() {
@@ -130,17 +130,32 @@ fn write_list(out: &mut String, graph: &DocumentGraph, ordered: bool, items: &[L
 }
 
 fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
-    out.push_str("<table><tbody>");
+    out.push_str("<table>");
     for row in rows {
         out.push_str("<tr>");
+        let tag = if row.is_header { "th" } else { "td" };
         for cell in &row.cells {
-            out.push_str("<td>");
-            write_inlines(out, cell)?;
-            out.push_str("</td>");
+            out.push('<');
+            out.push_str(tag);
+            if cell.colspan > 1 {
+                out.push_str(" colspan=\"");
+                out.push_str(&cell.colspan.to_string());
+                out.push('"');
+            }
+            if cell.rowspan > 1 {
+                out.push_str(" rowspan=\"");
+                out.push_str(&cell.rowspan.to_string());
+                out.push('"');
+            }
+            out.push('>');
+            write_inlines(out, &cell.content)?;
+            out.push_str("</");
+            out.push_str(tag);
+            out.push('>');
         }
         out.push_str("</tr>");
     }
-    out.push_str("</tbody></table>");
+    out.push_str("</table>");
     Ok(())
 }
 

@@ -13,7 +13,9 @@ mod inline;
 mod relation;
 mod source;
 mod status;
+mod transform_errors;
 mod validate;
+mod walk;
 mod wire;
 
 pub use asset::{Asset, AssetKind};
@@ -24,5 +26,6 @@ pub use inline::{AttributePair, Attributes, BreakKind, Inline};
 pub use relation::{Relation, RelationEndpoint, RelationKind};
 pub use source::{CoverageReport, SourceKind, SourceRef};
 pub use status::{LossMarker, SemanticStatus};
+pub use transform_errors::{Diagnostic, RewriteResult, Traversal, TransformError};
 pub use validate::{ValidationIssue, ValidationReport};
 pub use wire::{DocumentEnvelope, SCHEMA_VERSION, WireError};

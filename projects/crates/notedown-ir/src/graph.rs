@@ -7,6 +7,7 @@ use crate::{
     relation::{Relation, RelationEndpoint, RelationKind},
     source::{CoverageReport, SourceRef},
     status::LossMarker,
+    transform_errors::TransformError,
 };
 
 /// Document-level metadata (title is not document identity).
@@ -148,6 +149,113 @@ impl DocumentGraph {
     /// Indexed backlink edges pointing at `target`.
     pub fn backlinks_to(&self, target: &RelationEndpoint) -> Vec<&Relation> {
         self.relations.iter().filter(|relation| relation.kind == RelationKind::Backlink && relation.target.matches(target)).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mutation API — the write counterpart to push_*
+// ---------------------------------------------------------------------------
+
+impl DocumentGraph {
+    /// 删除一个 block 节点。
+    ///
+    /// 行为：
+    /// 1. 从 `blocks` Vec 中移除该节点
+    /// 2. 从所有 Section / ListItem 的 children 列表中清除对它的引用
+    /// 3. relations / sources 中对它的引用**不会**自动清理 ——
+    ///    [`validate`] 会把它们报告为 dangling。由调用方决定是否同步清理。
+    ///
+    /// [`validate`]: DocumentGraph::validate
+    pub fn delete_block(&mut self, id: NodeId) -> Result<(), TransformError> {
+        let pos = self.blocks.iter().position(|n| n.id == id).ok_or(TransformError::NotFound(id))?;
+        self.blocks.remove(pos);
+
+        // 从所有 Section children / ListItem children 中移除引用
+        for node in &mut self.blocks {
+            match &mut node.block {
+                Block::Section { children, .. } => {
+                    children.retain(|c| *c != id);
+                }
+                Block::List { items, .. } => {
+                    for item in items {
+                        item.children.retain(|c| *c != id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// 用新 Block 替换指定节点的 payload。NodeId 保持不变（语义身份稳定）。
+    pub fn replace_block(&mut self, id: NodeId, new_block: Block) -> Result<(), TransformError> {
+        let node = self
+            .blocks
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or(TransformError::NotFound(id))?;
+        node.block = new_block;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// 替换可容纳子节点的 block（目前仅 [`Block::Section`]）的 children 列表。
+    ///
+    /// 调用方必须保证 `new_children` 里的每个 NodeId 都已在图中存在；
+    /// 本函数只做最基本的结构合法性判断（parent 能否持 children）。
+    pub fn set_children(&mut self, parent_id: NodeId, new_children: Vec<NodeId>) -> Result<(), TransformError> {
+        let node = self
+            .blocks
+            .iter_mut()
+            .find(|n| n.id == parent_id)
+            .ok_or(TransformError::NotFound(parent_id))?;
+        match &mut node.block {
+            Block::Section { children, .. } => {
+                *children = new_children;
+            }
+            _ => return Err(TransformError::InvalidParent(parent_id)),
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// 向 Section 的 children 列表追加一个子节点。
+    pub fn append_child(&mut self, parent_id: NodeId, child: NodeId) -> Result<(), TransformError> {
+        let node = self
+            .blocks
+            .iter_mut()
+            .find(|n| n.id == parent_id)
+            .ok_or(TransformError::NotFound(parent_id))?;
+        match &mut node.block {
+            Block::Section { children, .. } => {
+                children.push(child);
+            }
+            _ => return Err(TransformError::InvalidParent(parent_id)),
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// 从 Section 的 children 列表中移除指定子节点（不删除 block 本身）。
+    pub fn remove_child(&mut self, parent_id: NodeId, child: NodeId) -> Result<(), TransformError> {
+        let node = self
+            .blocks
+            .iter_mut()
+            .find(|n| n.id == parent_id)
+            .ok_or(TransformError::NotFound(parent_id))?;
+        match &mut node.block {
+            Block::Section { children, .. } => {
+                let pos = children.iter().position(|c| *c == child).ok_or(
+                    TransformError::ChildNotFound { parent: parent_id, child },
+                )?;
+                children.remove(pos);
+            }
+            _ => return Err(TransformError::InvalidParent(parent_id)),
+        }
+        self.bump_revision();
+        Ok(())
     }
 }
 

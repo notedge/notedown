@@ -1,6 +1,8 @@
 use std::{collections::HashMap, path::Path};
 
-use notedown_ir::{Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, RelationEndpoint, SemanticStatus};
+use notedown_ir::{
+    Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, RelationEndpoint, SemanticStatus, TableCell, TableRow,
+};
 use oak_core::{GreenNode, Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
 use oak_markdown::{MarkdownLanguage, MarkdownParser, parser::element_type::MarkdownElementType};
 
@@ -216,6 +218,7 @@ fn lower_block_node(
             BlockOutcome::Block(Block::List { ordered, items })
         }
         MarkdownElementType::Blockquote => BlockOutcome::Block(Block::Quote { content: lower_blockquote_inlines(node, source, context) }),
+        MarkdownElementType::Table => BlockOutcome::Block(Block::Table { caption: None, rows: extract_table(node, source, context) }),
         MarkdownElementType::HorizontalRule => BlockOutcome::Loss(LossMarker {
             code: "import.markdown.horizontal_rule".into(),
             message: "horizontal rule lowered to loss marker".into(),
@@ -617,6 +620,63 @@ fn lower_blockquote_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText
         }
     }
     inlines
+}
+
+fn extract_table(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Vec<TableRow> {
+    let mut rows = Vec::new();
+    let mut header_pending = true;
+    for child in node.children() {
+        let RedTree::Node(row_node) = child
+        else {
+            continue;
+        };
+        if row_node.element_type() != MarkdownElementType::TableRow {
+            continue;
+        }
+        let mut cells = Vec::new();
+        for cell_child in row_node.children() {
+            let RedTree::Node(cell_node) = cell_child
+            else {
+                continue;
+            };
+            if cell_node.element_type() != MarkdownElementType::TableCell {
+                continue;
+            }
+            let content = trim_inline_edges(collect_inlines(cell_node, source, context));
+            cells.push(TableCell { content, colspan: 1, rowspan: 1 });
+        }
+        if cells.last().is_some_and(|cell| inline_text(&cell.content).is_empty()) {
+            cells.pop();
+        }
+        if cells.is_empty() || is_table_separator_row(&cells) {
+            continue;
+        }
+        let is_header = header_pending;
+        header_pending = false;
+        rows.push(TableRow { is_header, cells });
+    }
+    rows
+}
+
+fn is_table_separator_row(cells: &[TableCell]) -> bool {
+    let text = cells.iter().flat_map(|cell| cell.content.iter().map(Inline::plain_text)).collect::<String>();
+    let visible = text.trim();
+    !visible.is_empty() && visible.contains('-') && visible.chars().all(|character| matches!(character, '-' | ':'))
+}
+
+fn trim_inline_edges(mut inlines: Vec<Inline>) -> Vec<Inline> {
+    if let Some(Inline::Text { text }) = inlines.first_mut() {
+        *text = text.trim_start().to_string();
+    }
+    if let Some(Inline::Text { text }) = inlines.last_mut() {
+        *text = text.trim_end().to_string();
+    }
+    inlines.retain(|inline| !matches!(inline, Inline::Text { text } if text.is_empty()));
+    inlines
+}
+
+fn inline_text(inlines: &[Inline]) -> String {
+    inlines.iter().map(Inline::plain_text).collect()
 }
 
 fn heading_level(kind: MarkdownElementType) -> u8 {

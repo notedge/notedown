@@ -102,6 +102,46 @@ fn markdown_fenced_code_keeps_content_and_language() {
 }
 
 #[test]
+fn markdown_tables_lower_header_and_rows() {
+    let source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    let graph = import_markdown_bytes("table.md", source).expect("import markdown");
+    let Block::Table { caption: None, rows } = &graph.blocks[0].block
+    else {
+        panic!("table expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].is_header);
+    assert!(!rows[1].is_header);
+    assert_eq!(rows[0].cells.len(), 2);
+    assert_eq!(
+        rows[0].cells.iter().map(|cell| cell.content.clone()).collect::<Vec<_>>(),
+        vec![vec![Inline::Text { text: "A".into() }], vec![Inline::Text { text: "B".into() }],]
+    );
+    assert_eq!(
+        rows[1].cells.iter().map(|cell| cell.content.clone()).collect::<Vec<_>>(),
+        vec![vec![Inline::Text { text: "1".into() }], vec![Inline::Text { text: "2".into() }],]
+    );
+    assert!(rows.iter().flat_map(|row| row.cells.iter()).all(|cell| cell.colspan == 1 && cell.rowspan == 1));
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    let reopened = import_markdown_bytes("table-roundtrip.md", &markdown).expect("reopen markdown");
+    let Block::Table { rows: reopened_rows, .. } = &reopened.blocks[0].block
+    else {
+        panic!("reopened table expected: {:#?}", reopened.blocks)
+    };
+    assert_eq!(reopened_rows[0].is_header, true);
+    assert_eq!(
+        reopened_rows
+            .iter()
+            .map(|row| row.cells.iter().map(|cell| cell.content.iter().map(Inline::plain_text).collect::<String>()).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["A".to_string(), "B".to_string()], vec!["1".to_string(), "2".to_string()]],
+    );
+    assert!(reopened.validate().is_valid());
+}
+
+#[test]
 fn markdown_inline_code_strips_backticks() {
     let source = "Use `code` here.\n";
     let graph = import_markdown_bytes("inline-code.md", source).expect("import markdown");

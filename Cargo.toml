@@ -23,8 +23,8 @@ license = "MPL-2.0"
 [workspace.dependencies]
 # Boost dependencies
 # Overlaid by local path `.cargo/config.toml` (git ignored).
-boost-benchmark = { git = "https://github.com/oovm/rust-boost", rev = "465e3e5eb263f1d2b6f7429c426c5e78064182bc" }
-boost-diagnostic = { git = "https://github.com/oovm/rust-boost", rev = "465e3e5eb263f1d2b6f7429c426c5e78064182bc", default-features = false, features = ["std", "serde"] }
+boost-benchmark = { git = "https://github.com/oovm/rust-boost", rev = "9aa52745d6eae2d7748c76e4e3e6555e1f6e4b86" }
+boost-diagnostic = { git = "https://github.com/oovm/rust-boost", rev = "9aa52745d6eae2d7748c76e4e3e6555e1f6e4b86", default-features = false, features = ["std", "serde"] }
 # Binary Readers
 acorn-codec = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996", default-features = false, features = ["compression"] }
 acorn-core = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }

@@ -198,7 +198,13 @@ fn lower_block_node(
                 BlockOutcome::Skip
             }
             else {
-                BlockOutcome::Block(Block::Paragraph { content: collect_inlines(node, source, context) })
+                let content = collect_inlines(node, source, context);
+                if content.is_empty() {
+                    // Markdown blank lines and container-trailing newlines are not
+                    // paragraphs: an empty inline result must never reach the graph.
+                    return BlockOutcome::Skip;
+                }
+                BlockOutcome::Block(Block::Paragraph { content })
             }
         }
         MarkdownElementType::CodeBlock => {

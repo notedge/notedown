@@ -47,6 +47,24 @@ fn markdown_lists_lower_to_list_blocks() {
         }
     );
     assert!(nested_graph.validate().is_valid());
+
+    let contained = nested_graph
+        .blocks
+        .iter()
+        .flat_map(|node| match &node.block {
+            Block::Section { children, .. } => children.clone(),
+            Block::List { items, .. } => items.iter().flat_map(|item| item.children.clone()).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let root_blocks = nested_graph.blocks.iter().filter(|node| !contained.contains(&node.id)).collect::<Vec<_>>();
+    assert_eq!(root_blocks.len(), 1, "only the outer list is a root block: {:#?}", nested_graph.blocks);
+    assert!(matches!(&root_blocks[0].block, Block::List { ordered: false, .. }), "{:#?}", root_blocks[0].block);
+    assert!(
+        nested_graph.blocks.iter().all(|node| !matches!(&node.block, Block::Paragraph { content } if content.is_empty())),
+        "empty paragraphs must never reach the graph: {:#?}",
+        nested_graph.blocks
+    );
 }
 
 #[test]

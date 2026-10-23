@@ -5,6 +5,7 @@ use crate::FormatError;
 use super::map_opc_error;
 
 /// Parses OPC relationship targets keyed by relationship id.
+#[allow(dead_code)]
 pub fn parse_relationship_targets(xml: &[u8]) -> Result<HashMap<String, String>, FormatError> {
     acorn_docx::parse_relationship_targets(xml).map_err(map_opc_error)
 }

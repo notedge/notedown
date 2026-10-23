@@ -467,6 +467,7 @@ struct HyperlinkState {
 }
 
 impl HyperlinkState {
+    #[allow(dead_code)]
     fn push_run(&mut self, run: &RunState) {
         if run.text.is_empty() {
             return;

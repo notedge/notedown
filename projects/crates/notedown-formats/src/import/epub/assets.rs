@@ -112,6 +112,7 @@ pub fn hydrate_package_assets(graph: &mut DocumentGraph, package: &OcfPackage, l
 }
 
 /// Materialize embedded image bytes for registered assets from the OCF package.
+#[allow(dead_code)]
 pub fn hydrate_image_assets(graph: &mut DocumentGraph, package: &OcfPackage, ledger: &mut BudgetTracker) {
     hydrate_package_assets(graph, package, ledger);
 }

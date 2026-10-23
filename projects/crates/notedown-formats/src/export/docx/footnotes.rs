@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Write as _};
+use std::collections::HashMap;
 
 use notedown_ir::{Block, DocumentGraph};
 

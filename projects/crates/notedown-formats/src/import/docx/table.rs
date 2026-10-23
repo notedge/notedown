@@ -2,6 +2,7 @@ use notedown_ir::{Block, DocumentGraph, Inline, TableRow};
 
 /// Mutable table parse state for `w:tbl`/`w:tr`/`w:tc` walks.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub(crate) struct TableState {
     pub rows: Vec<Vec<Vec<Inline>>>,
     pub current_row: Vec<Vec<Inline>>,

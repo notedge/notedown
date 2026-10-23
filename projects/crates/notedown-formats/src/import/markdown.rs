@@ -449,7 +449,14 @@ fn extract_list(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &
                     let marker = child_node.text(source);
                     ordered = marker.trim_start().chars().next().map(|ch| ch.is_ascii_digit()).unwrap_or(false);
                 }
-                items.push(ListItem { content: collect_inlines(child_node, source, context), children: Vec::new() });
+                let number = if ordered {
+                    let marker = child_node.text(source);
+                    marker.trim_start().chars().take_while(|ch| ch.is_ascii_digit()).collect::<String>().parse::<u32>().ok()
+                }
+                else {
+                    None
+                };
+                items.push(ListItem { content: collect_inlines(child_node, source, context), children: Vec::new(), number });
             }
         }
     }

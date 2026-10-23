@@ -63,3 +63,56 @@ fn loss_is_explicit() {
     assert!(!graph.coverage.complete);
     assert_eq!(graph.coverage.loss.len(), 1);
 }
+
+#[test]
+fn ordered_list_number_survives_wire_roundtrip() {
+    use notedown_ir::ListItem;
+    let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
+    graph.push_block(Block::List {
+        ordered: true,
+        items: vec![
+            ListItem { content: Vec::new(), children: Vec::new(), number: Some(42) },
+            ListItem { content: Vec::new(), children: Vec::new(), number: Some(99) },
+        ],
+    });
+
+    let json = serde_json::to_string(&graph).expect("serialize");
+    let restored: DocumentGraph = serde_json::from_str(&json).expect("deserialize");
+
+    assert_eq!(restored.blocks.len(), 1);
+    if let Block::List { ordered, items, .. } = &restored.blocks[0].block {
+        assert!(ordered);
+        assert_eq!(items[0].number, Some(42));
+        assert_eq!(items[1].number, Some(99));
+    }
+    else {
+        panic!("expected List block");
+    }
+}
+
+#[test]
+fn unordered_list_skips_number_on_wire() {
+    use notedown_ir::ListItem;
+    let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
+    graph.push_block(Block::List {
+        ordered: false,
+        items: vec![
+            ListItem { content: Vec::new(), children: Vec::new(), number: None },
+            ListItem { content: Vec::new(), children: Vec::new(), number: None },
+        ],
+    });
+
+    let json = serde_json::to_string(&graph).expect("serialize");
+    assert!(
+        !json.contains("number"),
+        "unordered list should not serialize the missing number field, got: {json}"
+    );
+
+    let restored: DocumentGraph = serde_json::from_str(&json).expect("deserialize");
+    if let Block::List { items, .. } = &restored.blocks[0].block {
+        assert!(items.iter().all(|item| item.number.is_none()));
+    }
+    else {
+        panic!("expected List block");
+    }
+}

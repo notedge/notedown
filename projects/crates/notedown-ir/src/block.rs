@@ -68,6 +68,15 @@ pub struct ListItem {
     pub content: Vec<Inline>,
     /// Nested child blocks under this item.
     pub children: Vec<NodeId>,
+    /// Explicit list number when the parent list is ordered.
+    ///
+    /// Unordered lists must keep this `None`. Ordered lists that want the
+    /// numbering preserved across formats, after edits, or for cross-format
+    /// round-trips must populate each item with a non-zero number. Numbers do
+    /// not need to start from 1 but must be strictly increasing within the
+    /// parent list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
 }
 
 /// One table row of cells.

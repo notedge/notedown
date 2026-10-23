@@ -88,8 +88,8 @@ fn ordered_list_projects_an_ordered_list_block() {
     assert_eq!(
         items,
         &vec![
-            ListItem { content: vec![Inline::Text { text: "Alpha".into() }], children: Vec::new() },
-            ListItem { content: vec![Inline::Text { text: "Beta".into() }], children: Vec::new() },
+            ListItem { content: vec![Inline::Text { text: "Alpha".into() }], children: Vec::new(), number: Some(1) },
+            ListItem { content: vec![Inline::Text { text: "Beta".into() }], children: Vec::new(), number: Some(2) },
         ]
     );
 }

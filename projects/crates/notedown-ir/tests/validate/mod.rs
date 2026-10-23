@@ -106,7 +106,7 @@ fn missing_section_and_list_children() {
     graph.push_block(Block::Section { level: 1, title: Vec::new(), children: vec![notedown_ir::NodeId(20)] });
     graph.push_block(Block::List {
         ordered: false,
-        items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(21)] }],
+        items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(21)], number: None }],
     });
 
     let report = graph.validate();
@@ -128,7 +128,7 @@ fn containment_cycles_rejected_relation_cycles_allowed() {
     cyclic.push_block_with_id(notedown_ir::NodeId(1), Block::Section { level: 1, title: Vec::new(), children: vec![notedown_ir::NodeId(2)] });
     cyclic.push_block_with_id(
         notedown_ir::NodeId(2),
-        Block::List { ordered: false, items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(1)] }] },
+        Block::List { ordered: false, items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(1)], number: None }] },
     );
     assert!(cyclic.validate().issues.iter().any(|issue| matches!(issue, ValidationIssue::ContainmentCycle { .. })));
 
@@ -162,5 +162,137 @@ fn deep_containment_without_stack_overflow() {
         let children = if id == NODE_COUNT { Vec::new() } else { vec![notedown_ir::NodeId(id + 1)] };
         graph.push_block_with_id(notedown_ir::NodeId(id), Block::Section { level: 1, title: Vec::new(), children });
     }
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn ordered_list_requires_increasing_nonzero_numbers() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::List {
+        ordered: true,
+        items: vec![
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(1) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(2) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(3) },
+        ],
+    });
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn ordered_list_allows_non_continuous_increasing_numbers() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::List {
+        ordered: true,
+        items: vec![
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(3) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(7) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(9) },
+        ],
+    });
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn ordered_list_missing_number_is_rejected() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::List {
+        ordered: true,
+        items: vec![
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(1) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: None },
+        ],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(issue, ValidationIssue::MissingListItemNumber { item_index: 1, .. })));
+}
+
+#[test]
+fn ordered_list_zero_or_non_increasing_numbers_are_rejected() {
+    // Zero start
+    {
+        let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+        graph.push_block(Block::List {
+            ordered: true,
+            items: vec![notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(0) }],
+        });
+        let report = graph.validate();
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| matches!(issue, ValidationIssue::OutOfOrderListItemNumber { item_index: 0, found: Some(0), .. })));
+    }
+
+    // Duplicate
+    {
+        let mut graph = DocumentGraph::new(notedown_ir::DocumentId(2));
+        graph.push_block(Block::List {
+            ordered: true,
+            items: vec![
+                notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(1) },
+                notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(1) },
+                notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(2) },
+            ],
+        });
+        let report = graph.validate();
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            ValidationIssue::OutOfOrderListItemNumber { item_index: 1, found: Some(1), previous: Some(1), .. }
+        )));
+    }
+
+    // Reverse order
+    {
+        let mut graph = DocumentGraph::new(notedown_ir::DocumentId(3));
+        graph.push_block(Block::List {
+            ordered: true,
+            items: vec![
+                notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(5) },
+                notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(2) },
+            ],
+        });
+        let report = graph.validate();
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            ValidationIssue::OutOfOrderListItemNumber { item_index: 1, found: Some(2), previous: Some(5), .. }
+        )));
+    }
+}
+
+#[test]
+fn unordered_list_must_not_carry_number() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    graph.push_block(Block::List {
+        ordered: false,
+        items: vec![
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: None },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(7) },
+        ],
+    });
+    let report = graph.validate();
+    assert!(report.issues.iter().any(|issue| matches!(
+        issue,
+        ValidationIssue::UnexpectedListItemNumber { item_index: 1, found: 7, .. }
+    )));
+}
+
+#[test]
+fn nested_ordered_lists_have_independent_numbering() {
+    let mut graph = DocumentGraph::new(notedown_ir::DocumentId(1));
+    let inner = graph.push_block(Block::List {
+        ordered: true,
+        items: vec![
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(1) },
+            notedown_ir::ListItem { content: Vec::new(), children: Vec::new(), number: Some(2) },
+        ],
+    });
+    graph.push_block(Block::List {
+        ordered: true,
+        items: vec![notedown_ir::ListItem {
+            content: Vec::new(),
+            children: vec![inner],
+            number: Some(1),
+        }],
+    });
     assert!(graph.validate().is_valid());
 }

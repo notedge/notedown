@@ -86,6 +86,34 @@ pub enum ValidationIssue {
         /// Cycle target node.
         to: NodeId,
     },
+    /// Ordered list item is missing an explicit number.
+    MissingListItemNumber {
+        /// List node id.
+        list: NodeId,
+        /// Zero-based item index inside the list.
+        item_index: usize,
+    },
+    /// List item number violates the ordering invariant (non-positive or
+    /// not strictly greater than the previous item).
+    OutOfOrderListItemNumber {
+        /// List node id.
+        list: NodeId,
+        /// Zero-based item index inside the list.
+        item_index: usize,
+        /// Observed number, when present.
+        found: Option<u32>,
+        /// Previous item number that this one must exceed.
+        previous: Option<u32>,
+    },
+    /// Unordered list item should not carry a number.
+    UnexpectedListItemNumber {
+        /// List node id.
+        list: NodeId,
+        /// Zero-based item index inside the list.
+        item_index: usize,
+        /// Observed number.
+        found: u32,
+    },
 }
 
 /// Collected validation result.
@@ -174,7 +202,8 @@ impl DocumentGraph {
                 Block::Paragraph { content } | Block::Quote { content } => {
                     check_inline_refs(node.id, content, &context, report);
                 }
-                Block::List { items, .. } => {
+                Block::List { ordered, items, .. } => {
+                    check_list_numbering(node.id, *ordered, items, report);
                     for item in items {
                         check_inline_refs(node.id, &item.content, &context, report);
                         for child in &item.children {
@@ -310,5 +339,48 @@ fn check_inline_refs(from: NodeId, inlines: &[Inline], context: &InlineContext<'
 fn check_label(from: NodeId, kind: &str, label: &str, report: &mut ValidationReport) {
     if label.trim().is_empty() {
         report.issues.push(ValidationIssue::EmptyInlineLabel { from, kind: kind.to_string() });
+    }
+}
+
+/// Enforce list numbering invariants per [`Living 00`].
+///
+/// - Ordered list items must all carry a non-zero, strictly increasing number.
+/// - Unordered list items must not carry a number.
+fn check_list_numbering(list_id: NodeId, ordered: bool, items: &[crate::block::ListItem], report: &mut ValidationReport) {
+    if !ordered {
+        for (index, item) in items.iter().enumerate() {
+            if let Some(n) = item.number {
+                report.issues.push(ValidationIssue::UnexpectedListItemNumber { list: list_id, item_index: index, found: n });
+            }
+        }
+        return;
+    }
+
+    let mut previous: Option<u32> = None;
+    for (index, item) in items.iter().enumerate() {
+        match item.number {
+            None => report.issues.push(ValidationIssue::MissingListItemNumber { list: list_id, item_index: index }),
+            Some(n) => {
+                if n == 0 {
+                    report.issues.push(ValidationIssue::OutOfOrderListItemNumber {
+                        list: list_id,
+                        item_index: index,
+                        found: Some(n),
+                        previous,
+                    });
+                }
+                else if let Some(prev) = previous {
+                    if n <= prev {
+                        report.issues.push(ValidationIssue::OutOfOrderListItemNumber {
+                            list: list_id,
+                            item_index: index,
+                            found: Some(n),
+                            previous: Some(prev),
+                        });
+                    }
+                }
+                previous = Some(n);
+            }
+        }
     }
 }

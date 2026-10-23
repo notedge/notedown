@@ -67,9 +67,16 @@ fn lower_root_blocks(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Bl
                 }
                 NoteElementType::ListItem => {
                     let ordered = list_marker_ordered(child_node.text(source).as_ref());
+                    let number = if ordered {
+                        let marker = child_node.text(source);
+                        marker.trim_start().chars().take_while(|ch| ch.is_ascii_digit()).collect::<String>().parse::<u32>().ok()
+                    }
+                    else {
+                        None
+                    };
                     let mut content = collect_inlines(child_node, source);
                     strip_list_marker(&mut content);
-                    let item = ListItem { content, children: Vec::new() };
+                    let item = ListItem { content, children: Vec::new(), number };
                     match &mut pending_list {
                         Some((list_ordered, items)) if *list_ordered == ordered => {
                             items.push(item);
@@ -170,11 +177,12 @@ fn promote_list_item(node: RedNode<NoteLanguage>, source: &SourceText) -> Option
     let text = node.text(source).into_owned();
     let raw = text.trim();
     if let Some(content) = raw.strip_prefix("- ").or_else(|| raw.strip_prefix("* ")).or_else(|| raw.strip_prefix("+ ")) {
-        return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
+        return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None }));
     }
     if let Some((prefix, content)) = raw.split_once(". ") {
         if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) && !content.is_empty() {
-            return Some((true, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
+            let number = prefix.parse::<u32>().ok();
+            return Some((true, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number }));
         }
     }
     let inlines = collect_inlines(node, source);
@@ -183,7 +191,7 @@ fn promote_list_item(node: RedNode<NoteLanguage>, source: &SourceText) -> Option
     }
     if let Inline::Text { text } = &inlines[0] {
         if let Some(content) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")).or_else(|| text.strip_prefix("+ ")) {
-            return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new() }));
+            return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None }));
         }
     }
     None

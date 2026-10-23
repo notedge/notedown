@@ -23,7 +23,7 @@ fn bound_assets(block: &Block) -> Vec<Option<AssetId>> {
 fn nested_blocks_register_each_image_occurrence_once() {
     let mut graph = DocumentGraph::new(DocumentId(1));
     let paragraph = graph.push_block(Block::Paragraph { content: vec![image("diagram.png")] });
-    let list = graph.push_block(Block::List { ordered: false, items: vec![ListItem { content: Vec::new(), children: vec![paragraph] }] });
+    let list = graph.push_block(Block::List { ordered: false, items: vec![ListItem { content: Vec::new(), children: vec![paragraph], number: None }] });
     graph.push_block(Block::Section { level: 1, title: Vec::new(), children: vec![list] });
 
     register_image_assets(&mut graph);

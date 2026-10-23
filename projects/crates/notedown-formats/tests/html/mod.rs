@@ -127,13 +127,14 @@ fn html_export_preserves_list_children_and_their_reference_targets() {
     let quote = graph.push_block(Block::Quote { content: vec![Inline::Text { text: "child quote".into() }] });
     let nested_list = graph.push_block(Block::List {
         ordered: true,
-        items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "nested item".into() }], children: Vec::new() }],
+        items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "nested item".into() }], children: Vec::new(), number: None }],
     });
     graph.push_block(Block::List {
         ordered: false,
         items: vec![notedown_ir::ListItem {
             content: vec![Inline::Reference { display: "nested target".into(), target: nested_list }],
             children: vec![paragraph, code, quote, nested_list],
+            number: None,
         }],
     });
 
@@ -158,7 +159,7 @@ fn html_export_rejects_list_containment_cycles() {
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
     graph.push_block(Block::List {
         ordered: false,
-        items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(1)] }],
+        items: vec![notedown_ir::ListItem { content: Vec::new(), children: vec![notedown_ir::NodeId(1)], number: None }],
     });
     let error = export_html(&graph).expect_err("containment cycles must not recurse");
     assert!(error.to_string().contains("invalid document graph"));

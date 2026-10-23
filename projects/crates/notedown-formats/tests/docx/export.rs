@@ -487,7 +487,7 @@ fn docx_emits_section_and_list_children_in_semantic_order() {
     let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "child paragraph".into() }] });
     let list = graph.push_block(Block::List {
         ordered: true,
-        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![paragraph] }],
+        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![paragraph], number: None }],
     });
     graph.push_block(Block::Section { level: 1, title: vec![Inline::Text { text: "section heading".into() }], children: vec![list] });
     let exported = export_docx_bytes(&graph).expect("export section children");
@@ -518,7 +518,7 @@ fn docx_rejects_lists_deeper_than_numbering_definitions() {
     for depth in 0..10 {
         let list = graph.push_block(Block::List {
             ordered: false,
-            items: vec![ListItem { content: vec![Inline::Text { text: format!("depth {depth}") }], children }],
+            items: vec![ListItem { content: vec![Inline::Text { text: format!("depth {depth}") }], children, number: None }],
         });
         children = vec![list];
     }

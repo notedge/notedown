@@ -651,7 +651,7 @@ fn build_nested_items(
             break;
         }
         *cursor += 1;
-        let mut item = ListItem { content: current.content.clone(), children: Vec::new() };
+        let mut item = ListItem { content: current.content.clone(), children: Vec::new(), number: None };
         if *cursor < pending.len() && pending[*cursor].level > level {
             let child_level = pending[*cursor].level;
             let child_ordered = num_id.and_then(|id| numbering.is_ordered(id, child_level)).unwrap_or(ordered);

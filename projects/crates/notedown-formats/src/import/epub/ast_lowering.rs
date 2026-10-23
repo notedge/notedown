@@ -238,7 +238,7 @@ fn lower_list_item(li: &Element, graph: &mut DocumentGraph, member_path: Option<
             HtmlNode::Comment(_) => {}
         }
     }
-    ListItem { content, children }
+    ListItem { content, children, number: None }
 }
 
 fn collect_table_rows(element: &Element, graph: &mut DocumentGraph, member_path: Option<&str>, losses: &mut Vec<LossMarker>) -> Vec<TableRow> {

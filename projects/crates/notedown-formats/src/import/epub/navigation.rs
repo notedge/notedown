@@ -51,7 +51,7 @@ fn nav_entry_to_list_item(graph: &mut DocumentGraph, entry: &NavEntry) -> ListIt
         let nested_items = entry.children.iter().map(|child| nav_entry_to_list_item(graph, child)).collect();
         vec![graph.push_block(Block::List { ordered: false, items: nested_items })]
     };
-    ListItem { content: vec![link_inline(entry)], children }
+    ListItem { content: vec![link_inline(entry)], children, number: None }
 }
 
 fn link_inline(entry: &NavEntry) -> Inline {

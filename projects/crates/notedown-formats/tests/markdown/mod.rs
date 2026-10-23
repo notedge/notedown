@@ -2,6 +2,89 @@ use notedown_formats::{export::markdown::export_markdown, import::markdown::impo
 use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, RelationEndpoint, RelationKind, SemanticStatus};
 
 #[test]
+fn markdown_lists_lower_to_list_blocks() {
+    let source = "- alpha\n- beta\n";
+    let graph = import_markdown_bytes("list.md", source).expect("import markdown");
+    let Block::List { ordered: false, items } = &graph.blocks[0].block
+    else {
+        panic!("unordered list expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].content, vec![Inline::Text { text: "alpha".into() }]);
+    assert_eq!(items[1].content, vec![Inline::Text { text: "beta".into() }]);
+    assert!(items.iter().all(|item| item.children.is_empty()));
+    assert!(graph.validate().is_valid());
+
+    let ordered_source = "1. one\n2. two\n";
+    let ordered_graph = import_markdown_bytes("ordered-list.md", ordered_source).expect("import ordered list");
+    let Block::List { ordered: true, items } = &ordered_graph.blocks[0].block
+    else {
+        panic!("ordered list expected: {:#?}", ordered_graph.blocks)
+    };
+    assert_eq!(items.iter().map(|item| item.number).collect::<Vec<_>>(), vec![Some(1), Some(2)]);
+    assert_eq!(items[0].content, vec![Inline::Text { text: "one".into() }]);
+    assert!(ordered_graph.validate().is_valid());
+
+    let nested_source = "- parent\n  - child\n";
+    let nested_graph = import_markdown_bytes("nested-list.md", nested_source).expect("import nested list");
+    let outer_items = nested_graph
+        .blocks
+        .iter()
+        .find_map(|node| match &node.block {
+            Block::List { items, .. } if items.iter().any(|item| !item.children.is_empty()) => Some(items),
+            _ => None,
+        })
+        .expect("outer list with a nested child list");
+    assert_eq!(outer_items.len(), 1);
+    assert_eq!(outer_items[0].content, vec![Inline::Text { text: "parent".into() }]);
+    assert_eq!(outer_items[0].children.len(), 1);
+    let nested = nested_graph.block(outer_items[0].children[0]).expect("nested list block").block.clone();
+    assert_eq!(
+        nested,
+        Block::List {
+            ordered: false,
+            items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "child".into() }], children: Vec::new(), number: None }]
+        }
+    );
+    assert!(nested_graph.validate().is_valid());
+}
+
+#[test]
+fn markdown_blockquote_lowers_inline_content() {
+    let source = "> **bold** text\n";
+    let graph = import_markdown_bytes("quote.md", source).expect("import markdown");
+    let Block::Quote { content } = &graph.blocks[0].block
+    else {
+        panic!("quote expected: {:#?}", graph.blocks)
+    };
+    assert!(
+        content.iter().any(|inline| matches!(
+            inline,
+            Inline::Styled { style, children } if style == "bold" && children == &[Inline::Text { text: "bold".into() }]
+        )),
+        "{content:#?}"
+    );
+    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>().trim(), "bold text");
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    let reopened = import_markdown_bytes("quote-roundtrip.md", &markdown).expect("reopen markdown");
+    assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
+
+    let multiline = "> first line\n> second line\n";
+    let multiline_graph = import_markdown_bytes("multiline-quote.md", multiline).expect("import multiline quote");
+    let Block::Quote { content } = &multiline_graph.blocks[0].block
+    else {
+        panic!("quote expected: {:#?}", multiline_graph.blocks)
+    };
+    assert!(content.iter().any(|inline| matches!(inline, Inline::Break { kind: notedown_ir::BreakKind::Soft })), "{content:#?}");
+    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>().trim(), "first line second line");
+    let multiline_markdown = export_markdown(&multiline_graph).expect("export multiline quote");
+    let multiline_reopened = import_markdown_bytes("multiline-quote-roundtrip.md", &multiline_markdown).expect("reopen multiline quote");
+    assert_eq!(multiline_reopened.blocks[0].block, multiline_graph.blocks[0].block);
+}
+
+#[test]
 fn markdown_import_lowers_heading_and_paragraph() {
     let source = "# Title\n\nHello world.\n";
     let graph = import_markdown_bytes("sample.md", source).expect("import markdown");

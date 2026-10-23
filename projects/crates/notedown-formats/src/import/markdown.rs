@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus};
+use notedown_ir::{Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, RelationEndpoint, SemanticStatus};
 use oak_core::{GreenNode, Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
 use oak_markdown::{MarkdownLanguage, MarkdownParser, parser::element_type::MarkdownElementType};
 
@@ -26,6 +26,10 @@ fn markdown_import_language() -> MarkdownLanguage {
     language.allow_math = true;
     language.allow_footnotes = true;
     language.allow_strikethrough = true;
+    language.allow_lists = true;
+    language.allow_blockquotes = true;
+    language.allow_fenced_code_blocks = true;
+    language.allow_tables = true;
     language
 }
 
@@ -51,7 +55,7 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
     }
     for child in red_root.children() {
         if let RedTree::Node(node) = child {
-            match lower_block_node(node, source, &mut context) {
+            match lower_block_node(node, source, &mut context, &mut graph) {
                 BlockOutcome::Block(block) => {
                     graph.push_block(block);
                 }
@@ -168,7 +172,12 @@ fn split_reference_link(raw: &str) -> Option<(String, String, bool)> {
     None
 }
 
-fn lower_block_node(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> BlockOutcome {
+fn lower_block_node(
+    node: RedNode<MarkdownLanguage>,
+    source: &SourceText,
+    context: &mut LinkContext,
+    graph: &mut DocumentGraph,
+) -> BlockOutcome {
     let kind = node.element_type();
     match kind {
         MarkdownElementType::Heading1
@@ -203,12 +212,10 @@ fn lower_block_node(node: RedNode<MarkdownLanguage>, source: &SourceText, contex
             status: SemanticStatus::Resolved,
         }),
         MarkdownElementType::List => {
-            let (ordered, items) = extract_list(node, source, context);
+            let (ordered, items) = extract_list(node, source, context, graph);
             BlockOutcome::Block(Block::List { ordered, items })
         }
-        MarkdownElementType::Blockquote => {
-            BlockOutcome::Block(Block::Quote { content: vec![Inline::Text { text: extract_blockquote_text(node, source) }] })
-        }
+        MarkdownElementType::Blockquote => BlockOutcome::Block(Block::Quote { content: lower_blockquote_inlines(node, source, context) }),
         MarkdownElementType::HorizontalRule => BlockOutcome::Loss(LossMarker {
             code: "import.markdown.horizontal_rule".into(),
             message: "horizontal rule lowered to loss marker".into(),
@@ -309,6 +316,13 @@ fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {
         return;
     }
     inlines.push(inline);
+}
+
+fn push_soft_break(inlines: &mut Vec<Inline>) {
+    if inlines.is_empty() || matches!(inlines.last(), Some(Inline::Break { .. })) {
+        return;
+    }
+    inlines.push(Inline::Break { kind: BreakKind::Soft });
 }
 
 fn collect_plain_text(node: RedNode<MarkdownLanguage>, source: &SourceText) -> String {
@@ -439,40 +453,151 @@ fn extract_code_block(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (
     (language.filter(|value| !value.is_empty()), content.trim().to_string())
 }
 
-fn extract_list(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> (bool, Vec<ListItem>) {
+fn list_item_marker(node: RedNode<MarkdownLanguage>, source: &SourceText) -> Option<String> {
+    node.children()
+        .find(|child| child.kind::<MarkdownElementType>() == MarkdownElementType::ListMarker)
+        .map(|child| child.text(source).trim().to_string())
+}
+
+fn extract_list(
+    node: RedNode<MarkdownLanguage>,
+    source: &SourceText,
+    context: &mut LinkContext,
+    graph: &mut DocumentGraph,
+) -> (bool, Vec<ListItem>) {
     let mut ordered = false;
     let mut items = Vec::new();
     for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            if child_node.element_type() == MarkdownElementType::ListItem {
-                if items.is_empty() {
-                    let marker = child_node.text(source);
-                    ordered = marker.trim_start().chars().next().map(|ch| ch.is_ascii_digit()).unwrap_or(false);
-                }
-                let number = if ordered {
-                    let marker = child_node.text(source);
-                    marker.trim_start().chars().take_while(|ch| ch.is_ascii_digit()).collect::<String>().parse::<u32>().ok()
-                }
-                else {
-                    None
-                };
-                items.push(ListItem { content: collect_inlines(child_node, source, context), children: Vec::new(), number });
-            }
+        let RedTree::Node(item_node) = child
+        else {
+            continue;
+        };
+        if item_node.element_type() != MarkdownElementType::ListItem {
+            continue;
         }
+        let marker = list_item_marker(item_node, source);
+        if items.is_empty() {
+            ordered = marker.as_deref().and_then(|value| value.chars().next()).is_some_and(|character| character.is_ascii_digit());
+        }
+        let number = if ordered {
+            marker
+                .as_deref()
+                .map(|value| value.chars().take_while(char::is_ascii_digit).collect::<String>())
+                .and_then(|digits| digits.parse::<u32>().ok())
+        }
+        else {
+            None
+        };
+        let (content, children) = lower_list_item(item_node, source, context, graph);
+        items.push(ListItem { content, children, number });
     }
     (ordered, items)
 }
 
-fn extract_blockquote_text(node: RedNode<MarkdownLanguage>, source: &SourceText) -> String {
-    let mut parts = Vec::new();
+fn lower_list_item(
+    node: RedNode<MarkdownLanguage>,
+    source: &SourceText,
+    context: &mut LinkContext,
+    graph: &mut DocumentGraph,
+) -> (Vec<Inline>, Vec<NodeId>) {
+    let mut content = Vec::new();
+    let mut children = Vec::new();
+    let mut skip_marker_space = false;
+    let mut line_start = false;
     for child in node.children() {
-        if let RedTree::Node(child_node) = child {
-            if child_node.element_type() == MarkdownElementType::Paragraph {
-                parts.push(collect_plain_text(child_node, source));
+        match child {
+            RedTree::Leaf(_) => match child.kind::<MarkdownElementType>() {
+                MarkdownElementType::ListMarker => skip_marker_space = true,
+                MarkdownElementType::Newline => {
+                    skip_marker_space = false;
+                    line_start = true;
+                }
+                _ => {
+                    let text = child.text(source);
+                    if (skip_marker_space || line_start) && text.trim().is_empty() {
+                        skip_marker_space = false;
+                        line_start = false;
+                        continue;
+                    }
+                    skip_marker_space = false;
+                    line_start = false;
+                    if !text.is_empty() {
+                        push_inline(&mut content, Inline::Text { text: decode_escaped_text(text.as_ref()) });
+                    }
+                }
+            },
+            RedTree::Node(child_node) => {
+                skip_marker_space = false;
+                line_start = false;
+                if child_node.element_type() == MarkdownElementType::List {
+                    let (nested_ordered, nested_items) = extract_list(child_node, source, context, graph);
+                    children.push(graph.push_block(Block::List { ordered: nested_ordered, items: nested_items }));
+                }
+                else if let Some(inline) = lower_inline_node(child_node, source, context) {
+                    push_inline(&mut content, inline);
+                }
             }
         }
     }
-    parts.join("\n")
+    (content, children)
+}
+
+fn lower_blockquote_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Vec<Inline> {
+    let children = node.children().collect::<Vec<_>>();
+    let mut inlines = Vec::new();
+    let mut skip_marker_space = false;
+    let mut line_start = false;
+    for (index, child) in children.iter().enumerate() {
+        match *child {
+            RedTree::Leaf(_) => match child.kind::<MarkdownElementType>() {
+                MarkdownElementType::BlockquoteMarker => skip_marker_space = true,
+                MarkdownElementType::Newline => {
+                    skip_marker_space = false;
+                    line_start = true;
+                    if index + 1 < children.len() {
+                        push_soft_break(&mut inlines);
+                    }
+                }
+                _ => {
+                    let text = child.text(source);
+                    if (skip_marker_space || line_start) && text.trim().is_empty() {
+                        skip_marker_space = false;
+                        line_start = false;
+                        continue;
+                    }
+                    skip_marker_space = false;
+                    line_start = false;
+                    if !text.is_empty() {
+                        push_inline(&mut inlines, Inline::Text { text: decode_escaped_text(text.as_ref()) });
+                    }
+                }
+            },
+            RedTree::Node(child_node) => {
+                skip_marker_space = false;
+                line_start = false;
+                match child_node.element_type() {
+                    MarkdownElementType::Blockquote | MarkdownElementType::Paragraph => {
+                        push_soft_break(&mut inlines);
+                        let nested = if child_node.element_type() == MarkdownElementType::Blockquote {
+                            lower_blockquote_inlines(child_node, source, context)
+                        }
+                        else {
+                            collect_inlines(child_node, source, context)
+                        };
+                        for inline in nested {
+                            push_inline(&mut inlines, inline);
+                        }
+                    }
+                    _ => {
+                        if let Some(inline) = lower_inline_node(child_node, source, context) {
+                            push_inline(&mut inlines, inline);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    inlines
 }
 
 fn heading_level(kind: MarkdownElementType) -> u8 {

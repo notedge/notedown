@@ -1,0 +1,13 @@
+[package]
+name = "davinci-runtime"
+version.workspace = true
+authors.workspace = true
+description = "Runtime state, event normalization, reducers, and invalidation for DaVinci scenes"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+davinci-types = { workspace = true }
+davinci-scene = { workspace = true }

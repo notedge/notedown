@@ -1,19 +1,22 @@
-//! Structured diagram lowering failures.
+//! Structured diagram parsing and lowering failures.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use davinci_scene::SceneError;
-use davinci_types::{Diagnostic, DiagnosticSeverity, codes, diagnostic};
+use davinci_types::{Diagnostic, DiagnosticSeverity, diagnostic};
+
+#[cfg(feature = "mermaid")]
+use davinci_types::codes;
 
 /// A fatal diagram parsing or lowering failure.
 ///
-/// The small code-and-message surface mirrors [`SceneError`]. The full
-/// structured record is available through [`DiagramError::diagnostic`].
+/// The small code-and-message surface mirrors [`davinci_scene::SceneError`].
+/// The full structured record is available through
+/// [`DiagramError::diagnostic`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagramError {
     code: &'static str,
     message: String,
-    diagnostic: Diagnostic,
+    diagnostic: Box<Diagnostic>,
 }
 
 impl DiagramError {
@@ -21,7 +24,7 @@ impl DiagramError {
     pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         let message = message.into();
         let diagnostic = diagnostic("diagram", code, DiagnosticSeverity::Error, message.clone());
-        Self { code, message, diagnostic }
+        Self { code, message, diagnostic: Box::new(diagnostic) }
     }
 
     /// The stable `davinci.*` diagnostic code.
@@ -39,18 +42,22 @@ impl DiagramError {
         &self.diagnostic
     }
 
+    #[cfg(feature = "mermaid")]
     pub(crate) fn parse_failed(message: impl Into<String>) -> Self {
         Self::new(codes::PARSE_FAILED, message)
     }
 
+    #[cfg(feature = "mermaid")]
     pub(crate) fn ast_unavailable(message: impl Into<String>) -> Self {
         Self::new(codes::AST_UNAVAILABLE, message)
     }
 
+    #[cfg(feature = "mermaid")]
     pub(crate) fn unsupported(message: impl Into<String>) -> Self {
         Self::new(codes::UNSUPPORTED, message)
     }
 
+    #[cfg(feature = "mermaid")]
     pub(crate) fn empty_diagram(message: impl Into<String>) -> Self {
         Self::new(codes::EMPTY_DIAGRAM, message)
     }
@@ -63,9 +70,3 @@ impl Display for DiagramError {
 }
 
 impl std::error::Error for DiagramError {}
-
-impl From<SceneError> for DiagramError {
-    fn from(error: SceneError) -> Self {
-        Self::new(codes::SERIALIZATION_FAILED, format!("{}: {}", error.code(), error.message()))
-    }
-}

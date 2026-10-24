@@ -17,8 +17,3 @@ oak-mermaid = { workspace = true, optional = true }
 [features]
 default = ["mermaid"]
 mermaid = ["dep:oak-core", "dep:oak-mermaid"]
-
-[[test]]
-name = "main"
-path = "tests/main.rs"
-required-features = ["mermaid"]

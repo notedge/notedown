@@ -39,6 +39,7 @@ oak-notedown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev =
 oak-html = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971", default-features = false, features = ["serde"] }
 oak-xml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971", default-features = false, features = ["serde"] }
 oak-org-mode = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971", default-features = false, features = ["serde"] }
+oak-tex = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971", default-features = false, features = ["serde"] }
 oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971" }
 
 notedown = { path = "projects/crates/notedown" }

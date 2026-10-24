@@ -1,0 +1,1119 @@
+//! TeX/LaTeX import via `oak-tex`.
+//!
+//! The lowering keeps document semantics the IR can express: sections,
+//! paragraphs, inline styles, lists, simple tables, math source, and verbatim
+//! code. Everything that only makes sense to a TeX engine (macro definitions,
+//! packages, floats, arbitrary layout commands) stays an explicit opaque block
+//! or a recorded loss marker instead of being silently dropped.
+
+use std::path::Path;
+
+use notedown_ir::{
+    Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, TableCell, TableRow,
+};
+use oak_core::{Builder, SourceText, parser::session::ParseSession};
+use oak_tex::{
+    TexBuilder, TexLanguage,
+    ast::{TexArgument, TexCommand, TexEnvironment, TexItem, TexRoot},
+};
+
+use super::common::register_image_assets;
+use crate::FormatError;
+
+/// Import a TeX file from disk into `notedown-ir`.
+pub fn import_tex(path: impl AsRef<Path>) -> Result<DocumentGraph, FormatError> {
+    let path = path.as_ref();
+    let text =
+        std::fs::read_to_string(path).map_err(|error| FormatError::invalid_input(format!("failed to read {}: {error}", path.display())))?;
+    import_tex_bytes(&path.display().to_string(), &text)
+}
+
+/// Import TeX source text into `notedown-ir`.
+pub fn import_tex_bytes(label: &str, text: &str) -> Result<DocumentGraph, FormatError> {
+    let root = parse_tex(label, text)?;
+    let mut lowerer = TexLowerer { graph: DocumentGraph::new(document_id_for(label)), source: text };
+    let mut sink = Sink::document();
+    lowerer.lower_root(&root.items, 0, text.len(), &mut sink);
+    sink.flush(&mut lowerer.graph);
+
+    if lowerer.graph.blocks.is_empty() {
+        lowerer.loss("import.tex.empty_document", "TeX source produced no supported semantic blocks", SemanticStatus::Partial);
+    }
+    lowerer.loss(
+        "import.tex.partial_coverage",
+        "TeX import preserves sections, paragraphs, inline styles, lists, simple tabular tables, math source, and verbatim code, but not macros, packages, floats, or arbitrary layout semantics",
+        SemanticStatus::Partial,
+    );
+    register_image_assets(&mut lowerer.graph);
+    Ok(lowerer.graph)
+}
+
+fn parse_tex(label: &str, text: &str) -> Result<TexRoot, FormatError> {
+    let source = SourceText::new(text);
+    let language = TexLanguage::default();
+    let builder = TexBuilder::new(&language);
+    let mut session = ParseSession::<TexLanguage>::default();
+    builder.build(&source, &[], &mut session).result.map_err(|error| FormatError::parse("tex", format!("{label}: {error}")))
+}
+
+fn document_id_for(label: &str) -> DocumentId {
+    let mut hash = 1u64;
+    for byte in label.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
+    }
+    DocumentId(hash)
+}
+
+/// Inline and child-block accumulator shared by document, environment, and
+/// list-item lowering.
+struct Sink {
+    inlines: Vec<Inline>,
+    item_content: Vec<Inline>,
+    children: Vec<NodeId>,
+    content_taken: bool,
+    item_mode: bool,
+}
+
+impl Sink {
+    fn document() -> Self {
+        Self { inlines: Vec::new(), item_content: Vec::new(), children: Vec::new(), content_taken: false, item_mode: false }
+    }
+
+    fn item() -> Self {
+        Self { inlines: Vec::new(), item_content: Vec::new(), children: Vec::new(), content_taken: false, item_mode: true }
+    }
+
+    fn flush(&mut self, graph: &mut DocumentGraph) {
+        trim_inlines(&mut self.inlines);
+        if self.inlines.is_empty() {
+            return;
+        }
+        let inlines = std::mem::take(&mut self.inlines);
+        if self.item_mode && !self.content_taken {
+            self.item_content = inlines;
+            self.content_taken = true;
+        }
+        else if self.item_mode {
+            let id = graph.push_block(Block::Paragraph { content: inlines });
+            self.children.push(id);
+        }
+        else {
+            graph.push_block(Block::Paragraph { content: inlines });
+        }
+    }
+}
+
+struct TexLowerer<'a> {
+    graph: DocumentGraph,
+    source: &'a str,
+}
+
+impl<'a> TexLowerer<'a> {
+    fn raw(&self, start: usize, end: usize) -> &'a str {
+        self.source.get(start.min(self.source.len())..end.min(self.source.len())).unwrap_or("")
+    }
+
+    fn loss(&mut self, code: &str, message: impl Into<String>, status: SemanticStatus) {
+        self.graph.push_loss(LossMarker { code: code.into(), message: message.into(), status });
+    }
+
+    fn push_block(&mut self, sink: &mut Sink, block: Block) {
+        sink.flush(&mut self.graph);
+        if sink.item_mode {
+            let id = self.graph.push_block(block);
+            sink.children.push(id);
+        }
+        else {
+            self.graph.push_block(block);
+        }
+    }
+
+    /// Lower a run of AST items while also recovering block environments that
+    /// `oak-tex` drops from the AST (lists and tables become element kinds the
+    /// builder does not emit), using the raw source spans between items.
+    fn lower_root(&mut self, items: &[TexItem], region_start: usize, region_end: usize, sink: &mut Sink) {
+        let mut cursor = region_start;
+        let mut skip_until = 0usize;
+        for item in items {
+            let Some((start, end)) = item_span(item) else {
+                continue;
+            };
+            if start < skip_until {
+                continue;
+            }
+            self.lower_dropped_regions(cursor, start, sink);
+            if let TexItem::Command(command) = item {
+                if command_name(self.raw(command.span.start, command.span.end)) == "verb" {
+                    skip_until = command.span.end + self.verb_consumed_len(command.span.end);
+                }
+            }
+            self.lower_item(item, sink);
+            cursor = end;
+        }
+        self.lower_dropped_regions(cursor, region_end, sink);
+    }
+
+    fn lower_item(&mut self, item: &TexItem, sink: &mut Sink) {
+        match item {
+            TexItem::Text { content, .. } => self.push_text(content, sink),
+            TexItem::Comment { .. } => {}
+            TexItem::Group(group) => {
+                let inlines = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
+                sink.inlines.extend(inlines);
+            }
+            TexItem::Superscript(superscript) => {
+                let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end);
+                sink.inlines.push(Inline::Styled { style: "superscript".into(), children });
+            }
+            TexItem::Subscript(subscript) => {
+                let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end);
+                sink.inlines.push(Inline::Styled { style: "subscript".into(), children });
+            }
+            TexItem::Math(math) => {
+                let raw = self.raw(math.span.start, math.span.end);
+                let (content, display) = math_source(raw);
+                if display {
+                    self.push_block(sink, Block::Math { content, language: Some("latex".into()) });
+                }
+                else {
+                    sink.inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
+                }
+            }
+            TexItem::Command(command) => self.lower_command(command, sink),
+            TexItem::Environment(environment) => self.lower_environment(environment, sink),
+        }
+    }
+
+    fn lower_command(&mut self, command: &TexCommand, sink: &mut Sink) {
+        let raw = self.raw(command.span.start, command.span.end);
+        let name = command_name(raw);
+        if let Some(level) = section_level(&name) {
+            let title = self
+                .required_argument(command)
+                .map(|fragment| self.lower_inline_fragment(fragment))
+                .unwrap_or_default();
+            if title.is_empty() {
+                self.loss(
+                    "import.tex.section_without_title",
+                    format!("section command has no readable title: {}", raw.trim()),
+                    SemanticStatus::Partial,
+                );
+            }
+            self.push_block(sink, Block::Section { level, title, children: Vec::new() });
+            return;
+        }
+        match name.as_str() {
+            "par" => sink.flush(&mut self.graph),
+            "verb" => self.lower_verb(command, sink),
+            _ => match self.inline_from_command(command) {
+                InlineOutcome::Inline(inline) => sink.inlines.push(inline),
+                InlineOutcome::Dropped => {}
+                InlineOutcome::Unknown => {
+                    let kind = if name.is_empty() { "tex.unknown".to_string() } else { format!("tex.{name}") };
+                    if is_macro_definition(&name) {
+                        self.loss(
+                            "import.tex.macro_definition",
+                            format!("TeX macro definition kept opaque: {}", raw.trim()),
+                            SemanticStatus::Unsupported,
+                        );
+                    }
+                    self.push_block(
+                        sink,
+                        Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial },
+                    );
+                }
+            },
+        }
+    }
+
+    fn lower_environment(&mut self, environment: &TexEnvironment, sink: &mut Sink) {
+        let raw = self.raw(environment.span.start, environment.span.end);
+        let name = environment_name(raw);
+        match name.as_str() {
+            "document" => self.lower_root(&environment.content.items, environment.span.start, environment.span.end, sink),
+            "verbatim" | "lstlisting" | "minted" | "Verbatim" => {
+                let content = self.code_environment_content(environment.span.start, environment.span.end);
+                self.push_block(sink, Block::Code { language: None, content });
+            }
+            "itemize" | "enumerate" | "description" => self.lower_list(&name, environment.span.start, environment.span.end, sink),
+            "tabular" | "array" => self.lower_table(environment.span.start, environment.span.end, sink),
+            _ => {
+                self.loss(
+                    "import.tex.unknown_environment",
+                    format!("unknown TeX environment kept opaque: {name}"),
+                    SemanticStatus::Unsupported,
+                );
+                let kind = if name.is_empty() { "tex.environment.unknown".to_string() } else { format!("tex.environment.{name}") };
+                self.push_block(
+                    sink,
+                    Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial },
+                );
+            }
+        }
+    }
+
+    /// Lower a command in inline position.
+    fn inline_from_command(&mut self, command: &TexCommand) -> InlineOutcome {
+        let raw = self.raw(command.span.start, command.span.end);
+        let name = command_name(raw);
+        let styled = |style: &str, children: Vec<Inline>| Inline::Styled { style: style.into(), children };
+        let plain = match name.as_str() {
+            "&" => Some("&"),
+            "%" => Some("%"),
+            "$" => Some("$"),
+            "#" => Some("#"),
+            "_" => Some("_"),
+            "{" => Some("{"),
+            "}" => Some("}"),
+            " " | "space" => Some(" "),
+            _ => None,
+        };
+        if let Some(text) = plain {
+            return InlineOutcome::Inline(Inline::Text { text: text.into() });
+        }
+        if name == "\\" || name == "newline" {
+            return InlineOutcome::Inline(Inline::Break { kind: notedown_ir::BreakKind::Hard });
+        }
+        match name.as_str() {
+            "textbf" | "textsc" | "texttt" | "underline" | "textit" | "emph" | "text" => {
+                let children = self.required_argument(command).map(|fragment| self.lower_inline_fragment(fragment)).unwrap_or_default();
+                if children.is_empty() {
+                    return InlineOutcome::Dropped;
+                }
+                let style = match name.as_str() {
+                    "textbf" => "bold",
+                    "textit" | "emph" => "italic",
+                    "textsc" => "small-caps",
+                    "texttt" => "monospace",
+                    "underline" => "underline",
+                    _ => "text",
+                };
+                InlineOutcome::Inline(styled(style, children))
+            }
+            "cite" => {
+                let key = self.required_argument(command).unwrap_or_default().trim().to_string();
+                if key.is_empty() {
+                    self.loss("import.tex.empty_citation", "citation command has no key", SemanticStatus::Partial);
+                    return InlineOutcome::Dropped;
+                }
+                InlineOutcome::Inline(Inline::Citation { key, display: None })
+            }
+            "includegraphics" => {
+                let source = self.required_argument(command).unwrap_or_default().trim().to_string();
+                if source.is_empty() {
+                    self.loss("import.tex.empty_image_source", "image command has no target", SemanticStatus::Partial);
+                    return InlineOutcome::Dropped;
+                }
+                InlineOutcome::Inline(Inline::Image { source, alt: Vec::new(), title: None, asset: None })
+            }
+            "ref" => {
+                let label = self.required_argument(command).unwrap_or_default().trim().to_string();
+                self.loss(
+                    "import.tex.unresolved_reference",
+                    format!("reference target has no semantic node identity: {label}"),
+                    SemanticStatus::Unresolved,
+                );
+                InlineOutcome::Dropped
+            }
+            "label" => {
+                let label = self.required_argument(command).unwrap_or_default().trim().to_string();
+                self.loss(
+                    "import.tex.label_anchor",
+                    format!("label anchor is not representable as an inline semantic: {label}"),
+                    SemanticStatus::Partial,
+                );
+                InlineOutcome::Dropped
+            }
+            _ => InlineOutcome::Unknown,
+        }
+    }
+
+    fn lower_verb(&mut self, command: &TexCommand, sink: &mut Sink) {
+        let start = command.span.end;
+        let Some((content, _)) = self.verb_content(start) else {
+            self.loss("import.tex.verb_unterminated", "verb command has no closing delimiter", SemanticStatus::Partial);
+            self.push_block(
+                sink,
+                Block::Opaque {
+                    kind: "tex.verb".into(),
+                    payload_hint: self.raw(command.span.start, command.span.end).trim().to_string(),
+                    status: SemanticStatus::Partial,
+                },
+            );
+            return;
+        };
+        self.push_block(sink, Block::Code { language: None, content });
+    }
+
+    /// Number of bytes occupied by a `\verb<delimiter>...<delimiter>` body.
+    fn verb_consumed_len(&self, start: usize) -> usize {
+        match self.verb_content(start) {
+            Some((_, end)) => end.saturating_sub(start),
+            None => 0,
+        }
+    }
+
+    fn verb_content(&self, start: usize) -> Option<(String, usize)> {
+        let rest = self.source.get(start..)?;
+        let delimiter = rest.chars().next()?;
+        if delimiter.is_alphanumeric() || delimiter.is_whitespace() {
+            return None;
+        }
+        let body_start = start + delimiter.len_utf8();
+        let body = self.source.get(body_start..)?;
+        let end = body.find(delimiter)?;
+        Some((body[..end].to_string(), body_start + end + delimiter.len_utf8()))
+    }
+
+    fn required_argument(&self, command: &TexCommand) -> Option<&'a str> {
+        command.arguments.iter().find_map(|argument| match argument {
+            TexArgument::Required(root) => Some(self.argument_fragment(root)),
+            TexArgument::Optional(_) => None,
+        })
+    }
+
+    fn argument_fragment(&self, root: &TexRoot) -> &'a str {
+        let raw = self.raw(root.span.start, root.span.end).trim();
+        let raw = raw.strip_prefix('{').or_else(|| raw.strip_prefix('[')).unwrap_or(raw);
+        raw.strip_suffix('}').or_else(|| raw.strip_suffix(']')).unwrap_or(raw)
+    }
+
+    fn code_environment_content(&self, start: usize, end: usize) -> String {
+        let raw = self.raw(start, end);
+        let Some(header_end) = begin_header_end(raw) else {
+            return raw.to_string();
+        };
+        let Some(footer_start) = raw.rfind("\\end{") else {
+            return raw[header_end.min(raw.len())..].trim_matches('\n').to_string();
+        };
+        if footer_start <= header_end {
+            return String::new();
+        }
+        raw[header_end..footer_start].trim_matches('\n').to_string()
+    }
+
+    fn lower_list(&mut self, name: &str, start: usize, end: usize, sink: &mut Sink) {
+        let raw = self.raw(start, end);
+        let Some(header_end) = begin_header_end(raw) else {
+            self.loss("import.tex.malformed_list", "list environment header is not readable", SemanticStatus::Partial);
+            return;
+        };
+        let Some(footer_start) = raw.rfind("\\end{") else {
+            self.loss("import.tex.malformed_list", "list environment has no closing marker", SemanticStatus::Partial);
+            return;
+        };
+        if footer_start <= header_end {
+            self.loss("import.tex.empty_list", "list environment has no body", SemanticStatus::Partial);
+            return;
+        }
+        let interior = &raw[header_end..footer_start];
+        let slices = split_list_items(interior);
+        if slices.is_empty() {
+            self.loss("import.tex.list_without_items", "list environment contains no item marker", SemanticStatus::Partial);
+            return;
+        }
+        let ordered = name == "enumerate";
+        let mut items = Vec::new();
+        for (index, slice) in slices.into_iter().enumerate() {
+            if slice.label.is_some() {
+                self.loss(
+                    "import.tex.description_label",
+                    "custom list item marker is not represented in the list item content",
+                    SemanticStatus::Partial,
+                );
+            }
+            let fragment = interior.get(slice.start..slice.end).unwrap_or("").trim();
+            let mut item_sink = Sink::item();
+            self.lower_fragment_into(fragment, &mut item_sink);
+            item_sink.flush(&mut self.graph);
+            items.push(ListItem {
+                content: item_sink.item_content,
+                children: item_sink.children,
+                number: ordered.then_some((index + 1) as u32),
+            });
+        }
+        self.push_block(sink, Block::List { ordered, items });
+    }
+
+    fn lower_table(&mut self, start: usize, end: usize, sink: &mut Sink) {
+        let raw = self.raw(start, end);
+        let Some(header_end) = begin_header_end(raw) else {
+            self.loss("import.tex.malformed_table", "tabular environment header is not readable", SemanticStatus::Partial);
+            return;
+        };
+        let Some(footer_start) = raw.rfind("\\end{") else {
+            self.loss("import.tex.malformed_table", "tabular environment has no closing marker", SemanticStatus::Partial);
+            return;
+        };
+        if footer_start <= header_end {
+            self.loss("import.tex.empty_table", "tabular environment has no body", SemanticStatus::Partial);
+            return;
+        }
+        let body_start = column_spec_end(raw, header_end).unwrap_or(header_end);
+        if body_start >= footer_start {
+            self.loss("import.tex.empty_table", "tabular environment has no rows", SemanticStatus::Partial);
+            return;
+        }
+        let interior = &raw[body_start..footer_start];
+        if interior.contains("\\multicolumn") || interior.contains("\\multirow") {
+            self.loss(
+                "import.tex.table_spans",
+                "multi-column or multi-row table cell spans are not represented by the IR table cells",
+                SemanticStatus::Partial,
+            );
+        }
+        let mut rows = Vec::new();
+        for row in split_table_rows(interior) {
+            let cells = split_table_cells(row)
+                .into_iter()
+                .map(|cell| TableCell { content: self.lower_inline_fragment(cell), colspan: 1, rowspan: 1 })
+                .collect();
+            rows.push(TableRow { is_header: false, cells });
+        }
+        if rows.is_empty() {
+            self.loss("import.tex.empty_table", "tabular environment produced no table rows", SemanticStatus::Partial);
+        }
+        self.push_block(sink, Block::Table { caption: None, rows });
+    }
+
+    fn lower_dropped_regions(&mut self, start: usize, end: usize, sink: &mut Sink) {
+        if start >= end {
+            return;
+        }
+        let mut cursor = start;
+        while cursor < end {
+            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{")) else {
+                return;
+            };
+            let begin = cursor + offset;
+            let Some((name, _)) = parse_begin(&self.source[begin..end]) else {
+                cursor = begin + 7;
+                continue;
+            };
+            if !matches!(name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
+                cursor = begin + 7;
+                continue;
+            }
+            let Some(environment_end) = matching_environment_end(self.source, begin, end) else {
+                self.loss(
+                    "import.tex.unclosed_environment",
+                    format!("environment {name} has no closing marker"),
+                    SemanticStatus::Unsupported,
+                );
+                return;
+            };
+            match name.as_str() {
+                "itemize" | "enumerate" | "description" => self.lower_list(&name, begin, environment_end, sink),
+                _ => self.lower_table(begin, environment_end, sink),
+            }
+            cursor = environment_end;
+        }
+    }
+
+    fn lower_fragment_into(&mut self, fragment: &str, sink: &mut Sink) {
+        let Ok(root) = parse_tex("<fragment>", fragment) else {
+            self.loss("import.tex.fragment_parse_failed", "nested TeX fragment could not be parsed", SemanticStatus::Partial);
+            return;
+        };
+        let mut inner = TexLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: fragment };
+        inner.lower_root(&root.items, 0, fragment.len(), sink);
+        self.graph = inner.graph;
+    }
+
+    fn lower_inline_fragment(&mut self, fragment: &str) -> Vec<Inline> {
+        let Ok(root) = parse_tex("<inline>", fragment) else {
+            self.loss("import.tex.fragment_parse_failed", "inline TeX fragment could not be parsed", SemanticStatus::Partial);
+            return Vec::new();
+        };
+        let mut inner = TexLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: fragment };
+        let mut inlines = inner.collect_inlines(&root.items, 0, fragment.len());
+        trim_inlines(&mut inlines);
+        self.graph = inner.graph;
+        inlines
+    }
+
+    fn collect_inlines(&mut self, items: &[TexItem], region_start: usize, region_end: usize) -> Vec<Inline> {
+        let mut inlines = Vec::new();
+        let mut cursor = region_start;
+        let mut skip_until = 0usize;
+        for item in items {
+            let Some((start, end)) = item_span(item) else {
+                continue;
+            };
+            if start < skip_until {
+                continue;
+            }
+            self.record_dropped_regions_loss(cursor, start);
+            match item {
+                TexItem::Text { content, .. } => push_text_inlines(&mut inlines, content),
+                TexItem::Comment { .. } => {}
+                TexItem::Group(group) => {
+                    let nested = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
+                    inlines.extend(nested);
+                }
+                TexItem::Superscript(superscript) => {
+                    let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end);
+                    inlines.push(Inline::Styled { style: "superscript".into(), children });
+                }
+                TexItem::Subscript(subscript) => {
+                    let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end);
+                    inlines.push(Inline::Styled { style: "subscript".into(), children });
+                }
+                TexItem::Math(math) => {
+                    let (content, _) = math_source(self.raw(math.span.start, math.span.end));
+                    inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
+                }
+                TexItem::Command(command) => {
+                    let raw = self.raw(command.span.start, command.span.end);
+                    if command_name(raw) == "verb" {
+                        if let Some((content, end)) = self.verb_content(command.span.end) {
+                            skip_until = end;
+                            inlines.push(Inline::InlineCode { text: content });
+                        }
+                        else {
+                            self.loss("import.tex.verb_unterminated", "verb command has no closing delimiter", SemanticStatus::Partial);
+                        }
+                        continue;
+                    }
+                    match self.inline_from_command(command) {
+                        InlineOutcome::Inline(inline) => inlines.push(inline),
+                        InlineOutcome::Dropped => {}
+                        InlineOutcome::Unknown => self.loss(
+                            "import.tex.unsupported_command",
+                            format!("inline command has no semantic mapping: {}", raw.trim()),
+                            SemanticStatus::Unsupported,
+                        ),
+                    }
+                }
+                TexItem::Environment(environment) => {
+                    let raw = self.raw(environment.span.start, environment.span.end);
+                    let name = environment_name(raw);
+                    if matches!(name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
+                        self.loss(
+                            "import.tex.block_in_inline_context",
+                            format!("block environment {name} cannot be represented as inline content"),
+                            SemanticStatus::Partial,
+                        );
+                    }
+                    else if matches!(name.as_str(), "verbatim" | "lstlisting" | "minted" | "Verbatim") {
+                        let text = self.code_environment_content(environment.span.start, environment.span.end);
+                        inlines.push(Inline::InlineCode { text });
+                    }
+                    else {
+                        self.loss(
+                            "import.tex.unsupported_command",
+                            format!("environment has no inline semantic mapping: {name}"),
+                            SemanticStatus::Unsupported,
+                        );
+                    }
+                }
+            }
+            cursor = end;
+        }
+        self.record_dropped_regions_loss(cursor, region_end);
+        inlines
+    }
+
+    fn record_dropped_regions_loss(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+        let mut cursor = start;
+        while cursor < end {
+            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{")) else {
+                return;
+            };
+            let begin = cursor + offset;
+            let Some((name, _)) = parse_begin(&self.source[begin..end]) else {
+                cursor = begin + 7;
+                continue;
+            };
+            if matches!(name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
+                self.loss(
+                    "import.tex.block_in_inline_context",
+                    format!("block environment {name} cannot be represented as inline content"),
+                    SemanticStatus::Partial,
+                );
+            }
+            let Some(environment_end) = matching_environment_end(self.source, begin, end) else {
+                return;
+            };
+            cursor = environment_end;
+        }
+    }
+
+    fn push_text(&mut self, text: &str, sink: &mut Sink) {
+        for (index, chunk) in split_paragraphs(text).into_iter().enumerate() {
+            if index > 0 {
+                sink.flush(&mut self.graph);
+            }
+            push_text_inlines(&mut sink.inlines, chunk);
+        }
+    }
+}
+
+fn item_span(item: &TexItem) -> Option<(usize, usize)> {
+    match item {
+        TexItem::Command(command) => Some((command.span.start, command.span.end)),
+        TexItem::Environment(environment) => Some((environment.span.start, environment.span.end)),
+        TexItem::Group(group) => Some((group.span.start, group.span.end)),
+        TexItem::Math(math) => Some((math.span.start, math.span.end)),
+        TexItem::Superscript(superscript) => Some((superscript.span.start, superscript.span.end)),
+        TexItem::Subscript(subscript) => Some((subscript.span.start, subscript.span.end)),
+        TexItem::Text { span, .. } | TexItem::Comment { span, .. } => Some((span.start, span.end)),
+    }
+}
+
+fn command_name(raw: &str) -> String {
+    let name = raw.trim_start().strip_prefix('\\').unwrap_or(raw.trim_start());
+    let Some(first) = name.chars().next() else {
+        return String::new();
+    };
+    if first.is_ascii_alphabetic() {
+        name.chars().take_while(|character| character.is_ascii_alphabetic()).collect()
+    }
+    else {
+        first.to_string()
+    }
+}
+
+fn environment_name(raw: &str) -> String {
+    parse_begin(raw.trim_start()).map(|(name, _)| name).unwrap_or_default()
+}
+
+/// Parse a `\begin{name}` header at the start of `raw`.
+fn parse_begin(raw: &str) -> Option<(String, usize)> {
+    let rest = raw.strip_prefix("\\begin{")?;
+    let closing = rest.find('}')?;
+    let name = rest[..closing].trim().to_string();
+    Some((name, "\\begin{".len() + closing + 1))
+}
+
+fn begin_header_end(raw: &str) -> Option<usize> {
+    parse_begin(raw.trim_start()).map(|(_, end)| end + (raw.len() - raw.trim_start().len()))
+}
+
+fn section_level(name: &str) -> Option<u8> {
+    match name {
+        "part" | "chapter" | "section" => Some(1),
+        "subsection" => Some(2),
+        "subsubsection" => Some(3),
+        _ => None,
+    }
+}
+
+fn is_macro_definition(name: &str) -> bool {
+    matches!(
+        name,
+        "newcommand"
+            | "renewcommand"
+            | "providecommand"
+            | "declarerobustcommand"
+            | "def"
+            | "edef"
+            | "gdef"
+            | "xdef"
+            | "let"
+            | "newenvironment"
+            | "renewenvironment"
+    )
+}
+
+/// Result of mapping a TeX command to an inline semantic.
+enum InlineOutcome {
+    Inline(Inline),
+    /// The command was understood and intentionally produces no inline node.
+    Dropped,
+    /// The command has no inline semantic mapping.
+    Unknown,
+}
+
+fn math_source(raw: &str) -> (String, bool) {
+    let trimmed = raw.trim();
+    if let Some(inner) = trimmed.strip_prefix("$$").and_then(|value| value.strip_suffix("$$")) {
+        return (inner.trim().to_string(), true);
+    }
+    if let Some(inner) = trimmed.strip_prefix("\\[").and_then(|value| value.strip_suffix("\\]")) {
+        return (inner.trim().to_string(), true);
+    }
+    if trimmed.starts_with("\\begin{") {
+        return (trimmed.to_string(), true);
+    }
+    if let Some(inner) = trimmed.strip_prefix('$').and_then(|value| value.strip_suffix('$')) {
+        return (inner.trim().to_string(), false);
+    }
+    (trimmed.to_string(), false)
+}
+
+fn split_paragraphs(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'\n' {
+            let mut next = index + 1;
+            while next < bytes.len() && matches!(bytes[next], b' ' | b'\t' | b'\r') {
+                next += 1;
+            }
+            if next < bytes.len() && bytes[next] == b'\n' {
+                chunks.push(&text[start..index]);
+                index = next + 1;
+                start = index;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    chunks.push(&text[start..]);
+    chunks
+}
+
+fn push_text_inlines(inlines: &mut Vec<Inline>, text: &str) {
+    let normalized = normalize_text(text);
+    if normalized.is_empty() {
+        return;
+    }
+    if inlines.is_empty() {
+        let trimmed = normalized.trim_start();
+        if !trimmed.is_empty() {
+            push_inline_text(inlines, trimmed);
+        }
+        return;
+    }
+    if last_inline_ends_with_space(inlines) && normalized.starts_with(' ') {
+        push_inline_text(inlines, &normalized[1..]);
+        return;
+    }
+    push_inline_text(inlines, &normalized);
+}
+
+fn normalize_text(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut pending_space = false;
+    for character in text.chars() {
+        if character.is_whitespace() {
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+        if pending_space {
+            normalized.push(' ');
+            pending_space = false;
+        }
+        normalized.push(character);
+    }
+    if pending_space {
+        normalized.push(' ');
+    }
+    if normalized.is_empty() && !text.is_empty() {
+        return " ".into();
+    }
+    normalized
+}
+
+fn push_inline_text(inlines: &mut Vec<Inline>, text: &str) {
+    if let Some(Inline::Text { text: previous }) = inlines.last_mut() {
+        previous.push_str(text);
+        return;
+    }
+    inlines.push(Inline::Text { text: text.into() });
+}
+
+fn last_inline_ends_with_space(inlines: &[Inline]) -> bool {
+    matches!(inlines.last(), Some(Inline::Text { text }) if text.ends_with(' '))
+}
+
+fn trim_inlines(inlines: &mut Vec<Inline>) {
+    if let Some(Inline::Text { text }) = inlines.last_mut() {
+        let trimmed = text.trim_end().len();
+        text.truncate(trimmed);
+    }
+    if matches!(inlines.last(), Some(Inline::Text { text }) if text.is_empty()) {
+        inlines.pop();
+    }
+    if let Some(Inline::Text { text }) = inlines.first_mut() {
+        if text.starts_with(' ') {
+            *text = text.trim_start().to_string();
+        }
+    }
+    if matches!(inlines.first(), Some(Inline::Text { text }) if text.is_empty()) {
+        inlines.remove(0);
+    }
+}
+
+struct ListItemSlice {
+    start: usize,
+    end: usize,
+    label: Option<String>,
+}
+
+/// Split a list environment body on top-level `\item` markers.
+fn split_list_items(interior: &str) -> Vec<ListItemSlice> {
+    let bytes = interior.as_bytes();
+    let mut markers = Vec::new();
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+                continue;
+            }
+            b'\\' => {
+                if interior[index..].starts_with("\\begin{") {
+                    depth += 1;
+                    index += "\\begin{".len();
+                    continue;
+                }
+                if interior[index..].starts_with("\\end{") {
+                    depth = depth.saturating_sub(1);
+                    index += "\\end{".len();
+                    continue;
+                }
+                if interior[index..].starts_with("\\item") && !is_command_continuation(bytes.get(index + 5)) {
+                    let after = index + "\\item".len();
+                    if depth == 0 {
+                        let (label, content_start) = optional_label(interior, after);
+                        markers.push((index, content_start, label));
+                    }
+                    index = after;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    let mut slices = Vec::new();
+    for (position, (marker_start, content_start, label)) in markers.iter().enumerate() {
+        let end = markers.get(position + 1).map(|next| next.0).unwrap_or(interior.len());
+        let end = end.max(*marker_start).max(*content_start).min(interior.len());
+        slices.push(ListItemSlice { start: *content_start, end, label: label.clone() });
+    }
+    slices
+}
+
+fn is_command_continuation(byte: Option<&u8>) -> bool {
+    byte.is_some_and(|value| value.is_ascii_alphabetic())
+}
+
+fn optional_label(interior: &str, start: usize) -> (Option<String>, usize) {
+    let rest = &interior[start..];
+    let skipped = rest.len() - rest.trim_start().len();
+    let after_spaces = &rest[skipped..];
+    if let Some(body) = after_spaces.strip_prefix('[') {
+        if let Some(closing) = body.find(']') {
+            let label = body[..closing].trim().to_string();
+            return (Some(label), start + skipped + 1 + closing + 1);
+        }
+    }
+    (None, start)
+}
+
+/// Skip the required argument after `\begin{tabular}` (the column spec).
+fn column_spec_end(raw: &str, header_end: usize) -> Option<usize> {
+    let mut index = header_end;
+    let bytes = raw.as_bytes();
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if index < bytes.len() && bytes[index] == b'[' {
+        let mut depth = 0usize;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        index += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+    }
+    if index >= bytes.len() || bytes[index] != b'{' {
+        return Some(index);
+    }
+    let mut depth = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            b'\\' => {
+                index += 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn split_table_rows(interior: &str) -> Vec<&str> {
+    let mut rows = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    let bytes = interior.as_bytes();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+                continue;
+            }
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            b'\\' => {
+                if interior[index..].starts_with("\\begin{") {
+                    depth += 1;
+                    index += "\\begin{".len();
+                    continue;
+                }
+                if interior[index..].starts_with("\\end{") {
+                    depth = depth.saturating_sub(1);
+                    index += "\\end{".len();
+                    continue;
+                }
+                if depth == 0 && interior[index..].starts_with("\\\\") {
+                    rows.push(&interior[start..index]);
+                    index += 2;
+                    if index < bytes.len() && bytes[index] == b'[' {
+                        while index < bytes.len() && bytes[index] != b']' {
+                            index += 1;
+                        }
+                        index = (index + 1).min(bytes.len());
+                    }
+                    start = index;
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    rows.push(&interior[start..]);
+    rows.into_iter().map(strip_table_decorations).filter(|row| !row.trim().is_empty()).collect()
+}
+
+fn strip_table_decorations(row: &str) -> &str {
+    let mut row = row.trim();
+    loop {
+        let trimmed = strip_leading_decoration(row);
+        if trimmed.len() == row.len() {
+            break;
+        }
+        row = trimmed.trim_start();
+    }
+    row = row.trim_end();
+    loop {
+        let trimmed = strip_trailing_decoration(row);
+        if trimmed.len() == row.len() {
+            break;
+        }
+        row = trimmed.trim_end();
+    }
+    row
+}
+
+fn strip_leading_decoration(row: &str) -> &str {
+    for decoration in ["\\hline", "\\toprule", "\\midrule", "\\bottomrule", "\\hline"] {
+        if let Some(rest) = row.strip_prefix(decoration) {
+            return rest;
+        }
+    }
+    if let Some(rest) = row.strip_prefix("\\cline") {
+        if let Some(closing) = rest.find('}') {
+            return &rest[closing + 1..];
+        }
+    }
+    row
+}
+
+fn strip_trailing_decoration(row: &str) -> &str {
+    for decoration in ["\\hline", "\\toprule", "\\midrule", "\\bottomrule"] {
+        if let Some(rest) = row.strip_suffix(decoration) {
+            return rest;
+        }
+    }
+    row
+}
+
+fn split_table_cells(row: &str) -> Vec<&str> {
+    let mut cells = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    let bytes = row.as_bytes();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            b'\\' => {
+                if row[index..].starts_with("\\begin{") {
+                    depth += 1;
+                    index += "\\begin{".len();
+                    continue;
+                }
+                if row[index..].starts_with("\\end{") {
+                    depth = depth.saturating_sub(1);
+                    index += "\\end{".len();
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+            b'&' if depth == 0 => {
+                cells.push(&row[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    cells.push(&row[start..]);
+    cells
+}
+
+/// Find the matching `\end{...}` for the environment beginning at `begin`.
+fn matching_environment_end(source: &str, begin: usize, limit: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = begin;
+    while index < limit {
+        let rest = &source[index..limit];
+        if rest.starts_with("\\begin{") {
+            depth += 1;
+            index += "\\begin{".len();
+            continue;
+        }
+        if rest.starts_with("\\end{") {
+            depth = depth.saturating_sub(1);
+            let Some(closing) = source[index..limit].find('}') else {
+                return None;
+            };
+            index += closing + 1;
+            if depth == 0 {
+                return Some(index);
+            }
+            continue;
+        }
+        index += 1;
+    }
+    None
+}

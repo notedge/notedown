@@ -44,5 +44,7 @@ pub fn capabilities() -> Vec<FormatCapability> {
     }
     #[cfg(feature = "epub")]
     capabilities.push(FormatCapability { id: "epub", direction: FormatDirection::Import, status: FormatStatus::Partial });
+    #[cfg(feature = "tex")]
+    capabilities.push(FormatCapability { id: "tex", direction: FormatDirection::Import, status: FormatStatus::Partial });
     capabilities
 }

@@ -25,3 +25,6 @@ pub mod notedown;
 /// PDF import.
 #[cfg(feature = "pdf")]
 pub mod pdf;
+/// TeX/LaTeX import via `oak-tex`.
+#[cfg(feature = "tex")]
+pub mod tex;

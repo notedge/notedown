@@ -1,5 +1,5 @@
 use davinci_scene::{
-    Bounds, Color, MarkerShape, NodeKind, PathData, Point, Rect, Scene, SceneNode, ShapeStyle, Size, TextAnchor, TextStyle, Transform,
+    Bounds, Color, DisplayScene, MarkerShape, NodeKind, PathData, Point, Rect, SceneNode, ShapeStyle, Size, TextAnchor, TextStyle, Transform,
 };
 
 fn shape() -> ShapeStyle {
@@ -76,7 +76,7 @@ fn path_bounds_use_control_point_hull() {
 
 #[test]
 fn scene_bounds_union_nodes() {
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     assert_eq!(scene.bounds(), None);
     scene.push(SceneNode::new(NodeKind::Rect { rect: Rect::new(10.0, 10.0, 10.0, 10.0), style: shape() }));
     scene.push(SceneNode::new(NodeKind::Ellipse { center: Point::new(50.0, 50.0), radii: Size::new(5.0, 5.0), style: shape() }));

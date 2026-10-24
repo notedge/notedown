@@ -20,7 +20,7 @@
 //! Scenes stay immutable. Hover, focus, press, selection, viewport, parameters,
 //! and playback live only in [`RuntimeState`], so interaction can never pollute
 //! document semantics. Conversely, runtime fields are never written into
-//! `davinci_scene::SceneNode`, which only carries geometry and display
+//! `davinci_scene::SceneNode`, which only carries resolved geometry and display
 //! attributes.
 
 mod action;

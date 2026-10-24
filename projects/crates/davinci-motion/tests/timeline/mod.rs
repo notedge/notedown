@@ -1,11 +1,11 @@
 //! Timeline tests: advancing, sampling, completion, and interruption.
 
 use davinci_motion::{InterruptionPolicy, Timeline, plan_transition, sample};
-use davinci_scene::Scene;
+use davinci_scene::DisplayScene;
 
 use crate::common::{find, linear_intent, rect, scene, x};
 
-fn pair(start: f64, end: f64) -> (Scene, Scene) {
+fn pair(start: f64, end: f64) -> (DisplayScene, DisplayScene) {
     (scene(vec![rect("a", start, 1.0)]), scene(vec![rect("a", end, 1.0)]))
 }
 

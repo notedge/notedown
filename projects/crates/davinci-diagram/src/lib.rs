@@ -10,7 +10,7 @@
 //!    size, placed rectangles, orthogonal edge routes, cluster frames, and
 //!    diagnostics. A plan carries geometry only, never SVG strings, drawing
 //!    commands, or renderer instructions.
-//! 3. [`davinci_scene::Scene`] is the display scene produced by
+//! 3. [`davinci_scene::DisplayScene`] is the display scene produced by
 //!    [`render::render`] from a plan. A scene holds geometry and display
 //!    attributes only.
 //!
@@ -37,7 +37,7 @@ pub use error::DiagramError;
 #[cfg(feature = "mermaid")]
 pub use parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid};
 
-use davinci_scene::Scene;
+use davinci_scene::DisplayScene;
 use davinci_types::Diagnostic;
 
 /// A complete lowering result: the layout plan, its scene, and diagnostics.
@@ -46,7 +46,7 @@ pub struct LoweredDiagram {
     /// The deterministic compile result.
     pub plan: plan::DiagramLayoutPlan,
     /// The display scene rendered from [`LoweredDiagram::plan`].
-    pub scene: Scene,
+    pub scene: DisplayScene,
     /// Non-fatal loss and approximation records from compilation.
     pub diagnostics: Vec<Diagnostic>,
 }

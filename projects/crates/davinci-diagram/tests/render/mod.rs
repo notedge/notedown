@@ -4,7 +4,7 @@ use davinci_diagram::{
     render::render,
     spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
 };
-use davinci_scene::{NodeKind, Scene, SceneNode, SemanticRole};
+use davinci_scene::{DisplayScene, NodeKind, SceneNode, SemanticRole};
 
 fn node(id: &str) -> DiagramNode {
     DiagramNode { id: id.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None }
@@ -35,7 +35,7 @@ fn example_plan() -> DiagramLayoutPlan {
     compile(&example_spec(), &LayoutOptions::default())
 }
 
-fn scene_node<'a>(scene: &'a Scene, id: &str) -> &'a SceneNode {
+fn scene_node<'a>(scene: &'a DisplayScene, id: &str) -> &'a SceneNode {
     scene.nodes.iter().find(|node| node.id.as_deref() == Some(id)).unwrap_or_else(|| panic!("missing scene node `{id}`"))
 }
 

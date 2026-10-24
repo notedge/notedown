@@ -1,4 +1,4 @@
-use davinci_scene::{Color, NodeKind, Rect, Scene, SceneNode, ShapeStyle, Size, Transform};
+use davinci_scene::{Color, DisplayScene, NodeKind, Rect, SceneNode, ShapeStyle, Size, Transform};
 
 #[test]
 fn nested_group_transform_is_composed_into_svg_matrix() {
@@ -6,7 +6,7 @@ fn nested_group_transform_is_composed_into_svg_matrix() {
         .with_transform(Transform::translate(5.0, 0.0));
     let group = SceneNode::group(vec![child]).with_transform(Transform::translate(20.0, 10.0));
 
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     scene.push(group);
     let svg = scene.to_svg().expect("valid scene");
 

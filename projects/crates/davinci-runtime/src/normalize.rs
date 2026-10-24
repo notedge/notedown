@@ -1,6 +1,6 @@
 //! Conversion from host input events to semantic actions.
 
-use davinci_scene::{Point, Scene};
+use davinci_scene::{DisplayScene, Point};
 
 use crate::{Action, NormalizedEvent, RuntimeState, hit_test};
 
@@ -21,7 +21,7 @@ const WHEEL_ZOOM_RATE: f64 = 0.0015;
 /// an explicit target tests the given position; when nothing is hit no action
 /// is produced.
 #[must_use]
-pub fn normalize(event: &NormalizedEvent, state: &RuntimeState, scene: &Scene) -> Vec<Action> {
+pub fn normalize(event: &NormalizedEvent, state: &RuntimeState, scene: &DisplayScene) -> Vec<Action> {
     match event {
         NormalizedEvent::PointerMove { x, y } => {
             let target = hit_test(scene, Point::new(*x, *y)).map(|hit| hit.id);

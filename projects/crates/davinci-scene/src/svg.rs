@@ -7,14 +7,14 @@ use davinci_types::{Point, Rect, Size, Transform};
 use crate::{
     error::SceneError,
     path::{PathCommand, PathData},
-    scene::{MarkerShape, NodeKind, Scene, SceneNode, ShapeStyle, TextStyle},
+    scene::{DisplayScene, MarkerShape, NodeKind, SceneNode, ShapeStyle, TextStyle},
 };
 
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
-pub(crate) fn validate_scene(scene: &Scene) -> Result<(), SceneError> {
+pub(crate) fn validate_scene(scene: &DisplayScene) -> Result<(), SceneError> {
     validate_extent(scene.size, "scene.size")?;
     for (index, node) in scene.nodes.iter().enumerate() {
         validate_node(node, &format!("scene.nodes[{index}]"))?;
@@ -164,7 +164,7 @@ fn validate_finite(value: f64, context: &str) -> Result<(), SceneError> {
 // Writer
 // ---------------------------------------------------------------------------
 
-pub(crate) fn write_svg(scene: &Scene) -> Result<String, SceneError> {
+pub(crate) fn write_svg(scene: &DisplayScene) -> Result<String, SceneError> {
     validate_scene(scene)?;
 
     let mut out = String::new();

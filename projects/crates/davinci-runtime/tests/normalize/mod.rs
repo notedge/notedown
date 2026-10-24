@@ -1,10 +1,10 @@
 //! Event normalization from host input to semantic actions.
 
 use davinci_runtime::{Action, NormalizedEvent, RuntimeState, normalize};
-use davinci_scene::{NodeKind, Point, Rect, Scene, SceneNode, ShapeStyle, Size};
+use davinci_scene::{DisplayScene, NodeKind, Point, Rect, SceneNode, ShapeStyle, Size};
 
-fn scene() -> Scene {
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+fn scene() -> DisplayScene {
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     scene.push(SceneNode::new(NodeKind::Rect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), style: ShapeStyle::default() }).with_id("a"));
     scene
 }

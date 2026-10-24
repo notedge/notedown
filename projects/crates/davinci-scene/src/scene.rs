@@ -340,17 +340,17 @@ impl SceneNode {
     }
 }
 
-/// A generic vector scene: a canvas size plus ordered root nodes.
+/// A resolved display scene: a canvas size plus ordered resolved root nodes.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Scene {
+pub struct DisplayScene {
     /// Natural canvas size. `to_svg` emits `viewBox="0 0 width height"`.
     pub size: Size,
     /// Root nodes in paint order.
     pub nodes: Vec<SceneNode>,
 }
 
-impl Scene {
-    /// Create an empty scene with a canvas size.
+impl DisplayScene {
+    /// Create an empty display scene with a canvas size.
     pub fn new(size: Size) -> Self {
         Self { size, nodes: Vec::new() }
     }

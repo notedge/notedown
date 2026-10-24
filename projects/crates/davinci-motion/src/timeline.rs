@@ -1,6 +1,6 @@
 //! Host-driven timeline state over a transition plan.
 
-use davinci_scene::Scene;
+use davinci_scene::DisplayScene;
 
 use crate::{
     plan::{TransitionPlan, plan_transition},
@@ -17,16 +17,16 @@ pub struct Timeline {
     /// Plan currently being sampled.
     pub plan: TransitionPlan,
     /// Scene supplying exiting subtrees.
-    pub previous: Scene,
+    pub previous: DisplayScene,
     /// Scene supplying the output tree and update targets.
-    pub next: Scene,
+    pub next: DisplayScene,
     /// Elapsed seconds since the current plan started, clamped to the duration.
     pub elapsed: f64,
 }
 
 impl Timeline {
     /// Start a timeline at time zero.
-    pub fn new(previous: Scene, plan: TransitionPlan, next: Scene) -> Self {
+    pub fn new(previous: DisplayScene, plan: TransitionPlan, next: DisplayScene) -> Self {
         Self { plan, previous, next, elapsed: 0.0 }
     }
 
@@ -34,14 +34,14 @@ impl Timeline {
     ///
     /// Negative deltas move backwards. The elapsed time is clamped to
     /// `0.0..=duration`, so overshooting lands exactly on the final scene.
-    pub fn advance(&mut self, delta: f64) -> Scene {
+    pub fn advance(&mut self, delta: f64) -> DisplayScene {
         let duration = self.duration();
         self.elapsed = (self.elapsed + delta).clamp(0.0, duration);
         self.scene_at(self.elapsed)
     }
 
     /// Sample the current plan at `time` without changing elapsed time.
-    pub fn scene_at(&self, time: f64) -> Scene {
+    pub fn scene_at(&self, time: f64) -> DisplayScene {
         sample(&self.plan, &self.previous, &self.next, time)
     }
 
@@ -64,7 +64,7 @@ impl Timeline {
     ///   the supplied plan are replaced by the rebuilt ones.
     /// - `JumpToEnd` installs the supplied plan, moves elapsed time to the
     ///   duration, and returns the final next scene.
-    pub fn interrupt(&mut self, plan: TransitionPlan, next: Scene, current: Scene) -> Scene {
+    pub fn interrupt(&mut self, plan: TransitionPlan, next: DisplayScene, current: DisplayScene) -> DisplayScene {
         match plan.intent.interruption {
             crate::InterruptionPolicy::CancelAndRestart => {
                 self.plan = plan;

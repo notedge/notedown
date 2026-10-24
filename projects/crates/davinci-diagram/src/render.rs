@@ -1,11 +1,12 @@
 //! Deterministic scene rendering for a diagram layout plan.
 //!
-//! Rendering only translates final plan geometry into [`Scene`] nodes. It never
-//! re-runs layout, measures text, chooses scales, or emits backend commands.
+//! Rendering only translates final plan geometry into [`DisplayScene`] nodes.
+//! It never re-runs layout, measures text, chooses scales, or emits backend
+//! commands.
 
 use davinci_scene::{
-    Color, MarkerShape, NodeKind, PathData, Point, Rect, Scene, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, TextAnchor, TextStyle,
-    Transform,
+    Color, DisplayScene, MarkerShape, NodeKind, PathData, Point, Rect, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, TextAnchor,
+    TextStyle, Transform,
 };
 
 use crate::{
@@ -45,7 +46,7 @@ impl Default for RenderOptions {
 ///
 /// This uses [`RenderOptions::default`]. Equal plans always produce equal
 /// scenes and byte-identical SVG.
-pub fn render(plan: &DiagramLayoutPlan) -> Scene {
+pub fn render(plan: &DiagramLayoutPlan) -> DisplayScene {
     render_with_options(plan, &RenderOptions::default())
 }
 
@@ -56,8 +57,8 @@ pub fn render(plan: &DiagramLayoutPlan) -> Scene {
 /// region equal to the node rectangle. Edges are groups with
 /// [`SemanticRole::Edge`], edge labels use [`SemanticRole::EdgeLabel`], and
 /// cluster frames use [`SemanticRole::Cluster`].
-pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> Scene {
-    let mut scene = Scene::new(plan.canvas);
+pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> DisplayScene {
+    let mut scene = DisplayScene::new(plan.canvas);
 
     for cluster in &plan.clusters {
         push_cluster(&mut scene, cluster, options);
@@ -78,7 +79,7 @@ pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) ->
     scene
 }
 
-fn push_cluster(scene: &mut Scene, cluster: &PlacedCluster, options: &RenderOptions) {
+fn push_cluster(scene: &mut DisplayScene, cluster: &PlacedCluster, options: &RenderOptions) {
     let source = SourceRef::element(cluster.id.clone());
     scene.push(
         SceneNode::new(NodeKind::RoundedRect { rect: cluster.rect, radius: CLUSTER_RADIUS, style: cluster_style() })
@@ -102,7 +103,7 @@ fn push_cluster(scene: &mut Scene, cluster: &PlacedCluster, options: &RenderOpti
     }
 }
 
-fn push_edge(scene: &mut Scene, index: usize, edge: &RoutedEdge) {
+fn push_edge(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge) {
     let source = SourceRef::element(format!("{}->{}", edge.from.node, edge.to.node));
     let mut path = PathData::new().move_to(edge.points[0]);
     for &point in &edge.points[1..] {
@@ -132,13 +133,13 @@ fn push_edge(scene: &mut Scene, index: usize, edge: &RoutedEdge) {
     scene.push(SceneNode::group(children).with_id(format!("diagram-edge-{index}")).with_role(SemanticRole::Edge).with_source(source));
 }
 
-fn push_node(scene: &mut Scene, node: &PlacedNode) {
+fn push_node(scene: &mut DisplayScene, node: &PlacedNode) {
     let source = SourceRef::element(node.id.clone());
     let id = format!("diagram-node-{}", node.id);
     scene.push(node_shape(node).with_id(id.clone()).with_role(SemanticRole::Node).with_source(source).with_hit_region(node.rect));
 }
 
-fn push_node_label(scene: &mut Scene, node: &PlacedNode, options: &RenderOptions) {
+fn push_node_label(scene: &mut DisplayScene, node: &PlacedNode, options: &RenderOptions) {
     let source = SourceRef::element(node.id.clone());
     push_centered_text(
         scene,
@@ -151,7 +152,7 @@ fn push_node_label(scene: &mut Scene, node: &PlacedNode, options: &RenderOptions
     );
 }
 
-fn push_edge_label(scene: &mut Scene, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
+fn push_edge_label(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
     let (Some(label), Some(label_box)) = (edge.label.as_ref(), edge.label_box)
     else {
         return;
@@ -176,7 +177,15 @@ impl LabelKind {
     }
 }
 
-fn push_centered_text(scene: &mut Scene, id_prefix: &str, text: &str, center: Point, font_size: f64, kind: LabelKind, source: SourceRef) {
+fn push_centered_text(
+    scene: &mut DisplayScene,
+    id_prefix: &str,
+    text: &str,
+    center: Point,
+    font_size: f64,
+    kind: LabelKind,
+    source: SourceRef,
+) {
     let (fill, role) = kind.paint();
     let lines: Vec<&str> = text.split('\n').collect();
     for (index, line) in lines.iter().enumerate() {

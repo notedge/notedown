@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use davinci_scene::{NodeKind, Scene, SceneNode, Transform};
+use davinci_scene::{DisplayScene, NodeKind, SceneNode, Transform};
 
 /// Linear interpolation between two scalars with exact endpoints.
 ///
@@ -79,7 +79,7 @@ pub(crate) fn multiply_node_opacity(node: &mut SceneNode, factor: f64) {
 ///
 /// Duplicate ids keep the first occurrence, which is the contract every other
 /// operation in this crate uses.
-pub(crate) fn first_nodes(scene: &Scene) -> HashMap<&str, &SceneNode> {
+pub(crate) fn first_nodes(scene: &DisplayScene) -> HashMap<&str, &SceneNode> {
     let mut nodes = HashMap::new();
     for node in &scene.nodes {
         collect_first_nodes(node, &mut nodes);
@@ -100,7 +100,7 @@ fn collect_first_nodes<'a>(node: &'a SceneNode, nodes: &mut HashMap<&'a str, &'a
 
 /// Index path of the first occurrence of every id, where a root node is a
 /// one-element path and each further element is a child index inside a group.
-pub(crate) fn first_paths(scene: &Scene) -> HashMap<&str, Vec<usize>> {
+pub(crate) fn first_paths(scene: &DisplayScene) -> HashMap<&str, Vec<usize>> {
     let mut paths = HashMap::new();
     for (index, node) in scene.nodes.iter().enumerate() {
         let mut path = vec![index];
@@ -123,7 +123,7 @@ fn collect_first_paths<'a>(node: &'a SceneNode, path: &mut Vec<usize>, paths: &m
 }
 
 /// Ids in pre-order document order, keeping only the first occurrence.
-pub(crate) fn ordered_ids(scene: &Scene) -> Vec<&str> {
+pub(crate) fn ordered_ids(scene: &DisplayScene) -> Vec<&str> {
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
     for node in &scene.nodes {

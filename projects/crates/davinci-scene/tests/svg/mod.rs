@@ -1,9 +1,9 @@
 use davinci_scene::{
-    Color, MarkerShape, NodeKind, PathData, Point, Rect, ResourceRef, Scene, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, TextAnchor,
-    TextStyle, Transform,
+    Color, DisplayScene, MarkerShape, NodeKind, PathData, Point, Rect, ResourceRef, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef,
+    TextAnchor, TextStyle, Transform,
 };
 
-fn sample_scene() -> Scene {
+fn sample_scene() -> DisplayScene {
     let mut group = SceneNode::group(vec![
         SceneNode::new(NodeKind::Rect {
             rect: Rect::new(0.0, 0.0, 120.0, 60.0),
@@ -42,7 +42,7 @@ fn sample_scene() -> Scene {
     ]);
     group.transform = Transform::translate(20.0, 10.0);
 
-    let mut scene = Scene::new(Size::new(240.0, 160.0));
+    let mut scene = DisplayScene::new(Size::new(240.0, 160.0));
     scene.push(group);
     scene
 }
@@ -61,7 +61,7 @@ fn svg_output_is_byte_stable() {
 
 #[test]
 fn text_is_escaped_and_styled() {
-    let mut scene = Scene::new(Size::new(100.0, 50.0));
+    let mut scene = DisplayScene::new(Size::new(100.0, 50.0));
     scene.push(SceneNode::new(NodeKind::Text {
         position: Point::new(10.0, 20.0),
         text: "<A> & \"B\"".to_string(),
@@ -80,7 +80,7 @@ fn clips_get_stable_unique_ids() {
     let first = SceneNode::new(NodeKind::Rect { rect, style: ShapeStyle::filled(Color::BLACK) }).with_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
     let second = SceneNode::new(NodeKind::Rect { rect, style: ShapeStyle::filled(Color::BLACK) }).with_clip(Rect::new(2.0, 2.0, 5.0, 5.0));
 
-    let mut scene = Scene::new(Size::new(40.0, 40.0));
+    let mut scene = DisplayScene::new(Size::new(40.0, 40.0));
     scene.push(SceneNode::group(vec![first, second]));
     let svg = scene.to_svg().expect("valid scene");
 
@@ -92,7 +92,7 @@ fn clips_get_stable_unique_ids() {
 
 #[test]
 fn image_and_rounded_rect_emit_expected_attributes() {
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     scene.push(
         SceneNode::new(NodeKind::RoundedRect { rect: Rect::new(1.0, 2.0, 30.0, 40.0), radius: 6.0, style: ShapeStyle::filled(Color::WHITE) })
             .with_id("rounded"),
@@ -115,7 +115,7 @@ fn image_and_rounded_rect_emit_expected_attributes() {
 
 #[test]
 fn semantic_role_and_source_emit_data_attributes() {
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     scene.push(
         SceneNode::new(NodeKind::Rect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), style: ShapeStyle::filled(Color::WHITE) })
             .with_id("node-a")
@@ -133,7 +133,7 @@ fn semantic_role_and_source_emit_data_attributes() {
 
 #[test]
 fn ellipses_lines_and_diamond_markers_render() {
-    let mut scene = Scene::new(Size::new(50.0, 50.0));
+    let mut scene = DisplayScene::new(Size::new(50.0, 50.0));
     scene.push(SceneNode::new(NodeKind::Line {
         from: Point::new(0.0, 0.0),
         to: Point::new(10.0, 10.0),

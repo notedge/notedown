@@ -1,8 +1,8 @@
-use davinci_scene::{Color, NodeKind, Point, Rect, Scene, SceneNode, ShapeStyle, Size, TextStyle, Transform};
+use davinci_scene::{Color, DisplayScene, NodeKind, Point, Rect, SceneNode, ShapeStyle, Size, TextStyle, Transform};
 use davinci_types::codes;
 
-fn scene_with(node: SceneNode) -> Scene {
-    let mut scene = Scene::new(Size::new(100.0, 100.0));
+fn scene_with(node: SceneNode) -> DisplayScene {
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
     scene.push(node);
     scene
 }

@@ -3,7 +3,7 @@
 Runtime state and invalidation for DaVinci scenes.
 
 The crate keeps mutable interaction state outside the canonical graphic model. It normalizes host input, resolves a
-semantic target by hit testing a `davinci_scene::Scene`, reduces actions into a new `RuntimeState`, and reports which
+semantic target by hit testing a `davinci_scene::DisplayScene`, reduces actions into a new `RuntimeState`, and reports which
 compile scopes a change invalidates.
 
 ## Boundaries

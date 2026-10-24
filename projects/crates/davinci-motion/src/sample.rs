@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use davinci_scene::{NodeKind, Scene, SceneNode, Transform};
+use davinci_scene::{DisplayScene, NodeKind, SceneNode, Transform};
 
 use crate::{
     internal::{first_paths, lerp, lerp_transform, multiply_node_opacity, set_node_opacity},
@@ -43,7 +43,7 @@ use crate::{
 ///   opacity behavior.
 /// - Nodes without ids are never corresponded; id-less nodes that only exist in
 ///   the previous scene are not drawn.
-pub fn sample(plan: &TransitionPlan, previous: &Scene, next: &Scene, time: f64) -> Scene {
+pub fn sample(plan: &TransitionPlan, previous: &DisplayScene, next: &DisplayScene, time: f64) -> DisplayScene {
     let duration = plan.intent.duration;
     if duration <= 0.0 {
         return next.clone();
@@ -88,7 +88,7 @@ struct SampleIndex<'a> {
 }
 
 impl<'a> SampleIndex<'a> {
-    fn new(plan: &'a TransitionPlan, next: &'a Scene) -> Self {
+    fn new(plan: &'a TransitionPlan, next: &'a DisplayScene) -> Self {
         let mut kinds = HashMap::new();
         for correspondence in &plan.correspondences {
             kinds.entry(correspondence.id.as_str()).or_insert(correspondence.kind);
@@ -188,7 +188,7 @@ fn exit_host(ancestors: &[&str], index: &SampleIndex<'_>) -> Option<Vec<usize>> 
 }
 
 /// Append an exiting node at its host path, falling back to the scene roots.
-fn append_node(scene: &mut Scene, host: Option<&[usize]>, node: SceneNode) {
+fn append_node(scene: &mut DisplayScene, host: Option<&[usize]>, node: SceneNode) {
     if let Some(host) = host {
         if let Some(parent) = node_at_mut(scene, host) {
             if let NodeKind::Group { children, .. } = &mut parent.kind {
@@ -200,7 +200,7 @@ fn append_node(scene: &mut Scene, host: Option<&[usize]>, node: SceneNode) {
     scene.nodes.push(node);
 }
 
-fn node_at_mut<'a>(scene: &'a mut Scene, path: &[usize]) -> Option<&'a mut SceneNode> {
+fn node_at_mut<'a>(scene: &'a mut DisplayScene, path: &[usize]) -> Option<&'a mut SceneNode> {
     let (first, rest) = path.split_first()?;
     let mut node = scene.nodes.get_mut(*first)?;
     for index in rest {

@@ -1,6 +1,6 @@
 //! Pointer hit testing against scene geometry.
 
-use davinci_scene::{Bounds, NodeKind, Point, Rect, Scene, SceneNode, SemanticRole, SourceRef, TextAnchor, Transform};
+use davinci_scene::{Bounds, DisplayScene, NodeKind, Point, Rect, SceneNode, SemanticRole, SourceRef, TextAnchor, Transform};
 
 /// A semantic object resolved from a pointer position.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub struct HitTarget {
 ///
 /// Returns `None` when no node with an `id` is under the point.
 #[must_use]
-pub fn hit_test(scene: &Scene, point: Point) -> Option<HitTarget> {
+pub fn hit_test(scene: &DisplayScene, point: Point) -> Option<HitTarget> {
     let mut path = Vec::new();
     for (index, node) in scene.nodes.iter().enumerate().rev() {
         path.push(index);

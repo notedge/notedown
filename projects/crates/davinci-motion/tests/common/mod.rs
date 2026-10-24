@@ -1,11 +1,11 @@
 //! Shared scene builders for the integration tests.
 
 use davinci_motion::{Easing, MotionIntent};
-use davinci_scene::{NodeKind, Point, Rect, Scene, SceneNode, ShapeStyle, Size, TextStyle, Transform};
+use davinci_scene::{DisplayScene, NodeKind, Point, Rect, SceneNode, ShapeStyle, Size, TextStyle, Transform};
 
 /// Create a 200x100 scene from ordered root nodes.
-pub fn scene(nodes: Vec<SceneNode>) -> Scene {
-    let mut scene = Scene::new(Size::new(200.0, 100.0));
+pub fn scene(nodes: Vec<SceneNode>) -> DisplayScene {
+    let mut scene = DisplayScene::new(Size::new(200.0, 100.0));
     for node in nodes {
         scene.push(node);
     }
@@ -46,7 +46,7 @@ pub fn text(id: &str, opacity: f64) -> SceneNode {
 }
 
 /// Find the first node with an id anywhere in the tree.
-pub fn find<'a>(scene: &'a Scene, id: &str) -> Option<&'a SceneNode> {
+pub fn find<'a>(scene: &'a DisplayScene, id: &str) -> Option<&'a SceneNode> {
     scene.nodes.iter().find_map(|node| find_node(node, id))
 }
 
@@ -75,7 +75,7 @@ pub fn opacity(node: &SceneNode) -> f64 {
 }
 
 /// Horizontal translation of a node with the given id.
-pub fn x(scene: &Scene, id: &str) -> f64 {
+pub fn x(scene: &DisplayScene, id: &str) -> f64 {
     find(scene, id).expect("node should exist").transform.e()
 }
 

@@ -6,7 +6,7 @@
 
 use davinci_types::{Bounds, Point, Rect, Transform};
 
-use crate::{NodeKind, Scene, SceneNode, TextAnchor};
+use crate::{DisplayScene, NodeKind, SceneNode, TextAnchor};
 
 impl SceneNode {
     /// Axis-aligned bounds of this node in the parent coordinate system.
@@ -24,7 +24,7 @@ impl SceneNode {
     }
 }
 
-impl Scene {
+impl DisplayScene {
     /// Union of all root node bounds, or `None` for an empty scene.
     pub fn bounds(&self) -> Option<Bounds> {
         let mut bounds = self.nodes.iter().filter_map(SceneNode::bounds);

@@ -1,7 +1,7 @@
 //! Hit testing order, transforms, clips, and semantic targets.
 
 use davinci_runtime::hit_test;
-use davinci_scene::{NodeKind, Point, Rect, Scene, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, Transform};
+use davinci_scene::{DisplayScene, NodeKind, Point, Rect, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, Transform};
 
 fn rect_node(id: Option<&str>, x: f64, y: f64, width: f64, height: f64) -> SceneNode {
     let node = SceneNode::new(NodeKind::Rect { rect: Rect::new(x, y, width, height), style: ShapeStyle::default() });
@@ -11,11 +11,11 @@ fn rect_node(id: Option<&str>, x: f64, y: f64, width: f64, height: f64) -> Scene
     }
 }
 
-fn empty_scene() -> Scene {
-    Scene::new(Size::new(200.0, 200.0))
+fn empty_scene() -> DisplayScene {
+    DisplayScene::new(Size::new(200.0, 200.0))
 }
 
-fn hit_id(scene: &Scene, point: Point) -> Option<String> {
+fn hit_id(scene: &DisplayScene, point: Point) -> Option<String> {
     hit_test(scene, point).map(|hit| hit.id)
 }
 

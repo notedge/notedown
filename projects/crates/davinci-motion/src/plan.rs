@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use davinci_scene::{Scene, Transform};
+use davinci_scene::{DisplayScene, Transform};
 
 use crate::{
     easing::Easing,
@@ -155,7 +155,7 @@ pub struct TransitionPlan {
 /// The result is deterministic: every `Update` (in next-scene order) precedes
 /// every `Enter` (next-only, in next-scene order), which precedes every `Exit`
 /// (previous-only, in previous-scene order).
-pub fn match_scenes(previous: &Scene, next: &Scene) -> Vec<Correspondence> {
+pub fn match_scenes(previous: &DisplayScene, next: &DisplayScene) -> Vec<Correspondence> {
     let previous_ids = ordered_ids(previous);
     let next_ids = ordered_ids(next);
     let previous_set: HashSet<&str> = previous_ids.iter().copied().collect();
@@ -189,7 +189,7 @@ pub fn match_scenes(previous: &Scene, next: &Scene) -> Vec<Correspondence> {
 /// `Enter` and `Exit` nodes never get tracks. Their appearance and
 /// disappearance are entirely decided by [`sample`](crate::sample) from
 /// `intent.enter` and `intent.exit`, which keeps the policy in one place.
-pub fn plan_transition(previous: &Scene, next: &Scene, intent: &MotionIntent) -> TransitionPlan {
+pub fn plan_transition(previous: &DisplayScene, next: &DisplayScene, intent: &MotionIntent) -> TransitionPlan {
     let correspondences = match_scenes(previous, next);
     let previous_nodes = first_nodes(previous);
     let next_nodes = first_nodes(next);

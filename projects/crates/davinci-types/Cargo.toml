@@ -1,0 +1,16 @@
+[package]
+name = "davinci-types"
+version.workspace = true
+authors.workspace = true
+description = "Shared geometry, color, transform, and diagnostic primitives for the DaVinci diagram subsystem"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+boost-diagnostic = { workspace = true }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

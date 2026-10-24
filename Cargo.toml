@@ -5,12 +5,16 @@ members = [
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
     "projects/crates/notedown-fixtures",
+    "projects/crates/davinci-types",
+    "projects/crates/davinci-scene",
 ]
 default-members = [
     "projects/crates/notedown",
     "projects/crates/notedown-ir",
     "projects/crates/notedown-formats",
     "projects/crates/notedown-fixtures",
+    "projects/crates/davinci-types",
+    "projects/crates/davinci-scene",
 ]
 exclude = []
 
@@ -47,6 +51,10 @@ notedown = { path = "projects/crates/notedown" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats", default-features = false }
 notedown-fixtures = { path = "projects/crates/notedown-fixtures" }
+
+# DaVinci diagram subsystem
+davinci-types = { path = "projects/crates/davinci-types" }
+davinci-scene = { path = "projects/crates/davinci-scene" }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }

@@ -1,0 +1,16 @@
+[package]
+name = "davinci-scene"
+version.workspace = true
+authors.workspace = true
+description = "Deterministic generic vector scene model and SVG output for the DaVinci diagram subsystem"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+davinci-types = { workspace = true }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

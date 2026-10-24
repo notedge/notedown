@@ -1,0 +1,13 @@
+[package]
+name = "davinci-chart"
+version.workspace = true
+authors.workspace = true
+description = "Chart semantics compiled into generic DaVinci vector scenes"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+davinci-types = { workspace = true }
+davinci-scene = { workspace = true }

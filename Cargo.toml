@@ -8,6 +8,7 @@ members = [
     "projects/crates/davinci-types",
     "projects/crates/davinci-scene",
     "projects/crates/davinci-diagram",
+    "projects/crates/davinci-chart",
     "projects/crates/davinci-runtime",
     "projects/crates/davinci-motion",
 ]
@@ -62,6 +63,7 @@ notedown-fixtures = { path = "projects/crates/notedown-fixtures" }
 davinci-types = { path = "projects/crates/davinci-types" }
 davinci-scene = { path = "projects/crates/davinci-scene" }
 davinci-diagram = { path = "projects/crates/davinci-diagram" }
+davinci-chart = { path = "projects/crates/davinci-chart" }
 davinci-runtime = { path = "projects/crates/davinci-runtime" }
 davinci-motion = { path = "projects/crates/davinci-motion" }
 oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "0ef5bc2464718fd5d40542377a55fd5422e4c1fb", default-features = false, features = ["serde"] }

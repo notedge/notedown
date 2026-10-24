@@ -9,6 +9,7 @@ members = [
     "projects/crates/davinci-scene",
     "projects/crates/davinci-diagram",
     "projects/crates/davinci-runtime",
+    "projects/crates/davinci-motion",
 ]
 default-members = [
     "projects/crates/notedown",
@@ -19,6 +20,7 @@ default-members = [
     "projects/crates/davinci-scene",
     "projects/crates/davinci-diagram",
     "projects/crates/davinci-runtime",
+    "projects/crates/davinci-motion",
 ]
 exclude = []
 
@@ -61,6 +63,7 @@ davinci-types = { path = "projects/crates/davinci-types" }
 davinci-scene = { path = "projects/crates/davinci-scene" }
 davinci-diagram = { path = "projects/crates/davinci-diagram" }
 davinci-runtime = { path = "projects/crates/davinci-runtime" }
+davinci-motion = { path = "projects/crates/davinci-motion" }
 oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "2facdbaddb3663e2b35db7ee335dc886dd005abd", default-features = false, features = ["serde"] }
 
 # External dependencies

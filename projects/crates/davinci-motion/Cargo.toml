@@ -1,0 +1,13 @@
+[package]
+name = "davinci-motion"
+version.workspace = true
+authors.workspace = true
+description = "Stable correspondence and transition planning between DaVinci display scenes"
+repository = "https://github.com/notedge/notedown"
+readme = "readme.md"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+davinci-types = { workspace = true }
+davinci-scene = { workspace = true }

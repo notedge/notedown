@@ -56,10 +56,11 @@ parse.
 - Flowchart nodes with `Box`, `Round`, `Stadium`, `Subroutine`, `Cylinder`, `Circle`, and `Rhombus` shapes.
 - Edges with arrow, plain, dotted, and thick styles, plus edge labels.
 - Directions `TD`/`TB`, `BT`, `LR`, and `RL`.
+- `subgraph` blocks become clusters. A node joins every enclosing block, so an outer frame still covers nested members.
+  Nested blocks are flattened into sibling clusters and the lost containment is reported as a warning.
 - Deterministic layered placement, including explicit cycle diagnostics.
 
-Subgraphs are not represented because the pinned `oak-mermaid` AST has no grouping construct. Sequence and class
-diagrams are rejected explicitly.
+Sequence and class diagrams are rejected explicitly.
 
 ## Acceptance
 

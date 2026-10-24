@@ -54,3 +54,48 @@ fn flowchart_without_nodes_reports_empty_diagram() {
     let empty = mermaid_to_scene("flowchart TD\n").expect_err("empty flowchart has nothing to lay out");
     assert_eq!(empty.code(), codes::EMPTY_DIAGRAM);
 }
+
+#[test]
+fn subgraph_blocks_become_clusters_with_membership() {
+    let source = "flowchart TD\n  subgraph One\n    A[Start] --> B[Work]\n  end\n  B --> D[End]\n";
+    let spec = mermaid_to_spec(source).expect("subgraphs should lower");
+    assert_eq!(spec.clusters.len(), 1);
+
+    let cluster = &spec.clusters[0];
+    assert_eq!(cluster.id, "cluster-1");
+    assert_eq!(cluster.label.as_deref(), Some("One"));
+    assert_eq!(cluster.members, vec!["A".to_string(), "B".to_string()]);
+
+    let node = |id: &str| spec.nodes.iter().find(|node| node.id == id).expect("node");
+    assert_eq!(node("A").cluster.as_deref(), Some("cluster-1"));
+    assert!(node("D").cluster.is_none());
+
+    let lowered = mermaid_to_scene(source).expect("subgraphs should render");
+    assert!(lowered.diagnostics.is_empty(), "a single cluster must not report loss: {:?}", lowered.diagnostics);
+    let svg = lowered.scene.to_svg().expect("scene should serialize");
+    assert!(svg.contains(">One</text>"), "{svg}");
+}
+
+#[test]
+fn nested_subgraphs_flatten_with_a_diagnostic() {
+    let source = "flowchart TD\n  subgraph One\n    A[Start] --> B[Work]\n    subgraph two[Inner]\n      C[Deep]\n    end\n  end\n";
+    let spec = mermaid_to_spec(source).expect("nested subgraphs should lower");
+    assert_eq!(spec.clusters.len(), 2);
+
+    let outer = spec.clusters.iter().find(|cluster| cluster.id == "cluster-1").expect("outer cluster");
+    assert_eq!(outer.members, vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+    let inner = spec.clusters.iter().find(|cluster| cluster.id == "two").expect("inner cluster");
+    assert_eq!(inner.label.as_deref(), Some("Inner"));
+    assert_eq!(inner.members, vec!["C".to_string()]);
+
+    let node = |id: &str| spec.nodes.iter().find(|node| node.id == id).expect("node");
+    assert_eq!(node("A").cluster.as_deref(), Some("cluster-1"));
+    assert_eq!(node("C").cluster.as_deref(), Some("two"));
+
+    let lowered = mermaid_to_scene(source).expect("nested subgraphs should render");
+    assert_eq!(lowered.diagnostics.len(), 1, "flattening a nested subgraph loses containment: {:?}", lowered.diagnostics);
+    assert!(lowered.diagnostics[0].message().fallback().unwrap_or_default().contains("multiple clusters"));
+    let svg = lowered.scene.to_svg().expect("scene should serialize");
+    assert!(svg.contains(">One</text>"), "{svg}");
+    assert!(svg.contains(">Inner</text>"), "{svg}");
+}

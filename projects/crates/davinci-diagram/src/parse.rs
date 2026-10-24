@@ -17,13 +17,119 @@ use crate::{
     compile::{LayoutOptions, compile},
     error::DiagramError,
     render::render,
-    spec::{DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
+    spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
 };
 
 struct NodeSeed {
     id: String,
     label: Option<String>,
     shape: Option<NodeShape>,
+    cluster: Option<String>,
+}
+
+/// Accumulates nodes, edges, and clusters from nested flowchart elements.
+#[derive(Default)]
+struct Collector {
+    nodes: Vec<NodeSeed>,
+    indices: BTreeMap<String, usize>,
+    edges: Vec<DiagramEdge>,
+    clusters: Vec<Cluster>,
+}
+
+impl Collector {
+    /// Walk one nesting level. `ancestors` holds the enclosing cluster ids,
+    /// outermost first.
+    fn collect(&mut self, elements: &[FlowElement], ancestors: &[String]) -> Result<(), DiagramError> {
+        for element in elements {
+            match element {
+                FlowElement::Node { id, text, shape } => {
+                    let id = require_id(id)?;
+                    let label = text.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+                    self.upsert_node(&id, label, Some(convert_shape(*shape)), ancestors);
+                }
+                FlowElement::Edge { from, to, text, style } => {
+                    let from = require_id(from)?;
+                    let to = require_id(to)?;
+                    self.upsert_node(&from, None, None, ancestors);
+                    self.upsert_node(&to, None, None, ancestors);
+                    let label = text.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+                    self.edges.push(DiagramEdge {
+                        from: Endpoint { node: from, port: None },
+                        to: Endpoint { node: to, port: None },
+                        label,
+                        style: convert_edge_style(*style),
+                    });
+                }
+                FlowElement::Subgraph(subgraph) => {
+                    let id = self.register_cluster(subgraph.id.as_deref(), &subgraph.title);
+                    let mut nested = ancestors.to_vec();
+                    nested.push(id);
+                    self.collect(&subgraph.elements, &nested)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn upsert_node(&mut self, id: &str, label: Option<String>, shape: Option<NodeShape>, ancestors: &[String]) {
+        match self.indices.get(id) {
+            Some(&index) => {
+                let node = &mut self.nodes[index];
+                if node.label.is_none() {
+                    node.label = label;
+                }
+                if node.shape.is_none() {
+                    node.shape = shape;
+                }
+            }
+            None => {
+                self.indices.insert(id.to_string(), self.nodes.len());
+                self.nodes.push(NodeSeed { id: id.to_string(), label, shape, cluster: ancestors.last().cloned() });
+            }
+        }
+
+        for ancestor in ancestors {
+            let Some(cluster) = self.clusters.iter_mut().find(|cluster| &cluster.id == ancestor)
+            else {
+                continue;
+            };
+            if !cluster.members.iter().any(|member| member == id) {
+                cluster.members.push(id.to_string());
+            }
+        }
+    }
+
+    fn register_cluster(&mut self, explicit: Option<&str>, title: &str) -> String {
+        let base = explicit
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("cluster-{}", self.clusters.len() + 1));
+        let mut id = base.clone();
+        let mut suffix = 1;
+        while self.clusters.iter().any(|cluster| cluster.id == id) {
+            id = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        let label = title.trim();
+        self.clusters.push(Cluster { id: id.clone(), label: (!label.is_empty()).then(|| label.to_string()), members: Vec::new() });
+        id
+    }
+
+    fn into_parts(self) -> (Vec<DiagramNode>, Vec<DiagramEdge>, Vec<Cluster>) {
+        let nodes = self
+            .nodes
+            .into_iter()
+            .map(|node| DiagramNode {
+                id: node.id,
+                label: node.label,
+                shape: node.shape.unwrap_or(NodeShape::Box),
+                ports: Vec::new(),
+                cluster: node.cluster,
+            })
+            .collect();
+        (nodes, self.edges, self.clusters)
+    }
 }
 
 /// Parse Mermaid source through the `oak-mermaid` frontend.
@@ -55,22 +161,26 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 ///
 /// Only a single `graph`/`flowchart` diagram is accepted. Node ids keep the
 /// first seen label, an edge endpoint that has no node definition becomes an
-/// implicit `Box` node, and subgraphs are absent from the pinned Oak AST, so
-/// they cannot be represented in a spec.
+/// implicit `Box` node, and each `subgraph` block becomes a flat [`Cluster`].
+/// Nested subgraphs are flattened: a node joins every ancestor cluster of the
+/// block that declares it, so an outer frame still contains nested members.
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
     let flowchart = single_flowchart(&root)?;
     let direction = direction(&flowchart.orientation)
         .ok_or_else(|| DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation)))?;
-    let (nodes, edges) = collect_flowchart(flowchart)?;
+    let mut collector = Collector::default();
+    collector.collect(&flowchart.elements, &[])?;
 
-    if nodes.is_empty() {
+    if collector.nodes.is_empty() {
         return Err(DiagramError::empty_diagram("flowchart contains no nodes or edges"));
     }
 
     let mut spec = DiagramSpec::new(direction);
+    let (nodes, edges, clusters) = collector.into_parts();
     spec.nodes = nodes;
     spec.edges = edges;
+    spec.clusters = clusters;
     Ok(spec)
 }
 
@@ -108,76 +218,12 @@ fn single_flowchart(root: &MermaidRoot) -> Result<&Flowchart, DiagramError> {
     }
 }
 
-fn collect_flowchart(flowchart: &Flowchart) -> Result<(Vec<DiagramNode>, Vec<DiagramEdge>), DiagramError> {
-    let mut nodes: Vec<NodeSeed> = Vec::new();
-    let mut indices: BTreeMap<String, usize> = BTreeMap::new();
-    let mut edges: Vec<DiagramEdge> = Vec::new();
-
-    for element in &flowchart.elements {
-        match element {
-            FlowElement::Node { id, text, shape } => {
-                let id = require_id(id)?;
-                let label = text.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
-                match indices.get(&id) {
-                    Some(&index) => {
-                        let node = &mut nodes[index];
-                        if node.label.is_none() {
-                            node.label = label;
-                        }
-                        if node.shape.is_none() {
-                            node.shape = Some(convert_shape(*shape));
-                        }
-                    }
-                    None => {
-                        indices.insert(id.clone(), nodes.len());
-                        nodes.push(NodeSeed { id, label, shape: Some(convert_shape(*shape)) });
-                    }
-                }
-            }
-            FlowElement::Edge { from, to, text, style } => {
-                let from = require_id(from)?;
-                let to = require_id(to)?;
-                ensure_node(&mut nodes, &mut indices, &from);
-                ensure_node(&mut nodes, &mut indices, &to);
-                let label = text.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
-                edges.push(DiagramEdge {
-                    from: Endpoint { node: from, port: None },
-                    to: Endpoint { node: to, port: None },
-                    label,
-                    style: convert_edge_style(*style),
-                });
-            }
-        }
-    }
-
-    let nodes = nodes
-        .into_iter()
-        .map(|node| DiagramNode {
-            id: node.id,
-            label: node.label,
-            shape: node.shape.unwrap_or(NodeShape::Box),
-            ports: Vec::new(),
-            cluster: None,
-        })
-        .collect();
-
-    Ok((nodes, edges))
-}
-
 fn require_id(id: &str) -> Result<String, DiagramError> {
     let trimmed = id.trim();
     if trimmed.is_empty() {
         return Err(DiagramError::unsupported("flowchart contains a node or edge endpoint with an empty id"));
     }
     Ok(trimmed.to_string())
-}
-
-fn ensure_node(nodes: &mut Vec<NodeSeed>, indices: &mut BTreeMap<String, usize>, id: &str) {
-    if indices.contains_key(id) {
-        return;
-    }
-    indices.insert(id.to_string(), nodes.len());
-    nodes.push(NodeSeed { id: id.to_string(), label: None, shape: None });
 }
 
 fn direction(orientation: &str) -> Option<Direction> {

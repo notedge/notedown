@@ -7,6 +7,7 @@ members = [
     "projects/crates/notedown-fixtures",
     "projects/crates/davinci-types",
     "projects/crates/davinci-scene",
+    "projects/crates/davinci-diagram",
 ]
 default-members = [
     "projects/crates/notedown",
@@ -15,6 +16,7 @@ default-members = [
     "projects/crates/notedown-fixtures",
     "projects/crates/davinci-types",
     "projects/crates/davinci-scene",
+    "projects/crates/davinci-diagram",
 ]
 exclude = []
 
@@ -55,6 +57,8 @@ notedown-fixtures = { path = "projects/crates/notedown-fixtures" }
 # DaVinci diagram subsystem
 davinci-types = { path = "projects/crates/davinci-types" }
 davinci-scene = { path = "projects/crates/davinci-scene" }
+davinci-diagram = { path = "projects/crates/davinci-diagram" }
+oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "351b173259156f5bf0652daf6aa797378758a971", default-features = false, features = ["serde"] }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }

@@ -606,6 +606,20 @@ fn markdown_fenced_code_supports_tilde_and_long_backtick_fences() {
 }
 
 #[test]
+fn markdown_fenced_code_allows_an_indented_opening_fence() {
+    let (language, content) = code_block_content("  ```mermaid\nA[Start] --> B\n  ```\n");
+    assert_eq!(language.as_deref(), Some("mermaid"));
+    assert_eq!(content, "A[Start] --> B");
+
+    let deep = import_markdown_bytes("deep-fence.md", "    ```mermaid\nA[Start] --> B\n    ```\n").expect("import markdown");
+    assert!(
+        !matches!(&deep.blocks[0].block, Block::Code { language: Some(language), .. } if language == "mermaid"),
+        "four spaces must not open a fence: {:#?}",
+        deep.blocks[0].block
+    );
+}
+
+#[test]
 fn markdown_fenced_code_keeps_inner_blank_lines() {
     let (language, content) = code_block_content("```\nfirst\n\nthird\n```\n");
     assert_eq!(language, None);

@@ -547,7 +547,9 @@ fn strip_fence_line_remainder(text: &str) -> &str {
         return "";
     };
     let text = strip_leading_line_break(&text[index..]);
-    strip_trailing_line_break(text)
+    // The closing fence may itself be indented by up to three spaces, and that
+    // indentation is not part of the body.
+    strip_trailing_line_break(text.trim_end_matches([' ', '\t']))
 }
 
 fn strip_leading_line_break(text: &str) -> &str {

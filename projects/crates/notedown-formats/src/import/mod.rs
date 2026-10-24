@@ -28,3 +28,6 @@ pub mod pdf;
 /// TeX/LaTeX import via `oak-tex`.
 #[cfg(feature = "tex")]
 pub mod tex;
+/// Typst import via `oak-typst`.
+#[cfg(feature = "typst")]
+pub mod typst;

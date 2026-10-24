@@ -22,6 +22,7 @@ acorn-epub = { workspace = true, optional = true }
 oak-html = { workspace = true, optional = true }
 oak-xml = { workspace = true, optional = true }
 oak-tex = { workspace = true, optional = true }
+oak-typst = { workspace = true, optional = true }
 
 [features]
 default = ["markdown"]
@@ -33,6 +34,7 @@ pdf = ["dep:acorn-codec"]
 epub = ["dep:acorn-core", "dep:acorn-epub", "dep:oak-core", "dep:oak-html"]
 html = ["dep:oak-core", "dep:oak-html"]
 tex = ["dep:oak-core", "dep:oak-tex"]
+typst = ["dep:oak-core", "dep:oak-typst"]
 
 [[test]]
 name = "capability"
@@ -147,6 +149,11 @@ required-features = ["html", "markdown"]
 name = "tex_import"
 path = "tests/tex/mod.rs"
 required-features = ["tex"]
+
+[[test]]
+name = "typst_import"
+path = "tests/typst/mod.rs"
+required-features = ["typst"]
 
 [[test]]
 name = "markdown_to_docx"

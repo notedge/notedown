@@ -4,7 +4,7 @@ use davinci_diagram::{
     render::render,
     spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
 };
-use davinci_scene::{DisplayScene, NodeKind, SceneNode, SemanticRole};
+use davinci_scene::{SceneResolver, SemanticKind, SemanticNode, SemanticRole, SemanticScene};
 
 fn node(id: &str) -> DiagramNode {
     DiagramNode { id: id.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None }
@@ -35,11 +35,11 @@ fn example_plan() -> DiagramLayoutPlan {
     compile(&example_spec(), &LayoutOptions::default())
 }
 
-fn scene_node<'a>(scene: &'a DisplayScene, id: &str) -> &'a SceneNode {
+fn scene_node<'a>(scene: &'a SemanticScene, id: &str) -> &'a SemanticNode {
     scene.nodes.iter().find(|node| node.id.as_deref() == Some(id)).unwrap_or_else(|| panic!("missing scene node `{id}`"))
 }
 
-fn source_element(node: &SceneNode) -> Option<&str> {
+fn source_element(node: &SemanticNode) -> Option<&str> {
     node.source.as_ref().and_then(|source| source.element.as_deref())
 }
 
@@ -56,7 +56,7 @@ fn nodes_edges_and_clusters_carry_semantics_and_stable_ids() {
     let routed = scene_node(&scene, "diagram-edge-0");
     assert_eq!(routed.role, Some(SemanticRole::Edge));
     assert_eq!(source_element(routed), Some("A->B"));
-    assert!(matches!(routed.kind, NodeKind::Group { .. }));
+    assert!(matches!(routed.kind, SemanticKind::Group { .. }));
 
     let label = scene_node(&scene, "diagram-edge-0-label");
     assert_eq!(label.role, Some(SemanticRole::EdgeLabel));
@@ -70,9 +70,8 @@ fn nodes_edges_and_clusters_carry_semantics_and_stable_ids() {
 #[test]
 fn rendering_is_deterministic_and_serializes_to_svg() {
     let plan = example_plan();
-    let scene = render(&plan);
-    let first = scene.to_svg().expect("scene should serialize");
-    let second = render(&plan).to_svg().expect("scene should serialize");
+    let first = render(&plan).resolve(&SceneResolver::default()).to_svg().expect("scene should serialize");
+    let second = render(&plan).resolve(&SceneResolver::default()).to_svg().expect("scene should serialize");
     assert_eq!(first, second, "rendering the same plan twice must be identical");
     assert!(first.contains("data-role=\"node\""));
     assert!(first.contains("data-source=\"A\""));
@@ -98,13 +97,13 @@ fn node_shapes_map_to_scene_primitives() {
 
     let plan = compile(&spec, &LayoutOptions::default());
     let scene = render(&plan);
-    assert!(matches!(scene_node(&scene, "diagram-node-N0").kind, NodeKind::Rect { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N1").kind, NodeKind::RoundedRect { radius, .. } if radius == 8.0));
+    assert!(matches!(scene_node(&scene, "diagram-node-N0").kind, SemanticKind::Rect { .. }));
+    assert!(matches!(scene_node(&scene, "diagram-node-N1").kind, SemanticKind::RoundedRect { radius, .. } if radius == 8.0));
     assert!(
-        matches!(scene_node(&scene, "diagram-node-N2").kind, NodeKind::RoundedRect { radius, .. } if (radius - plan.node("N2").expect("N2").rect.height * 0.5).abs() < f64::EPSILON)
+        matches!(scene_node(&scene, "diagram-node-N2").kind, SemanticKind::RoundedRect { radius, .. } if (radius - plan.node("N2").expect("N2").rect.height * 0.5).abs() < f64::EPSILON)
     );
-    assert!(matches!(scene_node(&scene, "diagram-node-N3").kind, NodeKind::Rect { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N4").kind, NodeKind::Group { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N5").kind, NodeKind::Ellipse { radii, .. } if radii.width == radii.height));
-    assert!(matches!(scene_node(&scene, "diagram-node-N6").kind, NodeKind::Path { .. }));
+    assert!(matches!(scene_node(&scene, "diagram-node-N3").kind, SemanticKind::Rect { .. }));
+    assert!(matches!(scene_node(&scene, "diagram-node-N4").kind, SemanticKind::Group { .. }));
+    assert!(matches!(scene_node(&scene, "diagram-node-N5").kind, SemanticKind::Ellipse { radii, .. } if radii.width == radii.height));
+    assert!(matches!(scene_node(&scene, "diagram-node-N6").kind, SemanticKind::Path { .. }));
 }

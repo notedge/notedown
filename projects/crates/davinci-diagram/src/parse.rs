@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use davinci_scene::SceneResolver;
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_mermaid::{
     MermaidBuilder, MermaidLanguage,
@@ -190,15 +191,16 @@ pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     Ok(spec)
 }
 
-/// Lower Mermaid source to a layout plan and display scene.
+/// Lower Mermaid source to a layout plan and resolved display scene.
 ///
-/// The pipeline is `spec -> compile -> render`. Diagnostics come from the
-/// layout plan; rendering itself has no loss surface because every plan
-/// construct has a deterministic scene mapping.
+/// The pipeline is `spec -> compile -> render -> resolve`. Diagnostics come
+/// from the layout plan; rendering and resolution have no loss surface because
+/// every plan construct has a deterministic scene mapping.
 pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let spec = mermaid_to_spec(source)?;
     let plan = compile(&spec, &LayoutOptions::default());
-    let scene = render(&plan);
+    let semantic = render(&plan);
+    let scene = semantic.resolve(&SceneResolver::default());
     let diagnostics = plan.diagnostics.clone();
     Ok(LoweredDiagram { plan, scene, diagnostics })
 }

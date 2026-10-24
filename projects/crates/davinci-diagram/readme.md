@@ -2,13 +2,13 @@
 
 Compile diagram semantics into generic DaVinci vector scenes. The first slice covers Oak Mermaid flowcharts.
 
-## Three stages
+## Four stages
 
 The crate enforces the DaVinci layering contract as separate modules:
 
 ```text
-DiagramSpec -> DiagramLayoutPlan -> Scene
-  spec.rs          plan.rs          render.rs
+DiagramSpec -> DiagramLayoutPlan -> SemanticScene -> DisplayScene
+  spec.rs          plan.rs          render.rs        davinci-scene resolver
                 compile.rs
 ```
 
@@ -16,7 +16,10 @@ DiagramSpec -> DiagramLayoutPlan -> Scene
    ordering constraints. A source frontend lowers into this model.
 2. `plan::DiagramLayoutPlan` is the deterministic compile result: canvas size, placed node rectangles, orthogonal edge
    routes, cluster frames, and diagnostics. A plan carries geometry only.
-3. `davinci_scene::Scene` is the display scene produced by `render::render` from a plan.
+3. `davinci_scene::SemanticScene` is the unresolved domain tree produced by `render::render` from a plan. It keeps
+   ids, semantic roles, source references, hit regions, and unresolved local transforms.
+4. `davinci_scene::DisplayScene` is the resolved display tree produced by `SceneResolver`. It is the only input to
+   `to_svg` or another renderer.
 
 The Mermaid frontend in `parse.rs` produces a `DiagramSpec`. It never assembles SVG, chooses coordinates, or creates
 scene nodes.
@@ -24,7 +27,7 @@ scene nodes.
 ## Prohibited in a plan and a scene
 
 - No `svgPath`, `canvasCommand`, SVG string, drawing command, or backend instruction.
-- No scales, axes, or statistical transforms.
+- No `xField`, `yField`, `groupBy`, `stat`, `scale`, `nodeId`, or `edgeKind` fields.
 - No layout inside `render`; every coordinate comes from the plan.
 - No document semantics, `notedown-ir` dependency, animation, interaction state, data binding, or responsive chart
   semantics.
@@ -46,10 +49,9 @@ degradations are recorded as diagnostics:
 
 ## Oak Mermaid status
 
-`oak-mermaid` lowers flowchart sections introduced by a `graph`/`flowchart` header into `MermaidRoot`. Diagram families
-outside that subset (sequence, class, state, and similar headers) are skipped by the frontend, so `parse_mermaid`
-reports an explicit `davinci.diagram.ast-unavailable` diagnostic for a root without diagrams instead of pretending to
-parse.
+`oak-mermaid` lowers flowchart sections introduced by a `graph`/`flowchart` header into `MermaidRoot`. Other diagram
+families (sequence, class, state, and similar headers) are rejected by the frontend, so `parse_mermaid` reports an
+explicit `davinci.diagram.ast-unavailable` diagnostic instead of pretending to parse.
 
 ## Supported lowering
 

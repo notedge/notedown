@@ -1,6 +1,6 @@
 # davinci-motion
 
-Transition planning between two DaVinci display scenes.
+Transition planning between two resolved DaVinci display scenes (`davinci_scene::DisplayScene`).
 
 Correspondence is derived from stable scene ids, never from paint order. A plan records which nodes enter, update, or
 exit, the channels that animate, timing, easing, and the interruption policy. Sampling a plan at time `t` returns a

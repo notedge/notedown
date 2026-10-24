@@ -10,9 +10,12 @@
 //!    size, placed rectangles, orthogonal edge routes, cluster frames, and
 //!    diagnostics. A plan carries geometry only, never SVG strings, drawing
 //!    commands, or renderer instructions.
-//! 3. [`davinci_scene::DisplayScene`] is the display scene produced by
-//!    [`render::render`] from a plan. A scene holds geometry and display
-//!    attributes only.
+//! 3. [`davinci_scene::SemanticScene`] is the unresolved domain identity tree
+//!    produced by [`render::render`] from a plan. It keeps stable ids, semantic
+//!    roles, source references, hit regions, and local transforms.
+//! 4. [`davinci_scene::DisplayScene`] is the resolved display tree produced by
+//!    [`davinci_scene::SceneResolver`]. It holds flattened geometry and display
+//!    attributes only and is the sole input to SVG or another renderer.
 //!
 //! The Mermaid frontend produces a [`spec::DiagramSpec`] and never assembles
 //! SVG. Fatal failures return a [`DiagramError`] carrying a structured
@@ -40,12 +43,13 @@ pub use parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid};
 use davinci_scene::DisplayScene;
 use davinci_types::Diagnostic;
 
-/// A complete lowering result: the layout plan, its scene, and diagnostics.
+/// A complete lowering result: the layout plan, its resolved display scene,
+/// and diagnostics.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoweredDiagram {
     /// The deterministic compile result.
     pub plan: plan::DiagramLayoutPlan,
-    /// The display scene rendered from [`LoweredDiagram::plan`].
+    /// The display scene resolved from [`LoweredDiagram::plan`].
     pub scene: DisplayScene,
     /// Non-fatal loss and approximation records from compilation.
     pub diagnostics: Vec<Diagnostic>,

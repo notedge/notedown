@@ -11,7 +11,7 @@
 //!   tree of [`SceneNode`] values with flattened transforms, inherited clips,
 //!   and a small drawing style surface.
 //!
-//! Semantic resolution is the only bridge between them. It is pure and
+//! [`SemanticScene::resolve`] is the only bridge between them. It is pure and
 //! deterministic, and it never performs layout, text measurement, wrapping, or
 //! overlap avoidance. A host layout engine places the resolved canvas.
 //!

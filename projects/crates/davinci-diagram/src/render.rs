@@ -1,12 +1,12 @@
-//! Deterministic scene rendering for a diagram layout plan.
+//! Deterministic semantic scene rendering for a diagram layout plan.
 //!
-//! Rendering only translates final plan geometry into [`DisplayScene`] nodes.
+//! Rendering only translates final plan geometry into [`SemanticScene`] nodes.
 //! It never re-runs layout, measures text, chooses scales, or emits backend
-//! commands.
+//! commands. Resolution into display geometry is a separate step.
 
 use davinci_scene::{
-    Color, DisplayScene, MarkerShape, NodeKind, PathData, Point, Rect, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, TextAnchor,
-    TextStyle, Transform,
+    Color, MarkerShape, PathData, Point, Rect, SemanticKind, SemanticNode, SemanticRole, SemanticScene, ShapeStyle, Size, SourceRef,
+    TextAnchor, TextStyle, Transform,
 };
 
 use crate::{
@@ -42,11 +42,11 @@ impl Default for RenderOptions {
     }
 }
 
-/// Render a layout plan into a deterministic scene.
+/// Render a layout plan into a deterministic semantic scene.
 ///
 /// This uses [`RenderOptions::default`]. Equal plans always produce equal
-/// scenes and byte-identical SVG.
-pub fn render(plan: &DiagramLayoutPlan) -> DisplayScene {
+/// semantics and byte-identical SVG after resolution.
+pub fn render(plan: &DiagramLayoutPlan) -> SemanticScene {
     render_with_options(plan, &RenderOptions::default())
 }
 
@@ -57,8 +57,8 @@ pub fn render(plan: &DiagramLayoutPlan) -> DisplayScene {
 /// region equal to the node rectangle. Edges are groups with
 /// [`SemanticRole::Edge`], edge labels use [`SemanticRole::EdgeLabel`], and
 /// cluster frames use [`SemanticRole::Cluster`].
-pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> DisplayScene {
-    let mut scene = DisplayScene::new(plan.canvas);
+pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> SemanticScene {
+    let mut scene = SemanticScene::new(plan.canvas);
 
     for cluster in &plan.clusters {
         push_cluster(&mut scene, cluster, options);
@@ -79,10 +79,10 @@ pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) ->
     scene
 }
 
-fn push_cluster(scene: &mut DisplayScene, cluster: &PlacedCluster, options: &RenderOptions) {
+fn push_cluster(scene: &mut SemanticScene, cluster: &PlacedCluster, options: &RenderOptions) {
     let source = SourceRef::element(cluster.id.clone());
     scene.push(
-        SceneNode::new(NodeKind::RoundedRect { rect: cluster.rect, radius: CLUSTER_RADIUS, style: cluster_style() })
+        SemanticNode::new(SemanticKind::RoundedRect { rect: cluster.rect, radius: CLUSTER_RADIUS, style: cluster_style() })
             .with_id(format!("diagram-cluster-{}", cluster.id))
             .with_role(SemanticRole::Cluster)
             .with_source(source.clone()),
@@ -94,7 +94,7 @@ fn push_cluster(scene: &mut DisplayScene, cluster: &PlacedCluster, options: &Ren
             let position =
                 Point::new(cluster.rect.x + CLUSTER_LABEL_X, cluster.rect.y + CLUSTER_LABEL_Y + index as f64 * font_size * LINE_HEIGHT);
             scene.push(
-                SceneNode::new(NodeKind::Text { position, text: line.to_string(), style: label_text_style(font_size, CLUSTER_STROKE) })
+                SemanticNode::new(SemanticKind::Text { position, text: line.to_string(), style: label_text_style(font_size, CLUSTER_STROKE) })
                     .with_id(cluster_label_id(&cluster.id, index, label.split('\n').count()))
                     .with_role(SemanticRole::Label)
                     .with_source(source.clone()),
@@ -103,7 +103,7 @@ fn push_cluster(scene: &mut DisplayScene, cluster: &PlacedCluster, options: &Ren
     }
 }
 
-fn push_edge(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge) {
+fn push_edge(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge) {
     let source = SourceRef::element(format!("{}->{}", edge.from.node, edge.to.node));
     let mut path = PathData::new().move_to(edge.points[0]);
     for &point in &edge.points[1..] {
@@ -111,7 +111,7 @@ fn push_edge(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge) {
     }
 
     let mut children =
-        vec![SceneNode::new(NodeKind::Path { path, style: edge_style(edge.style) }).with_id(format!("diagram-edge-{index}-line"))];
+        vec![SemanticNode::new(SemanticKind::Path { path, style: edge_style(edge.style) }).with_id(format!("diagram-edge-{index}-line"))];
 
     if has_arrow(edge.style) {
         let end = edge.points[edge.points.len() - 1];
@@ -119,7 +119,7 @@ fn push_edge(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge) {
         let angle = (end.y - previous.y).atan2(end.x - previous.x).to_degrees();
         let transform = Transform::rotate_degrees(angle + 90.0).then(Transform::translate(end.x, end.y));
         children.push(
-            SceneNode::new(NodeKind::Marker {
+            SemanticNode::new(SemanticKind::Marker {
                 at: Point::ZERO,
                 shape: MarkerShape::Triangle,
                 size: ARROW_SIZE,
@@ -130,16 +130,16 @@ fn push_edge(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge) {
         );
     }
 
-    scene.push(SceneNode::group(children).with_id(format!("diagram-edge-{index}")).with_role(SemanticRole::Edge).with_source(source));
+    scene.push(SemanticNode::group(children).with_id(format!("diagram-edge-{index}")).with_role(SemanticRole::Edge).with_source(source));
 }
 
-fn push_node(scene: &mut DisplayScene, node: &PlacedNode) {
+fn push_node(scene: &mut SemanticScene, node: &PlacedNode) {
     let source = SourceRef::element(node.id.clone());
     let id = format!("diagram-node-{}", node.id);
     scene.push(node_shape(node).with_id(id.clone()).with_role(SemanticRole::Node).with_source(source).with_hit_region(node.rect));
 }
 
-fn push_node_label(scene: &mut DisplayScene, node: &PlacedNode, options: &RenderOptions) {
+fn push_node_label(scene: &mut SemanticScene, node: &PlacedNode, options: &RenderOptions) {
     let source = SourceRef::element(node.id.clone());
     push_centered_text(
         scene,
@@ -152,7 +152,7 @@ fn push_node_label(scene: &mut DisplayScene, node: &PlacedNode, options: &Render
     );
 }
 
-fn push_edge_label(scene: &mut DisplayScene, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
+fn push_edge_label(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
     let (Some(label), Some(label_box)) = (edge.label.as_ref(), edge.label_box)
     else {
         return;
@@ -178,7 +178,7 @@ impl LabelKind {
 }
 
 fn push_centered_text(
-    scene: &mut DisplayScene,
+    scene: &mut SemanticScene,
     id_prefix: &str,
     text: &str,
     center: Point,
@@ -193,7 +193,7 @@ fn push_centered_text(
         let position = Point::new(center.x, center.y + offset + font_size * BASELINE_SHIFT);
         let id = if lines.len() == 1 { id_prefix.to_string() } else { format!("{id_prefix}-{index}") };
         scene.push(
-            SceneNode::new(NodeKind::Text { position, text: (*line).to_string(), style: label_text_style(font_size, fill) })
+            SemanticNode::new(SemanticKind::Text { position, text: (*line).to_string(), style: label_text_style(font_size, fill) })
                 .with_id(id)
                 .with_role(role)
                 .with_source(source.clone()),
@@ -205,35 +205,35 @@ fn cluster_label_id(cluster: &str, index: usize, line_count: usize) -> String {
     if line_count == 1 { format!("diagram-cluster-{cluster}-label") } else { format!("diagram-cluster-{cluster}-label-{index}") }
 }
 
-fn node_shape(node: &PlacedNode) -> SceneNode {
+fn node_shape(node: &PlacedNode) -> SemanticNode {
     let style = node_style();
     let kind = match node.shape {
-        NodeShape::Box | NodeShape::Subroutine => NodeKind::Rect { rect: node.rect, style },
-        NodeShape::Round => NodeKind::RoundedRect { rect: node.rect, radius: ROUND_RADIUS, style },
-        NodeShape::Stadium => NodeKind::RoundedRect { rect: node.rect, radius: node.rect.height * 0.5, style },
-        NodeShape::Cylinder => NodeKind::Group { children: cylinder_children(&node.id, node.rect, style), opacity: 1.0 },
+        NodeShape::Box | NodeShape::Subroutine => SemanticKind::Rect { rect: node.rect, style },
+        NodeShape::Round => SemanticKind::RoundedRect { rect: node.rect, radius: ROUND_RADIUS, style },
+        NodeShape::Stadium => SemanticKind::RoundedRect { rect: node.rect, radius: node.rect.height * 0.5, style },
+        NodeShape::Cylinder => SemanticKind::Group { children: cylinder_children(&node.id, node.rect, style), opacity: 1.0 },
         NodeShape::Circle => {
             let radius = node.rect.width.min(node.rect.height) * 0.5;
-            NodeKind::Ellipse { center: node.rect.center(), radii: Size::new(radius, radius), style }
+            SemanticKind::Ellipse { center: node.rect.center(), radii: Size::new(radius, radius), style }
         }
-        NodeShape::Rhombus => NodeKind::Path { path: rhombus_path(node.rect), style },
+        NodeShape::Rhombus => SemanticKind::Path { path: rhombus_path(node.rect), style },
     };
-    SceneNode::new(kind)
+    SemanticNode::new(kind)
 }
 
-fn cylinder_children(id: &str, rect: Rect, style: ShapeStyle) -> Vec<SceneNode> {
+fn cylinder_children(id: &str, rect: Rect, style: ShapeStyle) -> Vec<SemanticNode> {
     let cap = (rect.height * 0.15).max(2.0);
     let center = rect.center();
     let body = Rect::new(rect.x, rect.y + cap, rect.width, (rect.height - cap * 2.0).max(0.0));
     vec![
-        SceneNode::new(NodeKind::Rect { rect: body, style: style.clone() }).with_id(format!("diagram-node-{id}-body")),
-        SceneNode::new(NodeKind::Ellipse {
+        SemanticNode::new(SemanticKind::Rect { rect: body, style: style.clone() }).with_id(format!("diagram-node-{id}-body")),
+        SemanticNode::new(SemanticKind::Ellipse {
             center: Point::new(center.x, rect.bottom() - cap),
             radii: Size::new(rect.width * 0.5, cap),
             style: style.clone(),
         })
         .with_id(format!("diagram-node-{id}-bottom")),
-        SceneNode::new(NodeKind::Ellipse { center: Point::new(center.x, rect.y + cap), radii: Size::new(rect.width * 0.5, cap), style })
+        SemanticNode::new(SemanticKind::Ellipse { center: Point::new(center.x, rect.y + cap), radii: Size::new(rect.width * 0.5, cap), style })
             .with_id(format!("diagram-node-{id}-top")),
     ]
 }

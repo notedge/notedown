@@ -9,15 +9,16 @@
 //!
 //! ```text
 //! raw input -> NormalizedEvent -> hit test -> Action -> reduce -> RuntimeState
-//!            -> invalidate -> InvalidationSet -> node narrowing
+//!            -> invalidate -> InvalidationSet -> node narrowing -> passes
 //! ```
 //!
 //! [`hit_test`] resolves a scene point to the topmost semantic id,
 //! [`normalize`] turns host input into semantic [`Action`] values, [`reduce`]
 //! applies one action to a [`RuntimeState`] without touching its input, and
 //! [`invalidate`] reports which layers a change disturbs, [`reduce_update`]
-//! combines the state transition with that layer set, and [`invalidated_nodes`]
-//! narrows it against scene identity.
+//! combines the state transition with that layer set, [`invalidated_nodes`]
+//! narrows it against scene identity, and [`derive_steps`] turns it into an
+//! ordered pass list.
 //!
 //! The invalidation layer is what keeps interaction incremental. Hover, focus,
 //! press, and selection changes stay on [`InvalidationScope::Overlay`], zoom
@@ -39,6 +40,7 @@ mod nodes;
 mod normalize;
 mod reduce;
 mod state;
+mod steps;
 
 pub use action::Action;
 pub use event::NormalizedEvent;
@@ -48,3 +50,4 @@ pub use nodes::{NodeInvalidation, invalidated_nodes, invalidated_semantic_nodes}
 pub use normalize::normalize;
 pub use reduce::{RuntimeUpdate, reduce, reduce_update};
 pub use state::{MAX_SCALE, MIN_SCALE, Playback, RuntimeState, Viewport};
+pub use steps::{Pass, derive_steps};

@@ -8,13 +8,13 @@ use crate::{
     flowchart::{LoweredDiagram, lower_mermaid},
 };
 
-/// Parse Mermaid source through the pinned `oak-mermaid` frontend.
+/// Parse Mermaid source through the `oak-mermaid` frontend.
 ///
-/// The pinned Oak revision ships AST types and a parser entry, but its builder
-/// does not lower green tree nodes into `MermaidRoot` and returns an empty
-/// diagram list for every input. This function therefore rejects an empty AST
-/// with an explicit `davinci.diagram.ast-unavailable` diagnostic instead of
-/// reporting a successful parse with no semantics.
+/// The frontend lowers flowchart sections into `MermaidRoot`. Diagrams outside
+/// that subset, or source without any diagram header, produce an empty root.
+/// This function rejects an empty AST with an explicit
+/// `davinci.diagram.ast-unavailable` diagnostic instead of reporting a
+/// successful parse with no semantics.
 pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
     let text = SourceText::new(source);
     let language = MermaidLanguage::default();
@@ -25,7 +25,7 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 
     match output.result {
         Ok(root) if root.diagrams.is_empty() => Err(DiagramError::ast_unavailable(format!(
-            "`oak-mermaid` at rev 351b173259156f5bf0652daf6aa797378758a971 accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced no diagrams because its builder does not lower green nodes into `MermaidRoot`",
+            "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced no diagrams, only flowchart sections inside a `graph`/`flowchart` header are lowered",
             source.len()
         ))),
         Ok(root) => Ok(root),

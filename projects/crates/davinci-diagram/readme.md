@@ -12,11 +12,10 @@ Lower diagram semantics into `davinci-scene` values. The first slice covers Oak 
 
 ## Oak Mermaid status
 
-The pinned Oak revision `351b173259156f5bf0652daf6aa797378758a971` ships `oak-mermaid` with AST types and a parser
-entry, but its builder does not lower green tree nodes into `MermaidRoot`: the lexer emits error tokens and the builder
-returns an empty diagram list. `parse_mermaid` therefore reports an explicit `davinci.diagram.ast-unavailable`
-diagnostic instead of pretending to parse. The flowchart lowering itself is real and is tested against the typed
-`oak_mermaid::ast::Flowchart` model that a working frontend produces.
+`oak-mermaid` lowers flowchart sections introduced by a `graph`/`flowchart` header into `MermaidRoot`. Diagram
+families outside that subset (sequence, class, state, and similar headers) are skipped by the frontend, so
+`parse_mermaid` reports an explicit `davinci.diagram.ast-unavailable` diagnostic for a root without diagrams
+instead of pretending to parse.
 
 ## Supported lowering
 

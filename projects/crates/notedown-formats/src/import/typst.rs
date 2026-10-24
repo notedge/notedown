@@ -6,10 +6,10 @@
 //! structure the AST cannot express stay explicit opaque blocks or recorded
 //! loss markers.
 //!
-//! The pinned `oak-typst` parser finishes heading and list-item nodes at the
-//! end of the source instead of at the line end. Lowering therefore resumes
-//! after the first meaningful line and reparses the remaining source instead
-//! of treating the whole tail as heading or list content.
+//! Lowering is line-oriented: heading, list, and enum spans can extend past the
+//! line they start on, so the lowerer resumes at the first meaningful line
+//! boundary and reparses the remaining source rather than treating the whole
+//! tail as heading or list content.
 
 use std::path::Path;
 

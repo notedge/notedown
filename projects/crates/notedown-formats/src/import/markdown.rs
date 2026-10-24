@@ -504,38 +504,58 @@ fn is_markdown_marker(text: &str) -> bool {
     matches!(text, "*" | "**" | "_" | "__" | "~~" | "`" | "[" | "]" | "(" | ")" | "![")
 }
 
+/// Fenced code keeps the raw source slice between the two fences.
+///
+/// `oak-markdown` re-lexes fence bodies with the inline lexer, which turns
+/// punctuation into dedicated tokens or nodes (`A[Start]` becomes `Text "A"`,
+/// `Link "["` and `Text "Start"`). Rebuilding the body token by token dropped
+/// every element the lowering did not know about, so the content is taken from
+/// the source byte range instead.
 fn extract_code_block(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (Option<String>, String) {
+    let node_span = node.span();
     let mut language = None;
-    let mut content = String::new();
-    let mut in_content = false;
-    let mut skip_fence_line_end = false;
+    let mut body_start = None;
+    let mut body_end = node_span.end;
     for child in node.children() {
         match child.kind::<MarkdownElementType>() {
+            MarkdownElementType::CodeFence if body_start.is_none() => body_start = Some(child.span().end),
             MarkdownElementType::CodeFence => {
-                in_content = !in_content;
-                skip_fence_line_end = in_content;
+                body_end = child.span().start;
+                break;
             }
-            MarkdownElementType::CodeLanguage => {
+            MarkdownElementType::CodeLanguage if body_start.is_some() && language.is_none() => {
                 let text = child.text(source);
                 let tag = text.trim();
-                if language.is_none() && !tag.is_empty() {
+                if !tag.is_empty() {
                     language = Some(tag.to_string());
                 }
-            }
-            MarkdownElementType::Newline if in_content && skip_fence_line_end => {
-                skip_fence_line_end = false;
-            }
-            MarkdownElementType::Text | MarkdownElementType::Whitespace | MarkdownElementType::Newline | MarkdownElementType::Error
-                if in_content =>
-            {
-                skip_fence_line_end = false;
-                content.push_str(&child.text(source));
+                body_start = Some(child.span().end);
             }
             _ => {}
         }
     }
-    let content = content.trim_end_matches(['\n', '\r']).to_string();
-    (language, content)
+    let start = body_start.unwrap_or(node_span.start).min(body_end);
+    let raw = source.slice((start..body_end).into());
+    (language, strip_fence_line_remainder(&raw).to_string())
+}
+
+/// A fence body starts on the line after the opening fence and its info
+/// string, and ends before the line break that precedes the closing fence.
+fn strip_fence_line_remainder(text: &str) -> &str {
+    let Some(index) = text.find(['\r', '\n'])
+    else {
+        return "";
+    };
+    let text = strip_leading_line_break(&text[index..]);
+    strip_trailing_line_break(text)
+}
+
+fn strip_leading_line_break(text: &str) -> &str {
+    text.strip_prefix("\r\n").or_else(|| text.strip_prefix('\n')).or_else(|| text.strip_prefix('\r')).unwrap_or(text)
+}
+
+fn strip_trailing_line_break(text: &str) -> &str {
+    text.strip_suffix("\r\n").or_else(|| text.strip_suffix('\n')).or_else(|| text.strip_suffix('\r')).unwrap_or(text)
 }
 
 fn list_item_marker(node: RedNode<MarkdownLanguage>, source: &SourceText) -> Option<String> {

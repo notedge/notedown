@@ -570,6 +570,48 @@ fn markdown_thematic_break_lowers_to_the_canonical_opaque_block() {
     assert!(reopened.validate().is_valid());
 }
 
+fn code_block_content(markdown: &str) -> (Option<String>, String) {
+    let graph = import_markdown_bytes("fenced-code.md", markdown).expect("import markdown");
+    let Block::Code { language, content } = &graph.blocks[0].block
+    else {
+        panic!("code block expected: {:#?}", graph.blocks)
+    };
+    (language.clone(), content.clone())
+}
+
+#[test]
+fn markdown_fenced_code_keeps_raw_mermaid_source() {
+    let source = "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n";
+    let (language, content) = code_block_content(source);
+    assert_eq!(language.as_deref(), Some("mermaid"));
+    assert_eq!(content, "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]");
+}
+
+#[test]
+fn markdown_fenced_code_keeps_indented_body_lines() {
+    let (language, content) = code_block_content("```mermaid\n  A[Start] --> B{Done?}\n    nested[Node]\n```\n");
+    assert_eq!(language.as_deref(), Some("mermaid"));
+    assert_eq!(content, "  A[Start] --> B{Done?}\n    nested[Node]");
+}
+
+#[test]
+fn markdown_fenced_code_supports_tilde_and_long_backtick_fences() {
+    let (tilde_language, tilde_content) = code_block_content("~~~mermaid\nA[Start] --> B{Done?}\n~~~\n");
+    assert_eq!(tilde_language.as_deref(), Some("mermaid"));
+    assert_eq!(tilde_content, "A[Start] --> B{Done?}");
+
+    let (backtick_language, backtick_content) = code_block_content("````js\nconst a = `b`;\n````\n");
+    assert_eq!(backtick_language.as_deref(), Some("js"));
+    assert_eq!(backtick_content, "const a = `b`;");
+}
+
+#[test]
+fn markdown_fenced_code_keeps_inner_blank_lines() {
+    let (language, content) = code_block_content("```\nfirst\n\nthird\n```\n");
+    assert_eq!(language, None);
+    assert_eq!(content, "first\n\nthird");
+}
+
 #[test]
 fn markdown_setext_heading_is_not_a_thematic_break() {
     let graph = import_markdown_bytes("setext.md", "Title\n---\n").expect("import markdown");

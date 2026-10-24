@@ -88,6 +88,8 @@ pub struct RuntimeState {
     pub viewport: Viewport,
     /// Named numeric parameters read by layout and motion.
     pub parameters: BTreeMap<String, f64>,
+    /// Selected host theme or style preset.
+    pub theme: Option<String>,
     /// Playback cursor.
     pub playback: Playback,
 }

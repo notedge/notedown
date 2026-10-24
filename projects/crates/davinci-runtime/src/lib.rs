@@ -9,19 +9,26 @@
 //!
 //! ```text
 //! raw input -> NormalizedEvent -> hit test -> Action -> reduce -> RuntimeState
-//!            -> invalidate -> Invalidation
+//!            -> invalidate -> InvalidationSet
 //! ```
 //!
 //! [`hit_test`] resolves a scene point to the topmost semantic id,
 //! [`normalize`] turns host input into semantic [`Action`] values, [`reduce`]
 //! applies one action to a [`RuntimeState`] without touching its input, and
-//! [`invalidate`] reports which compile scopes a change disturbs.
+//! [`invalidate`] reports which layers a change disturbs, and [`reduce_update`]
+//! combines the state transition with that layer set.
+//!
+//! The invalidation layer is what keeps interaction incremental. Hover, focus,
+//! press, and selection changes stay on [`InvalidationScope::Overlay`], zoom
+//! and pan stay on [`InvalidationScope::Viewport`], playback stays on
+//! [`InvalidationScope::Motion`], and only data or container changes reach the
+//! expensive layout chain. No action reports every layer.
 //!
 //! Scenes stay immutable. Hover, focus, press, selection, viewport, parameters,
-//! and playback live only in [`RuntimeState`], so interaction can never pollute
-//! document semantics. Conversely, runtime fields are never written into
-//! `davinci_scene::SceneNode`, which only carries resolved geometry and display
-//! attributes.
+//! theme, and playback live only in [`RuntimeState`], so interaction can never
+//! pollute document semantics. Conversely, runtime fields are never written
+//! into `davinci_scene::SceneNode`, which only carries resolved geometry and
+//! display attributes.
 
 mod action;
 mod event;
@@ -34,7 +41,7 @@ mod state;
 pub use action::Action;
 pub use event::NormalizedEvent;
 pub use hit_test::{HitTarget, hit_test};
-pub use invalidation::{Invalidation, InvalidationScope, invalidate};
+pub use invalidation::{Invalidation, InvalidationScope, InvalidationSet, invalidate};
 pub use normalize::normalize;
-pub use reduce::reduce;
+pub use reduce::{RuntimeUpdate, reduce, reduce_update};
 pub use state::{MAX_SCALE, MIN_SCALE, Playback, RuntimeState, Viewport};

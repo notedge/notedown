@@ -1,6 +1,10 @@
 //! Reducer purity, pointer state, selection, viewport, and playback behavior.
 
-use davinci_runtime::{Action, MAX_SCALE, MIN_SCALE, Playback, RuntimeState, Viewport, reduce};
+use std::collections::BTreeSet;
+
+use davinci_runtime::{
+    Action, InvalidationScope, InvalidationSet, MAX_SCALE, MIN_SCALE, Playback, RuntimeState, Viewport, reduce, reduce_update,
+};
 use davinci_scene::Point;
 
 fn assert_close(actual: f64, expected: f64) {
@@ -222,4 +226,65 @@ fn play_and_pause_only_change_the_playing_flag() {
     let paused = reduce(&playing, &Action::Pause);
     assert!(!paused.playback.playing);
     assert_close(paused.playback.time, 3.0);
+}
+
+#[test]
+fn reduce_update_carries_state_and_layers() {
+    let state = RuntimeState::default();
+
+    let update = reduce_update(&state, &Action::Hover(Some("a".to_owned())));
+
+    assert_eq!(update.state.hover.as_deref(), Some("a"));
+    assert_eq!(update.invalidation, InvalidationSet::of([InvalidationScope::Overlay]));
+    assert_eq!(update.targets, BTreeSet::from(["a".to_owned()]));
+    assert_eq!(state, RuntimeState::default(), "reduce_update must not mutate its input");
+}
+
+#[test]
+fn reduce_update_names_the_released_target_from_the_state_diff() {
+    let state = RuntimeState { pressed: Some("p".to_owned()), ..RuntimeState::default() };
+
+    let update = reduce_update(&state, &Action::Release);
+
+    assert_eq!(update.state.pressed, None);
+    assert_eq!(update.targets, BTreeSet::from(["p".to_owned()]));
+    assert_eq!(update.invalidation, InvalidationSet::of([InvalidationScope::Overlay]));
+}
+
+#[test]
+fn reduce_update_reports_cleared_selection_members() {
+    let mut state = RuntimeState::default();
+    state.selection.extend(["a".to_owned(), "b".to_owned()]);
+
+    let update = reduce_update(&state, &Action::ClearSelection);
+
+    assert!(update.state.selection.is_empty());
+    assert_eq!(update.targets, BTreeSet::from(["a".to_owned(), "b".to_owned()]));
+}
+
+#[test]
+fn no_op_actions_have_no_invalidation() {
+    let paused = RuntimeState::default();
+    let advanced = reduce_update(&paused, &Action::Advance(1.0));
+    assert!(advanced.invalidation.is_empty());
+    assert!(advanced.targets.is_empty());
+
+    let hovered = RuntimeState { hover: Some("a".to_owned()), ..RuntimeState::default() };
+    let repeated = reduce_update(&hovered, &Action::Hover(Some("a".to_owned())));
+    assert!(repeated.invalidation.is_empty());
+    assert!(repeated.targets.is_empty());
+    assert_eq!(repeated.state, hovered);
+}
+
+#[test]
+fn parameter_changes_carry_the_closed_data_chain() {
+    let state = RuntimeState::default();
+
+    let update = reduce_update(&state, &Action::SetParameter { name: "brush".to_owned(), value: 0.5 });
+
+    assert_eq!(
+        update.invalidation,
+        InvalidationSet::of([InvalidationScope::Data, InvalidationScope::Measurement, InvalidationScope::Layout, InvalidationScope::Motion,])
+    );
+    assert_eq!(update.state.parameters.get("brush"), Some(&0.5));
 }

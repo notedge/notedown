@@ -1,8 +1,29 @@
 //! Pure action reducer.
 
+use std::collections::BTreeSet;
+
 use davinci_types::Point;
 
-use crate::{Action, MAX_SCALE, MIN_SCALE, RuntimeState};
+use crate::{Action, InvalidationSet, MAX_SCALE, MIN_SCALE, RuntimeState, invalidate};
+
+/// One reduced action: the next state plus the layers it dirties.
+///
+/// [`reduce`] stays the pure state transition. Hosts that drive incremental
+/// recompilation use this richer result instead of recomputing the whole tree.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuntimeUpdate {
+    /// State after the action.
+    pub state: RuntimeState,
+    /// Layers that must be recomputed, already closed under implication.
+    pub invalidation: InvalidationSet,
+    /// Semantic ids whose pointer or selection membership changed.
+    ///
+    /// The symmetric difference between input and output state is used instead
+    /// of the action payload alone, so [`Action::Release`] still names the id
+    /// that was pressed and [`Action::ClearSelection`] names every released
+    /// selection member.
+    pub targets: BTreeSet<String>,
+}
 
 /// Apply one action, returning the next state.
 ///
@@ -62,6 +83,7 @@ pub fn reduce(state: &RuntimeState, action: &Action) -> RuntimeState {
         Action::SetParameter { name, value } => {
             next.parameters.insert(name.clone(), *value);
         }
+        Action::SetTheme(theme) => next.theme = theme.clone(),
         Action::Play => next.playback.playing = true,
         Action::Pause => next.playback.playing = false,
         Action::Seek(time) => next.playback.time = time.max(0.0),
@@ -72,4 +94,46 @@ pub fn reduce(state: &RuntimeState, action: &Action) -> RuntimeState {
         }
     }
     next
+}
+
+/// Apply one action and report the state plus the layers it dirties.
+///
+/// This wraps [`reduce`] with invalidation metadata, so an interaction yields
+/// both the new [`RuntimeState`] and the incremental work it implies:
+///
+/// - A no-op action, meaning the state compares equal before and after, reports
+///   an empty set. Hovering the already hovered id therefore costs nothing.
+/// - `targets` is the symmetric difference of pointer ids and the selection
+///   between input and output state, so it stays accurate for actions that
+///   carry no id, such as `Release`.
+/// - `invalidation` is the closed set documented on
+///   [`invalidate`](crate::invalidate).
+#[must_use]
+pub fn reduce_update(state: &RuntimeState, action: &Action) -> RuntimeUpdate {
+    let next = reduce(state, action);
+    if next == *state {
+        return RuntimeUpdate { state: next, invalidation: InvalidationSet::empty(), targets: BTreeSet::new() };
+    }
+    let invalidation = invalidate(action);
+    let targets = changed_targets(state, &next);
+    RuntimeUpdate { state: next, invalidation: invalidation.scopes, targets }
+}
+
+/// Ids whose pointer slot or selection membership differs between two states.
+fn changed_targets(before: &RuntimeState, after: &RuntimeState) -> BTreeSet<String> {
+    let mut targets = BTreeSet::new();
+    extend_changed(&mut targets, before.hover.as_deref(), after.hover.as_deref());
+    extend_changed(&mut targets, before.focus.as_deref(), after.focus.as_deref());
+    extend_changed(&mut targets, before.pressed.as_deref(), after.pressed.as_deref());
+    for id in before.selection.symmetric_difference(&after.selection) {
+        targets.insert(id.clone());
+    }
+    targets
+}
+
+/// Record both ids when one pointer slot moved away from or onto an id.
+fn extend_changed(targets: &mut BTreeSet<String>, before: Option<&str>, after: Option<&str>) {
+    if before != after {
+        targets.extend(before.into_iter().chain(after).map(str::to_owned));
+    }
 }

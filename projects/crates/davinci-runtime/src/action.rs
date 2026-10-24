@@ -54,6 +54,12 @@ pub enum Action {
         /// New parameter value.
         value: f64,
     },
+    /// Select a host theme or style preset.
+    ///
+    /// The runtime only records the selection. Mapping the theme onto scene
+    /// attributes stays a host concern, and the change dirties the style layer
+    /// only.
+    SetTheme(Option<String>),
     /// Start or resume playback.
     Play,
     /// Pause playback.

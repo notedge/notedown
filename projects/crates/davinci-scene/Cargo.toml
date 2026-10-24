@@ -10,7 +10,3 @@ edition.workspace = true
 
 [dependencies]
 davinci-types = { workspace = true }
-
-[[test]]
-name = "main"
-path = "tests/main.rs"

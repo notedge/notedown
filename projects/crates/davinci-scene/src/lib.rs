@@ -21,6 +21,7 @@
 mod bounds;
 mod error;
 mod path;
+mod resolve;
 mod scene;
 mod semantic;
 mod svg;
@@ -28,5 +29,6 @@ mod svg;
 pub use davinci_types::{Bounds, Color, Point, Rect, Size, Transform, codes};
 pub use error::SceneError;
 pub use path::{PathCommand, PathData};
+pub use resolve::SceneResolver;
 pub use scene::{DisplayScene, MarkerShape, NodeKind, ResourceRef, SceneNode, SemanticRole, ShapeStyle, SourceRef, TextAnchor, TextStyle};
 pub use semantic::{SemanticKind, SemanticNode, SemanticScene};

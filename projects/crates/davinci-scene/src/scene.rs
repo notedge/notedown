@@ -4,6 +4,102 @@ use davinci_types::{Color, Point, Rect, Size, Transform};
 
 use crate::{error::SceneError, path::PathData};
 
+/// Domain meaning of a scene node.
+///
+/// Roles are metadata for hit testing, accessibility, and motion
+/// correspondence. They never change geometry or paint order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SemanticRole {
+    /// Page, canvas, or panel background.
+    Background,
+    /// A generic layout region that hosts other content.
+    Region,
+    /// A diagram node or chart mark carrying primary content.
+    Node,
+    /// A connecting edge or link.
+    Edge,
+    /// Text attached to an edge.
+    EdgeLabel,
+    /// A diagram cluster or subgraph boundary.
+    Cluster,
+    /// A chart axis line or band.
+    Axis,
+    /// A chart scale tick.
+    Tick,
+    /// A chart legend region.
+    Legend,
+    /// A chart data mark.
+    Mark,
+    /// A text label for another semantic object.
+    Label,
+    /// Non-semantic decoration such as a separator or watermark.
+    Decoration,
+}
+
+impl SemanticRole {
+    /// A stable lowercase keyword for diagnostics and SVG `data-role`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Background => "background",
+            Self::Region => "region",
+            Self::Node => "node",
+            Self::Edge => "edge",
+            Self::EdgeLabel => "edge-label",
+            Self::Cluster => "cluster",
+            Self::Axis => "axis",
+            Self::Tick => "tick",
+            Self::Legend => "legend",
+            Self::Mark => "mark",
+            Self::Label => "label",
+            Self::Decoration => "decoration",
+        }
+    }
+}
+
+/// Where a scene node came from in its source document or data snapshot.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceRef {
+    /// Stable source element identity, such as a diagram node id or field name.
+    pub element: Option<String>,
+    /// Half-open byte range in the originating text source, when applicable.
+    pub span: Option<(usize, usize)>,
+}
+
+impl SourceRef {
+    /// Create a source reference from an element identity.
+    pub fn element(element: impl Into<String>) -> Self {
+        Self { element: Some(element.into()), span: None }
+    }
+
+    /// Attach a half-open byte range.
+    pub fn with_span(mut self, start: usize, end: usize) -> Self {
+        self.span = Some((start, end));
+        self
+    }
+}
+
+/// An external resource referenced by a scene node.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceRef {
+    /// Resource location passed through to the renderer.
+    pub href: String,
+    /// Optional MIME type for hosts that need to preload the resource.
+    pub mime: Option<String>,
+}
+
+impl ResourceRef {
+    /// Create a resource reference from a location.
+    pub fn new(href: impl Into<String>) -> Self {
+        Self { href: href.into(), mime: None }
+    }
+
+    /// Declare the resource MIME type.
+    pub fn with_mime(mut self, mime: impl Into<String>) -> Self {
+        self.mime = Some(mime.into());
+        self
+    }
+}
+
 /// How a text element aligns its content horizontally.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextAnchor {
@@ -158,8 +254,8 @@ pub enum NodeKind {
     Image {
         /// Placement rectangle in local coordinates.
         rect: Rect,
-        /// Image reference passed through to the renderer.
-        href: String,
+        /// Referenced image resource passed through to the renderer.
+        resource: ResourceRef,
         /// Image opacity in the inclusive range `0.0..=1.0`.
         opacity: f64,
     },
@@ -181,6 +277,13 @@ pub enum NodeKind {
 pub struct SceneNode {
     /// Stable caller-provided identity. The SVG writer emits it as `id`.
     pub id: Option<String>,
+    /// Domain meaning used for hit testing, accessibility, and motion matching.
+    pub role: Option<SemanticRole>,
+    /// Origin of this node in its source document or data snapshot.
+    pub source: Option<SourceRef>,
+    /// Hit region in this node's local coordinates, when the painted geometry
+    /// is a poor pointer target.
+    pub hit_region: Option<Rect>,
     /// Transform applied to this node and all of its children.
     pub transform: Transform,
     /// Axis-aligned clip rectangle in this node's local coordinates.
@@ -192,7 +295,7 @@ pub struct SceneNode {
 impl SceneNode {
     /// Create a node from its geometry.
     pub fn new(kind: NodeKind) -> Self {
-        Self { id: None, transform: Transform::IDENTITY, clip: None, kind }
+        Self { id: None, role: None, source: None, hit_region: None, transform: Transform::IDENTITY, clip: None, kind }
     }
 
     /// Create a group node with default opacity.
@@ -203,6 +306,24 @@ impl SceneNode {
     /// Attach a stable identity.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
+        self
+    }
+
+    /// Declare the node's domain meaning.
+    pub fn with_role(mut self, role: SemanticRole) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    /// Declare where the node came from.
+    pub fn with_source(mut self, source: SourceRef) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    /// Declare an explicit pointer target in local coordinates.
+    pub fn with_hit_region(mut self, hit_region: Rect) -> Self {
+        self.hit_region = Some(hit_region);
         self
     }
 

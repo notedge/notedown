@@ -27,6 +27,9 @@ fn validate_node(node: &SceneNode, context: &str) -> Result<(), SceneError> {
     if let Some(clip) = node.clip {
         validate_rect(clip, &format!("{context}.clip"))?;
     }
+    if let Some(hit_region) = node.hit_region {
+        validate_rect(hit_region, &format!("{context}.hit_region"))?;
+    }
 
     match &node.kind {
         NodeKind::Group { children, opacity } => {
@@ -224,6 +227,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<g");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_transform_attribute(out, node.transform);
             if *opacity != 1.0 {
                 push_number_attribute(out, "opacity", *opacity);
@@ -239,6 +243,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<path");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             out.push_str(" d=\"");
             out.push_str(&path_data(path));
             out.push('"');
@@ -250,6 +255,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<line");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_number_attribute(out, "x1", from.x);
             push_number_attribute(out, "y1", from.y);
             push_number_attribute(out, "x2", to.x);
@@ -262,6 +268,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<rect");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_rect_attributes(out, *rect);
             push_transform_attribute(out, node.transform);
             write_shape_paint(out, style, true);
@@ -271,6 +278,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<rect");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_rect_attributes(out, *rect);
             push_number_attribute(out, "rx", *radius);
             push_transform_attribute(out, node.transform);
@@ -281,6 +289,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<ellipse");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_number_attribute(out, "cx", center.x);
             push_number_attribute(out, "cy", center.y);
             push_number_attribute(out, "rx", radii.width);
@@ -293,6 +302,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&indent);
             out.push_str("<text");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_number_attribute(out, "x", position.x);
             push_number_attribute(out, "y", position.y);
             push_transform_attribute(out, node.transform);
@@ -301,12 +311,16 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&escape(text));
             out.push_str("</text>\n");
         }
-        NodeKind::Image { rect, href, opacity } => {
+        NodeKind::Image { rect, resource, opacity } => {
             out.push_str(&indent);
             out.push_str("<image");
             push_id_attribute(out, node.id.as_deref());
+            push_semantic_attributes(out, node);
             push_rect_attributes(out, *rect);
-            push_string_attribute(out, "href", href);
+            push_string_attribute(out, "href", &resource.href);
+            if let Some(mime) = resource.mime.as_deref() {
+                push_string_attribute(out, "data-mime", mime);
+            }
             push_transform_attribute(out, node.transform);
             if *opacity != 1.0 {
                 push_number_attribute(out, "opacity", *opacity);
@@ -320,6 +334,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
                     out.push_str(&indent);
                     out.push_str("<circle");
                     push_id_attribute(out, node.id.as_deref());
+                    push_semantic_attributes(out, node);
                     push_number_attribute(out, "cx", at.x);
                     push_number_attribute(out, "cy", at.y);
                     push_number_attribute(out, "r", half);
@@ -328,6 +343,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
                     out.push_str(&indent);
                     out.push_str("<polygon");
                     push_id_attribute(out, node.id.as_deref());
+                    push_semantic_attributes(out, node);
                     out.push_str(" points=\"");
                     let points = if matches!(*shape, MarkerShape::Triangle) {
                         vec![Point::new(at.x, at.y - half), Point::new(at.x - half, at.y + half), Point::new(at.x + half, at.y + half)]
@@ -352,6 +368,20 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_transform_attribute(out, node.transform);
             write_shape_paint(out, style, true);
             out.push_str("/>\n");
+        }
+    }
+}
+
+fn push_semantic_attributes(out: &mut String, node: &SceneNode) {
+    if let Some(role) = node.role {
+        push_string_attribute(out, "data-role", role.as_str());
+    }
+    if let Some(source) = node.source.as_ref() {
+        if let Some(element) = source.element.as_deref() {
+            push_string_attribute(out, "data-source", element);
+        }
+        if let Some((start, end)) = source.span {
+            let _ = write!(out, " data-source-range=\"{start}-{end}\"");
         }
     }
 }

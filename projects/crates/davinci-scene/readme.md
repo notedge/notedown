@@ -15,8 +15,11 @@ workspace.
 - `Scene`, `SceneNode`, and the node kinds `Group`, `Path`, `Line`, `Rect`, `RoundedRect`, `Ellipse`, `Text`, `Image`,
   and `Marker`.
 - Per-node `Transform`, axis-aligned `clip`, and computed bounds.
+- Per-node provenance metadata: stable `id`, `SemanticRole`, `SourceRef`, `hit_region`, and `ResourceRef` for images.
+  Metadata drives hit testing, accessibility, and motion correspondence. It never changes geometry or paint order.
 - Styles limited to fill, stroke, stroke width, opacity, font family, font size, font weight, and text anchor.
-- `Scene::to_svg` with fixed attribute order and stable number formatting.
+- `Scene::to_svg` with fixed attribute order and stable number formatting. Semantic metadata is emitted as `data-role`,
+  `data-source`, `data-source-range`, and `data-mime`.
 
 ## Acceptance
 

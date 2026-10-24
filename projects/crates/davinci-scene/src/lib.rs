@@ -20,4 +20,4 @@ mod svg;
 pub use davinci_types::{Bounds, Color, Point, Rect, Size, Transform, codes};
 pub use error::SceneError;
 pub use path::{PathCommand, PathData};
-pub use scene::{MarkerShape, NodeKind, Scene, SceneNode, ShapeStyle, TextAnchor, TextStyle};
+pub use scene::{MarkerShape, NodeKind, ResourceRef, Scene, SceneNode, SemanticRole, ShapeStyle, SourceRef, TextAnchor, TextStyle};

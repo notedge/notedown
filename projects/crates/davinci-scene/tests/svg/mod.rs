@@ -1,5 +1,6 @@
 use davinci_scene::{
-    Color, MarkerShape, NodeKind, PathData, Point, Rect, Scene, SceneNode, ShapeStyle, Size, TextAnchor, TextStyle, Transform,
+    Color, MarkerShape, NodeKind, PathData, Point, Rect, ResourceRef, Scene, SceneNode, SemanticRole, ShapeStyle, Size, SourceRef, TextAnchor,
+    TextStyle, Transform,
 };
 
 fn sample_scene() -> Scene {
@@ -97,14 +98,37 @@ fn image_and_rounded_rect_emit_expected_attributes() {
             .with_id("rounded"),
     );
     scene.push(
-        SceneNode::new(NodeKind::Image { rect: Rect::new(5.0, 5.0, 10.0, 10.0), href: "assets/a&b.png".to_string(), opacity: 0.75 })
-            .with_id("img"),
+        SceneNode::new(NodeKind::Image {
+            rect: Rect::new(5.0, 5.0, 10.0, 10.0),
+            resource: ResourceRef::new("assets/a&b.png").with_mime("image/png"),
+            opacity: 0.75,
+        })
+        .with_id("img"),
     );
     let svg = scene.to_svg().expect("valid scene");
 
     assert!(svg.contains("<rect id=\"rounded\" x=\"1\" y=\"2\" width=\"30\" height=\"40\" rx=\"6\" fill=\"#ffffff\"/>"), "{svg}");
     assert!(svg.contains("href=\"assets/a&amp;b.png\""), "{svg}");
+    assert!(svg.contains("data-mime=\"image/png\""), "{svg}");
     assert!(svg.contains("opacity=\"0.75\""), "{svg}");
+}
+
+#[test]
+fn semantic_role_and_source_emit_data_attributes() {
+    let mut scene = Scene::new(Size::new(100.0, 100.0));
+    scene.push(
+        SceneNode::new(NodeKind::Rect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), style: ShapeStyle::filled(Color::WHITE) })
+            .with_id("node-a")
+            .with_role(SemanticRole::Node)
+            .with_source(SourceRef::element("A").with_span(3, 4))
+            .with_hit_region(Rect::new(-1.0, -1.0, 12.0, 12.0)),
+    );
+    let svg = scene.to_svg().expect("valid scene");
+
+    assert!(svg.contains("data-role=\"node\""), "{svg}");
+    assert!(svg.contains("data-source=\"A\""), "{svg}");
+    assert!(svg.contains("data-source-range=\"3-4\""), "{svg}");
+    assert!(!svg.contains("hit_region"), "{svg}");
 }
 
 #[test]

@@ -152,6 +152,12 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
             "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced no diagrams, only graph/flowchart sections are lowered",
             source.len()
         ))),
+        Ok(root) if root.diagrams.iter().any(|diagram| !matches!(diagram, MermaidDiagram::Flowchart(_))) => {
+            Err(DiagramError::ast_unavailable(format!(
+                "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced non-flowchart diagrams, only graph/flowchart sections are lowered",
+                source.len()
+            )))
+        }
         Ok(root) => Ok(root),
         Err(error) => Err(DiagramError::parse_failed(format!("`oak-mermaid` failed to build an AST: {error}"))),
     }
@@ -212,7 +218,7 @@ fn single_flowchart(root: &MermaidRoot) -> Result<&Flowchart, DiagramError> {
         MermaidDiagram::Sequence(_) => {
             Err(DiagramError::ast_unavailable("Mermaid sequence diagrams are not lowered, only graph/flowchart sections are supported"))
         }
-        MermaidDiagram::ClassDiagram(_) => {
+        MermaidDiagram::Class(_) => {
             Err(DiagramError::ast_unavailable("Mermaid class diagrams are not lowered, only graph/flowchart sections are supported"))
         }
     }

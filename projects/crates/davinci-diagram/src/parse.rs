@@ -12,10 +12,11 @@ use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_mermaid::{
     MermaidBuilder, MermaidLanguage,
     ast::{
-        EdgeStyle as MermaidEdgeStyle, FlowElement, Flowchart, MermaidDiagram, MermaidRoot, MessageArrow,
+        ClassDiagram, EdgeStyle as MermaidEdgeStyle, FlowElement, Flowchart, MermaidDiagram, MermaidRoot, MessageArrow,
         NodeShape as MermaidNodeShape, ParticipantKind, SequenceDiagram,
     },
 };
+use oak_uml::model::{Class, RelationKind};
 
 use crate::{
     LoweredDiagram,
@@ -204,9 +205,7 @@ pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
             let diagnostics = plan.diagnostics.clone();
             Ok(LoweredDiagram { plan, scene, diagnostics })
         }
-        MermaidDiagram::Class(_) => {
-            Err(DiagramError::ast_unavailable("Mermaid class diagrams are not lowered yet"))
-        }
+        MermaidDiagram::Class(class) => lower_graph(class_spec(class, source)?),
     }
 }
 
@@ -317,6 +316,184 @@ fn message_style(arrow: MessageArrow) -> EdgeStyle {
         MessageArrow::SolidArrow => EdgeStyle::Arrow,
         MessageArrow::DottedArrow => EdgeStyle::DottedArrow,
     }
+}
+
+/// One authored class relation line with the operand that receives the marker.
+struct ClassRelationLine {
+    left: String,
+    right: String,
+    marker_at_left: bool,
+}
+
+/// Lower one `classDiagram` AST into the graph spec used by layered layout.
+///
+/// A class becomes a `Box` node whose label starts with the class name followed
+/// by one line per member, so the existing node measurement and multiline label
+/// rendering carry members without a new scene primitive. A class that appears
+/// only in a relation becomes an implicit node.
+///
+/// Relation kinds keep their UML end marker: inheritance uses a hollow arrow,
+/// composition a filled diamond, aggregation a hollow diamond, association a
+/// filled arrow, and dependency a dotted arrow. The Oak class AST keeps only the
+/// relation kind and endpoint order, so the authored arrow spelling is matched
+/// back to the relation to place the marker on the correct operand. This keeps
+/// `A <|-- B` and `A --|> B` pointing at the same superclass.
+fn class_spec(diagram: &ClassDiagram, source: &str) -> Result<DiagramSpec, DiagramError> {
+    let mut spec = DiagramSpec::new(Direction::BottomUp);
+    let mut known: BTreeSet<String> = BTreeSet::new();
+
+    for class in &diagram.classes {
+        let name = class.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        spec.nodes.push(DiagramNode {
+            id: name.to_string(),
+            label: Some(class_label(class)),
+            shape: NodeShape::Box,
+            ports: Vec::new(),
+            cluster: None,
+        });
+        known.insert(name.to_string());
+    }
+
+    let relation_lines = class_relation_lines(source);
+    let mut used_lines = vec![false; relation_lines.len()];
+    for relation in &diagram.relations {
+        let source_name = relation.source.trim();
+        let target_name = relation.target.trim();
+        if source_name.is_empty() || target_name.is_empty() {
+            return Err(DiagramError::unsupported("class relation has an empty class name"));
+        }
+        for endpoint in [source_name, target_name] {
+            if known.insert(endpoint.to_string()) {
+                spec.nodes.push(DiagramNode {
+                    id: endpoint.to_string(),
+                    label: None,
+                    shape: NodeShape::Box,
+                    ports: Vec::new(),
+                    cluster: None,
+                });
+            }
+        }
+
+        let marker_at_left = match take_relation_line(&relation_lines, &mut used_lines, source_name, target_name) {
+            Some(marker_at_left) => marker_at_left,
+            None => matches!(&relation.kind, RelationKind::Inheritance | RelationKind::Composition | RelationKind::Aggregation),
+        };
+        let (from, to) = if marker_at_left { (target_name, source_name) } else { (source_name, target_name) };
+        spec.edges.push(DiagramEdge {
+            from: Endpoint { node: from.to_string(), port: None },
+            to: Endpoint { node: to.to_string(), port: None },
+            label: relation.label.as_deref().map(str::trim).filter(|label| !label.is_empty()).map(str::to_string),
+            style: class_edge_style(&relation.kind),
+        });
+    }
+
+    if spec.nodes.is_empty() {
+        return Err(DiagramError::empty_diagram("class diagram contains no classes or relations"));
+    }
+    Ok(spec)
+}
+
+fn class_label(class: &Class) -> String {
+    let mut label = class.name.trim().to_string();
+    for member in &class.members {
+        let name = member.name.trim();
+        if !name.is_empty() {
+            label.push('\n');
+            label.push_str(name);
+        }
+    }
+    label
+}
+
+fn class_edge_style(kind: &RelationKind) -> EdgeStyle {
+    match kind {
+        RelationKind::Inheritance => EdgeStyle::HollowArrow,
+        RelationKind::Association => EdgeStyle::Arrow,
+        RelationKind::Composition => EdgeStyle::FilledDiamond,
+        RelationKind::Aggregation => EdgeStyle::HollowDiamond,
+        RelationKind::Dependency => EdgeStyle::DottedArrow,
+    }
+}
+
+/// Recover relation lines from the authored `classDiagram` section.
+///
+/// Only lines outside a class member block are considered, because member
+/// defaults can contain arrow-like punctuation. The scan normalizes marker
+/// placement only, it does not build a second relation model.
+fn class_relation_lines(source: &str) -> Vec<ClassRelationLine> {
+    let mut lines = Vec::new();
+    let mut inside = false;
+    let mut depth = 0usize;
+    for raw in source.lines() {
+        let line = raw.trim();
+        if !inside {
+            inside = line.starts_with("classDiagram");
+            continue;
+        }
+        if line.is_empty() || line.starts_with("%%") {
+            continue;
+        }
+        if depth == 0 && DIAGRAM_HEADERS.iter().any(|header| starts_with_keyword(line, header)) {
+            break;
+        }
+        let opens = line.matches('{').count();
+        let closes = line.matches('}').count();
+        if depth == 0 && opens == 0 && closes == 0 {
+            if let Some(relation) = class_relation_line(line) {
+                lines.push(relation);
+            }
+        }
+        depth = depth.saturating_add(opens).saturating_sub(closes);
+    }
+    lines
+}
+
+fn class_relation_line(line: &str) -> Option<ClassRelationLine> {
+    const ARROWS: &[(&str, bool)] = &[
+        ("<|--", true),
+        ("--|>", false),
+        ("..|>", false),
+        ("|>..", true),
+        ("*--", true),
+        ("--*", false),
+        ("o--", true),
+        ("--o", false),
+        ("..>", false),
+        ("<..", true),
+        ("-->", false),
+        ("<--", true),
+        ("..", false),
+    ];
+    let (index, token, marker_at_left) = ARROWS
+        .iter()
+        .filter_map(|&(token, marker_at_left)| line.find(token).map(|index| (index, token, marker_at_left)))
+        .min_by_key(|&(index, token, _)| (index, std::cmp::Reverse(token.len())))?;
+    let left = line[..index].trim();
+    let right = line[index + token.len()..].split(':').next().unwrap_or_default().trim();
+    if left.is_empty() || right.is_empty() {
+        return None;
+    }
+    Some(ClassRelationLine { left: left.to_string(), right: right.to_string(), marker_at_left })
+}
+
+fn take_relation_line(lines: &[ClassRelationLine], used: &mut [bool], source: &str, target: &str) -> Option<bool> {
+    for (index, line) in lines.iter().enumerate() {
+        if used[index] {
+            continue;
+        }
+        if line.left == source && line.right == target {
+            used[index] = true;
+            return Some(line.marker_at_left);
+        }
+        if line.left == target && line.right == source {
+            used[index] = true;
+            return Some(!line.marker_at_left);
+        }
+    }
+    None
 }
 
 /// Diagram headers that start a new section in one Mermaid source.

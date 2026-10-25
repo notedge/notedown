@@ -168,9 +168,9 @@ fn push_edge(scene: &mut SemanticScene, id_prefix: &str, index: usize, edge: &Ro
         children.push(
             SemanticNode::new(SemanticKind::Marker {
                 at: Point::ZERO,
-                shape: MarkerShape::Triangle,
+                shape: marker_shape(edge.style),
                 size: ARROW_SIZE,
-                style: ShapeStyle::filled(EDGE_COLOR),
+                style: marker_style(edge.style),
             })
             .with_id(format!("{id_prefix}-{index}-arrow"))
             .with_transform(transform),
@@ -323,5 +323,27 @@ fn label_text_style(font_size: f64, fill: Color) -> TextStyle {
 }
 
 fn has_arrow(style: EdgeStyle) -> bool {
-    matches!(style, EdgeStyle::Arrow | EdgeStyle::DottedArrow | EdgeStyle::ThickArrow)
+    matches!(
+        style,
+        EdgeStyle::Arrow
+            | EdgeStyle::DottedArrow
+            | EdgeStyle::ThickArrow
+            | EdgeStyle::HollowArrow
+            | EdgeStyle::FilledDiamond
+            | EdgeStyle::HollowDiamond
+    )
+}
+
+fn marker_shape(style: EdgeStyle) -> MarkerShape {
+    match style {
+        EdgeStyle::FilledDiamond | EdgeStyle::HollowDiamond => MarkerShape::Diamond,
+        _ => MarkerShape::Triangle,
+    }
+}
+
+fn marker_style(style: EdgeStyle) -> ShapeStyle {
+    match style {
+        EdgeStyle::HollowArrow | EdgeStyle::HollowDiamond => ShapeStyle::stroked(EDGE_COLOR, 1.5),
+        _ => ShapeStyle::filled(EDGE_COLOR),
+    }
 }

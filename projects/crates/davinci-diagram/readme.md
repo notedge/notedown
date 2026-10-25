@@ -50,9 +50,9 @@ degradations are recorded as diagnostics:
 
 ## Oak Mermaid status
 
-`oak-mermaid` lowers `graph`/`flowchart` and `sequenceDiagram` sections into `MermaidRoot`. State, ER, and similar
-headers still produce no diagram, so `parse_mermaid` reports an explicit `davinci.diagram.ast-unavailable` diagnostic
-instead of pretending to parse. `classDiagram` parses but is not lowered yet.
+`oak-mermaid` lowers `graph`/`flowchart`, `sequenceDiagram`, and `classDiagram` sections into `MermaidRoot`. State,
+ER, and similar headers still produce no diagram, so `parse_mermaid` reports an explicit
+`davinci.diagram.ast-unavailable` diagnostic instead of pretending to parse.
 
 ## Supported lowering
 
@@ -71,7 +71,13 @@ instead of pretending to parse. `classDiagram` parses but is not lowered yet.
 - Sequence statements outside that subset (`Note`, `loop`, `alt`, `activate`, `autonumber`, and similar) fail with
   `davinci.diagram.unsupported` before compilation, so the host keeps the authored source visible instead of dropping
   the diagram silently.
-- `mermaid_to_spec` stays the flowchart graph spec entry point. Sequence diagrams lower through `mermaid_to_scene`.
+- `classDiagram` classes and members become `Box` nodes whose label carries the class name and one line per member.
+  Relations keep their UML end marker: inheritance a hollow arrow, composition a filled diamond, aggregation a hollow
+  diamond, association a filled arrow, and dependency a dotted arrow. Marker placement follows the authored arrow
+  spelling, so `A <|-- B` and `A --|> B` both point at the superclass. Classes that appear only in a relation become
+  implicit nodes.
+- `mermaid_to_spec` stays the flowchart graph spec entry point. Sequence and class diagrams lower through
+  `mermaid_to_scene`.
 
 ## Acceptance
 

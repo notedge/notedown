@@ -67,6 +67,7 @@ davinci-chart = { path = "projects/crates/davinci-chart" }
 davinci-runtime = { path = "projects/crates/davinci-runtime" }
 davinci-motion = { path = "projects/crates/davinci-motion" }
 oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "59c7d479882bc08124c81f95d03b154b5cecdcbe", default-features = false, features = ["serde"] }
+oak-uml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "59c7d479882bc08124c81f95d03b154b5cecdcbe", default-features = false, features = ["serde"] }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }

@@ -2,7 +2,7 @@
 name = "davinci-diagram"
 version.workspace = true
 authors.workspace = true
-description = "Diagram semantics to DaVinci vector scene lowering, starting with Oak Mermaid flowcharts"
+description = "Diagram semantics to DaVinci vector scene lowering for Oak Mermaid flowcharts, sequences, and class diagrams"
 repository = "https://github.com/notedge/notedown"
 readme = "readme.md"
 license.workspace = true
@@ -13,7 +13,8 @@ davinci-types = { workspace = true }
 davinci-scene = { workspace = true }
 oak-core = { workspace = true, optional = true }
 oak-mermaid = { workspace = true, optional = true }
+oak-uml = { workspace = true, optional = true }
 
 [features]
 default = ["mermaid"]
-mermaid = ["dep:oak-core", "dep:oak-mermaid"]
+mermaid = ["dep:oak-core", "dep:oak-mermaid", "dep:oak-uml"]

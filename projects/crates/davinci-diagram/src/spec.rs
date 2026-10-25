@@ -53,6 +53,19 @@ pub enum EdgeStyle {
     /// The current scene surface has no dash attribute, so this style is
     /// lowered as a solid line and reported as an approximation.
     DottedLine,
+    /// A solid line ending in a hollow arrow head.
+    ///
+    /// Class inheritance uses this style so the superclass end stays distinct
+    /// from an ordinary association arrow.
+    HollowArrow,
+    /// A solid line ending in a filled diamond.
+    ///
+    /// Class composition uses this style.
+    FilledDiamond,
+    /// A solid line ending in a hollow diamond.
+    ///
+    /// Class aggregation uses this style.
+    HollowDiamond,
 }
 
 /// One side of a node rectangle.

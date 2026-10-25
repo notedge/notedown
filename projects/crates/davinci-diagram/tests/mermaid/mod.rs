@@ -1,6 +1,6 @@
 use davinci_diagram::{
     parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid},
-    spec::{Direction, NodeShape},
+    spec::{Direction, EdgeStyle, NodeShape},
 };
 use davinci_scene::codes;
 
@@ -125,6 +125,59 @@ fn unsupported_sequence_statements_fall_back_to_source() {
     assert!(error.message().contains("Note"), "{}", error.message());
     assert!(error.message().contains("line 4"), "{}", error.message());
     assert!(error.message().contains("falls back"), "{}", error.message());
+}
+
+const CLASS_SOURCE: &str = "classDiagram\n    class Animal {\n        +int age\n        +isMammal()\n    }\n    class Duck {\n        +swim()\n    }\n    Animal <|-- Duck : is a\n    Duck --> Pond : lives in\n";
+
+#[test]
+fn class_source_lowers_boxes_members_and_relations() {
+    let lowered = mermaid_to_scene(CLASS_SOURCE).expect("class diagram should lower");
+
+    let ids: Vec<&str> = lowered.plan.nodes.iter().map(|node| node.id.as_str()).collect();
+    assert_eq!(ids, ["Animal", "Duck", "Pond"], "declared classes keep order and relation endpoints become implicit nodes");
+    assert_eq!(lowered.plan.node("Animal").expect("Animal").label, "Animal\n+int age\n+isMammal()");
+    assert_eq!(lowered.plan.node("Duck").expect("Duck").label, "Duck\n+swim()");
+    assert_eq!(lowered.plan.node("Pond").expect("Pond").label, "Pond");
+
+    assert_eq!(lowered.plan.edges.len(), 2);
+    assert_eq!(lowered.plan.edges[0].from.node, "Duck");
+    assert_eq!(lowered.plan.edges[0].to.node, "Animal");
+    assert_eq!(lowered.plan.edges[0].style, EdgeStyle::HollowArrow);
+    assert_eq!(lowered.plan.edges[0].label.as_deref(), Some("is a"));
+    assert_eq!(lowered.plan.edges[1].from.node, "Duck");
+    assert_eq!(lowered.plan.edges[1].to.node, "Pond");
+    assert_eq!(lowered.plan.edges[1].style, EdgeStyle::Arrow);
+    assert_eq!(lowered.plan.edges[1].label.as_deref(), Some("lives in"));
+    assert!(lowered.diagnostics.is_empty(), "a clean class diagram must not report loss: {:?}", lowered.diagnostics);
+
+    let svg = lowered.scene.to_svg().expect("scene should serialize");
+    assert!(svg.contains(">Animal</text>"), "{svg}");
+    assert!(svg.contains(">+int age</text>"), "{svg}");
+    assert!(svg.contains(">is a</text>"), "{svg}");
+}
+
+#[test]
+fn class_relation_styles_and_arrow_spellings_keep_their_uml_end() {
+    let source = "classDiagram\n    class A\n    class B\n    class C\n    class D\n    A *-- B\n    A o-- C\n    A ..> D\n    A --|> E\n";
+    let lowered = mermaid_to_scene(source).expect("class relations should lower");
+
+    let edge = |index: usize| &lowered.plan.edges[index];
+    assert_eq!(edge(0).from.node, "B", "composition puts the filled diamond on the whole");
+    assert_eq!(edge(0).to.node, "A");
+    assert_eq!(edge(0).style, EdgeStyle::FilledDiamond);
+    assert_eq!(edge(1).from.node, "C", "aggregation puts the hollow diamond on the whole");
+    assert_eq!(edge(1).to.node, "A");
+    assert_eq!(edge(1).style, EdgeStyle::HollowDiamond);
+    assert_eq!(edge(2).from.node, "A");
+    assert_eq!(edge(2).to.node, "D");
+    assert_eq!(edge(2).style, EdgeStyle::DottedArrow);
+    assert_eq!(edge(3).from.node, "A", "`--|>` points at the right operand superclass");
+    assert_eq!(edge(3).to.node, "E");
+    assert_eq!(edge(3).style, EdgeStyle::HollowArrow);
+
+    assert_eq!(lowered.plan.nodes.len(), 5, "`E` becomes an implicit class");
+    assert_eq!(lowered.diagnostics.len(), 1, "only the dotted dependency is approximated: {:?}", lowered.diagnostics);
+    assert_eq!(lowered.diagnostics[0].code().as_str(), codes::APPROXIMATED);
 }
 
 #[test]

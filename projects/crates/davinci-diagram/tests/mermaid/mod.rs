@@ -35,18 +35,96 @@ fn mermaid_spec_maps_direction_and_keeps_the_first_label() {
 }
 
 #[test]
-fn empty_and_unsupported_sources_report_ast_unavailable() {
+fn empty_source_is_unavailable_while_sequence_families_parse() {
     let empty = parse_mermaid("").expect_err("empty source has no AST");
     assert_eq!(empty.code(), codes::AST_UNAVAILABLE);
-    assert!(empty.message().contains("graph/flowchart"));
+    assert!(empty.message().contains("no diagrams"));
 
-    let sequence = parse_mermaid("sequenceDiagram\n  Alice->>Bob: Hello\n").expect_err("sequence is unsupported");
-    assert_eq!(sequence.code(), codes::AST_UNAVAILABLE);
-    assert!(sequence.message().contains("graph/flowchart"));
+    let root = parse_mermaid("sequenceDiagram\n  Alice->>Bob: Hello\n").expect("sequence AST should be available");
+    assert_eq!(root.diagrams.len(), 1);
 
-    let lowered = mermaid_to_scene("sequenceDiagram\n  Alice->>Bob: Hello\n").expect_err("sequence is unsupported");
-    assert_eq!(lowered.code(), codes::AST_UNAVAILABLE);
-    assert!(lowered.message().contains("graph/flowchart"));
+    let spec = mermaid_to_spec("sequenceDiagram\n  Alice->>Bob: Hello\n").expect_err("the graph spec is flowchart-only");
+    assert_eq!(spec.code(), codes::UNSUPPORTED);
+    assert!(spec.message().contains("mermaid_to_scene"));
+}
+
+const SEQUENCE_SOURCE: &str = "sequenceDiagram\n    participant Client as Browser\n    actor Server\n    participant DB\n    Client->>Server: request\n    Server->>DB: query\n    DB->>Server: rows\n    Server->>Client: response\n    Client->Server: ping\n";
+
+#[test]
+fn sequence_source_lowers_participants_messages_and_lifelines() {
+    let lowered = mermaid_to_scene(SEQUENCE_SOURCE).expect("sequence should lower");
+
+    let ids: Vec<&str> = lowered.plan.nodes.iter().map(|node| node.id.as_str()).collect();
+    assert_eq!(ids, ["Client", "Server", "DB"], "participants keep declaration order");
+    assert_eq!(lowered.plan.node("Client").expect("Client").label, "Browser");
+    assert_eq!(lowered.plan.node("Server").expect("Server").label, "Server");
+    assert_eq!(lowered.plan.node("Client").expect("Client").shape, NodeShape::Box);
+    assert_eq!(lowered.plan.node("Server").expect("Server").shape, NodeShape::Round);
+    assert_eq!(lowered.plan.edges.len(), 5);
+    assert!(lowered.plan.canvas.width > 0.0, "canvas width comes from participant columns");
+    assert!(lowered.plan.canvas.height > 0.0, "canvas height comes from message rows");
+    assert!(lowered.diagnostics.is_empty(), "a clean sequence must not report loss: {:?}", lowered.diagnostics);
+
+    let client = lowered.plan.node("Client").expect("Client").rect;
+    let server = lowered.plan.node("Server").expect("Server").rect;
+    let db = lowered.plan.node("DB").expect("DB").rect;
+    assert!(client.x < server.x && server.x < db.x, "participant columns advance rightwards");
+
+    let rows: Vec<f64> = lowered.plan.edges.iter().map(|edge| edge.points[0].y).collect();
+    assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "message rows advance downwards: {rows:?}");
+    assert_eq!(lowered.plan.edges[0].points[0].x, client.center().x);
+    assert_eq!(lowered.plan.edges[0].points[1].x, server.center().x);
+
+    let svg = lowered.scene.to_svg().expect("scene should serialize");
+    assert!(svg.contains(">Browser</text>"), "{svg}");
+    assert!(svg.contains(">request</text>"), "{svg}");
+    assert!(svg.contains(">response</text>"), "{svg}");
+    assert!(svg.contains("diagram-sequence-lifeline-Client"), "{svg}");
+}
+
+#[test]
+fn sequence_lowering_is_deterministic() {
+    let first = mermaid_to_scene(SEQUENCE_SOURCE).expect("sequence should lower");
+    let second = mermaid_to_scene(SEQUENCE_SOURCE).expect("sequence should lower");
+    assert_eq!(first.plan, second.plan);
+    assert_eq!(first.scene, second.scene);
+}
+
+#[test]
+fn dotted_sequence_messages_are_approximated_with_diagnostics() {
+    let source = "sequenceDiagram\n    A-->>B: ack\n    B-->A: note\n";
+    let lowered = mermaid_to_scene(source).expect("dotted messages should still lower");
+
+    assert_eq!(lowered.plan.nodes.len(), 2, "message endpoints become implicit participants");
+    assert_eq!(lowered.plan.edges.len(), 2);
+    assert_eq!(lowered.diagnostics.len(), 2, "both dotted styles lose their dash surface: {:?}", lowered.diagnostics);
+    assert!(
+        lowered.diagnostics.iter().all(|diagnostic| diagnostic.code().as_str() == codes::APPROXIMATED),
+        "{:?}",
+        lowered.diagnostics
+    );
+}
+
+#[test]
+fn self_sequence_messages_are_skipped_with_a_diagnostic() {
+    let source = "sequenceDiagram\n    A->>A: retry\n    A->>B: go\n";
+    let lowered = mermaid_to_scene(source).expect("the rest of the sequence should lower");
+
+    assert_eq!(lowered.plan.nodes.len(), 2);
+    assert_eq!(lowered.plan.edges.len(), 1);
+    assert_eq!(lowered.diagnostics.len(), 1);
+    assert!(lowered.diagnostics[0].message().fallback().unwrap_or_default().contains("self"));
+}
+
+#[test]
+fn unsupported_sequence_statements_fall_back_to_source() {
+    let source = "sequenceDiagram\n    participant A\n    participant B\n    Note over A,B: shared\n    A->>B: ping\n";
+    let error = mermaid_to_scene(source).expect_err("notes are not lowered");
+
+    assert_eq!(error.code(), codes::UNSUPPORTED);
+    assert!(error.message().contains("Note"), "{}", error.message());
+    assert!(error.message().contains("line 4"), "{}", error.message());
+    assert!(error.message().contains("falls back"), "{}", error.message());
 }
 
 #[test]

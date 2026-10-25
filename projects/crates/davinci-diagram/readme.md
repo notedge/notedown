@@ -1,6 +1,7 @@
 # davinci-diagram
 
-Compile diagram semantics into generic DaVinci vector scenes. The first slice covers Oak Mermaid flowcharts.
+Compile diagram semantics into generic DaVinci vector scenes. The current slice covers Oak Mermaid flowcharts and
+sequence diagrams.
 
 ## Four stages
 
@@ -49,20 +50,28 @@ degradations are recorded as diagnostics:
 
 ## Oak Mermaid status
 
-`oak-mermaid` lowers flowchart sections introduced by a `graph`/`flowchart` header into `MermaidRoot`. Other diagram
-families (sequence, class, state, and similar headers) are rejected by the frontend, so `parse_mermaid` reports an
-explicit `davinci.diagram.ast-unavailable` diagnostic instead of pretending to parse.
+`oak-mermaid` lowers `graph`/`flowchart` and `sequenceDiagram` sections into `MermaidRoot`. State, ER, and similar
+headers still produce no diagram, so `parse_mermaid` reports an explicit `davinci.diagram.ast-unavailable` diagnostic
+instead of pretending to parse. `classDiagram` parses but is not lowered yet.
 
 ## Supported lowering
 
 - Flowchart nodes with `Box`, `Round`, `Stadium`, `Subroutine`, `Cylinder`, `Circle`, and `Rhombus` shapes.
-- Edges with arrow, plain, dotted, and thick styles, plus edge labels.
+- Edges with arrow, plain, dotted, dotted-line, and thick styles, plus edge labels.
 - Directions `TD`/`TB`, `BT`, `LR`, and `RL`.
 - `subgraph` blocks become clusters. A node joins every enclosing block, so an outer frame still covers nested members.
   Nested blocks are flattened into sibling clusters and the lost containment is reported as a warning.
 - Deterministic layered placement, including explicit cycle diagnostics.
-
-Sequence and class diagrams are rejected explicitly.
+- `sequenceDiagram` participants and `actor` aliases, `A->>B`, `A-->>B`, `A->B`, and `A-->B` messages, and implicit
+  participants that appear only as message endpoints.
+- Sequence layout is time-ordered: participant header boxes are measured from their labels, messages occupy one row
+  each, the canvas covers all columns and rows plus the margin, and lifelines are decoration from each header to the
+  canvas bottom. Dotted messages are drawn solid with an approximation diagnostic. Self messages and undeclared
+  participants in a hand-built spec are skipped with diagnostics.
+- Sequence statements outside that subset (`Note`, `loop`, `alt`, `activate`, `autonumber`, and similar) fail with
+  `davinci.diagram.unsupported` before compilation, so the host keeps the authored source visible instead of dropping
+  the diagram silently.
+- `mermaid_to_spec` stays the flowchart graph spec entry point. Sequence diagrams lower through `mermaid_to_scene`.
 
 ## Acceptance
 

@@ -48,6 +48,11 @@ pub enum EdgeStyle {
     DottedArrow,
     /// A thick line with an arrow head.
     ThickArrow,
+    /// A dotted line without an arrow head.
+    ///
+    /// The current scene surface has no dash attribute, so this style is
+    /// lowered as a solid line and reported as an approximation.
+    DottedLine,
 }
 
 /// One side of a node rectangle.

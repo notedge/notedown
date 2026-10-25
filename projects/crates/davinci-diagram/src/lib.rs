@@ -18,7 +18,9 @@
 //!    attributes only and is the sole input to SVG or another renderer.
 //!
 //! The Mermaid frontend produces a [`spec::DiagramSpec`] and never assembles
-//! SVG. Fatal failures return a [`DiagramError`] carrying a structured
+//! SVG. Flowcharts and class diagrams use layered layout; sequence diagrams use
+//! a time-ordered layout that reuses the same nodes, edges, plan, and scene
+//! surface. Fatal failures return a [`DiagramError`] carrying a structured
 //! diagnostic. Non-fatal loss and approximation are recorded in
 //! [`DiagramLayoutPlan::diagnostics`] and copied into
 //! [`LoweredDiagram::diagnostics`]; nothing is dropped silently.

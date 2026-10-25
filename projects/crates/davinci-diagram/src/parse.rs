@@ -2,22 +2,26 @@
 //!
 //! This module never assembles SVG or scene nodes. It maps the typed
 //! `oak-mermaid` AST onto [`crate::spec::DiagramSpec`] and leaves geometry to
-//! [`crate::compile::compile`] and [`crate::render::render`].
+//! [`crate::compile::compile`] or [`crate::compile::compile_sequence`] and
+//! [`crate::render::render`] or [`crate::render::render_sequence`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use davinci_scene::SceneResolver;
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_mermaid::{
     MermaidBuilder, MermaidLanguage,
-    ast::{EdgeStyle as MermaidEdgeStyle, FlowElement, Flowchart, MermaidDiagram, MermaidRoot, NodeShape as MermaidNodeShape},
+    ast::{
+        EdgeStyle as MermaidEdgeStyle, FlowElement, Flowchart, MermaidDiagram, MermaidRoot, MessageArrow,
+        NodeShape as MermaidNodeShape, ParticipantKind, SequenceDiagram,
+    },
 };
 
 use crate::{
     LoweredDiagram,
-    compile::{LayoutOptions, compile},
+    compile::{LayoutOptions, compile, compile_sequence},
     error::DiagramError,
-    render::render,
+    render::{render, render_sequence},
     spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
 };
 
@@ -135,11 +139,12 @@ impl Collector {
 
 /// Parse Mermaid source through the `oak-mermaid` frontend.
 ///
-/// The frontend lowers `graph`/`flowchart` sections into `MermaidRoot`.
-/// Diagram families outside that subset, or source without any diagram header,
-/// produce an empty root. This function rejects an empty AST with an explicit
+/// The frontend recognises `graph`/`flowchart`, `sequenceDiagram`, and
+/// `classDiagram` sections. Source without any diagram header produces an empty
+/// root. This function rejects an empty AST with an explicit
 /// `davinci.diagram.ast-unavailable` diagnostic instead of reporting a
-/// successful parse with no semantics.
+/// successful parse with no semantics. Family-specific lowering rules live in
+/// the functions below.
 pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
     let text = SourceText::new(source);
     let language = MermaidLanguage::default();
@@ -150,15 +155,9 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 
     match output.result {
         Ok(root) if root.diagrams.is_empty() => Err(DiagramError::ast_unavailable(format!(
-            "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced no diagrams, only graph/flowchart sections are lowered",
+            "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced no diagrams",
             source.len()
         ))),
-        Ok(root) if root.diagrams.iter().any(|diagram| !matches!(diagram, MermaidDiagram::Flowchart(_))) => {
-            Err(DiagramError::ast_unavailable(format!(
-                "`oak-mermaid` accepted {} bytes with {oak_diagnostics} Oak parser diagnostics but produced non-flowchart diagrams, only graph/flowchart sections are lowered",
-                source.len()
-            )))
-        }
         Ok(root) => Ok(root),
         Err(error) => Err(DiagramError::parse_failed(format!("`oak-mermaid` failed to build an AST: {error}"))),
     }
@@ -171,9 +170,55 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 /// implicit `Box` node, and each `subgraph` block becomes a flat [`Cluster`].
 /// Nested subgraphs are flattened: a node joins every ancestor cluster of the
 /// block that declares it, so an outer frame still contains nested members.
+///
+/// Sequence and class diagrams lower through [`mermaid_to_scene`], which selects
+/// their family-specific compile pass.
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
-    let flowchart = single_flowchart(&root)?;
+    match single_diagram(&root)? {
+        MermaidDiagram::Flowchart(flowchart) => flowchart_spec(flowchart),
+        MermaidDiagram::Sequence(_) | MermaidDiagram::Class(_) => Err(DiagramError::unsupported(
+            "`mermaid_to_spec` returns the flowchart graph spec, sequence and class diagrams lower through `mermaid_to_scene`",
+        )),
+    }
+}
+
+/// Lower Mermaid source to a layout plan and resolved display scene.
+///
+/// The pipeline is `spec -> compile -> render -> resolve`. Flowcharts and class
+/// diagrams use layered graph layout, sequence diagrams use time-ordered layout.
+/// Diagnostics come from the layout plan; rendering and resolution have no loss
+/// surface because every plan construct has a deterministic scene mapping.
+/// Unsupported sequence statements fail before compilation so the host keeps the
+/// authored source visible instead of dropping the diagram silently.
+pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
+    let root = parse_mermaid(source)?;
+    match single_diagram(&root)? {
+        MermaidDiagram::Flowchart(flowchart) => lower_graph(flowchart_spec(flowchart)?),
+        MermaidDiagram::Sequence(sequence) => {
+            validate_sequence_source(source)?;
+            let spec = sequence_spec(sequence)?;
+            let plan = compile_sequence(&spec, &LayoutOptions::default());
+            let semantic = render_sequence(&plan);
+            let scene = semantic.resolve(&SceneResolver::default());
+            let diagnostics = plan.diagnostics.clone();
+            Ok(LoweredDiagram { plan, scene, diagnostics })
+        }
+        MermaidDiagram::Class(_) => {
+            Err(DiagramError::ast_unavailable("Mermaid class diagrams are not lowered yet"))
+        }
+    }
+}
+
+fn lower_graph(spec: DiagramSpec) -> Result<LoweredDiagram, DiagramError> {
+    let plan = compile(&spec, &LayoutOptions::default());
+    let semantic = render(&plan);
+    let scene = semantic.resolve(&SceneResolver::default());
+    let diagnostics = plan.diagnostics.clone();
+    Ok(LoweredDiagram { plan, scene, diagnostics })
+}
+
+fn flowchart_spec(flowchart: &Flowchart) -> Result<DiagramSpec, DiagramError> {
     let direction = direction(&flowchart.orientation)
         .ok_or_else(|| DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation)))?;
     let mut collector = Collector::default();
@@ -191,23 +236,9 @@ pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     Ok(spec)
 }
 
-/// Lower Mermaid source to a layout plan and resolved display scene.
-///
-/// The pipeline is `spec -> compile -> render -> resolve`. Diagnostics come
-/// from the layout plan; rendering and resolution have no loss surface because
-/// every plan construct has a deterministic scene mapping.
-pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
-    let spec = mermaid_to_spec(source)?;
-    let plan = compile(&spec, &LayoutOptions::default());
-    let semantic = render(&plan);
-    let scene = semantic.resolve(&SceneResolver::default());
-    let diagnostics = plan.diagnostics.clone();
-    Ok(LoweredDiagram { plan, scene, diagnostics })
-}
-
-fn single_flowchart(root: &MermaidRoot) -> Result<&Flowchart, DiagramError> {
+fn single_diagram(root: &MermaidRoot) -> Result<&MermaidDiagram, DiagramError> {
     if root.diagrams.is_empty() {
-        return Err(DiagramError::ast_unavailable("Mermaid source produced no diagrams, only graph/flowchart sections are lowered"));
+        return Err(DiagramError::ast_unavailable("Mermaid source produced no diagrams"));
     }
     if root.diagrams.len() > 1 {
         return Err(DiagramError::unsupported(format!(
@@ -215,15 +246,144 @@ fn single_flowchart(root: &MermaidRoot) -> Result<&Flowchart, DiagramError> {
             root.diagrams.len()
         )));
     }
-    match &root.diagrams[0] {
-        MermaidDiagram::Flowchart(flowchart) => Ok(flowchart),
-        MermaidDiagram::Sequence(_) => {
-            Err(DiagramError::ast_unavailable("Mermaid sequence diagrams are not lowered, only graph/flowchart sections are supported"))
+    Ok(&root.diagrams[0])
+}
+
+/// Lower one `sequenceDiagram` AST into the graph spec used by sequence layout.
+///
+/// Participants become nodes in declaration order and messages become edges in
+/// source order. A message endpoint that has no participant declaration becomes
+/// an implicit participant, matching Mermaid. `NodeShape::Box` marks a
+/// participant and `NodeShape::Round` marks an actor, so the actor distinction
+/// survives without a second node model.
+fn sequence_spec(sequence: &SequenceDiagram) -> Result<DiagramSpec, DiagramError> {
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    let mut known: BTreeSet<String> = BTreeSet::new();
+
+    for participant in &sequence.participants {
+        let id = participant.id.trim();
+        if id.is_empty() {
+            continue;
         }
-        MermaidDiagram::Class(_) => {
-            Err(DiagramError::ast_unavailable("Mermaid class diagrams are not lowered, only graph/flowchart sections are supported"))
-        }
+        let label = participant.display.as_deref().map(str::trim).filter(|display| !display.is_empty()).map(str::to_string);
+        spec.nodes.push(DiagramNode {
+            id: id.to_string(),
+            label,
+            shape: match participant.kind {
+                ParticipantKind::Participant => NodeShape::Box,
+                ParticipantKind::Actor => NodeShape::Round,
+            },
+            ports: Vec::new(),
+            cluster: None,
+        });
+        known.insert(id.to_string());
     }
+
+    for message in &sequence.messages {
+        let from = message.from.trim();
+        let to = message.to.trim();
+        if from.is_empty() || to.is_empty() {
+            return Err(DiagramError::unsupported("sequence message has an empty participant id"));
+        }
+        for endpoint in [from, to] {
+            if known.insert(endpoint.to_string()) {
+                spec.nodes.push(DiagramNode {
+                    id: endpoint.to_string(),
+                    label: None,
+                    shape: NodeShape::Box,
+                    ports: Vec::new(),
+                    cluster: None,
+                });
+            }
+        }
+        spec.edges.push(DiagramEdge {
+            from: Endpoint { node: from.to_string(), port: None },
+            to: Endpoint { node: to.to_string(), port: None },
+            label: Some(message.text.trim().to_string()).filter(|text| !text.is_empty()),
+            style: message_style(message.arrow),
+        });
+    }
+
+    if spec.nodes.is_empty() {
+        return Err(DiagramError::empty_diagram("sequence diagram contains no participants"));
+    }
+    Ok(spec)
+}
+
+fn message_style(arrow: MessageArrow) -> EdgeStyle {
+    match arrow {
+        MessageArrow::Solid => EdgeStyle::Line,
+        MessageArrow::Dotted => EdgeStyle::DottedLine,
+        MessageArrow::SolidArrow => EdgeStyle::Arrow,
+        MessageArrow::DottedArrow => EdgeStyle::DottedArrow,
+    }
+}
+
+/// Diagram headers that start a new section in one Mermaid source.
+const DIAGRAM_HEADERS: &[&str] = &[
+    "flowchart",
+    "graph",
+    "classDiagram",
+    "stateDiagram-v2",
+    "stateDiagram",
+    "erDiagram",
+    "gantt",
+    "pie",
+    "gitGraph",
+    "journey",
+    "mindmap",
+    "requirementDiagram",
+    "timeline",
+    "quadrantChart",
+    "xychart-beta",
+    "sankey-beta",
+    "block-beta",
+    "C4Context",
+    "zenuml",
+];
+
+/// Reject sequence statements outside the documented lowering subset.
+///
+/// `oak-mermaid` skips statements such as `Note`, `loop`, `alt`, `activate`, and
+/// `autonumber`. Skipping them in the AST would render a silently incomplete
+/// sequence, so this guard checks the authored sequence section before lowering:
+/// blank lines, comments, participant/actor declarations, and message arrows are
+/// accepted, and every other statement produces a structured
+/// `davinci.diagram.unsupported` error so the host falls back to the authored
+/// source. The guard classifies statement starts only, it does not build a
+/// second AST.
+fn validate_sequence_source(source: &str) -> Result<(), DiagramError> {
+    let mut inside = false;
+    for (index, raw) in source.lines().enumerate() {
+        let line = raw.trim();
+        if !inside {
+            inside = line.starts_with("sequenceDiagram");
+            continue;
+        }
+        if line.is_empty() || line.starts_with("%%") {
+            continue;
+        }
+        if DIAGRAM_HEADERS.iter().any(|header| starts_with_keyword(line, header)) {
+            break;
+        }
+        if starts_with_keyword(line, "participant") || starts_with_keyword(line, "actor") {
+            continue;
+        }
+        if line.contains("-->>") || line.contains("->>") || line.contains("-->") || line.contains("->") {
+            continue;
+        }
+        let keyword = line.split_whitespace().next().unwrap_or(line);
+        return Err(DiagramError::unsupported(format!(
+            "sequence statement `{keyword}` on line {} is not lowered, the diagram falls back to its source",
+            index + 1
+        )));
+    }
+    Ok(())
+}
+
+fn starts_with_keyword(line: &str, keyword: &str) -> bool {
+    line.strip_prefix(keyword)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':'))
 }
 
 fn require_id(id: &str) -> Result<String, DiagramError> {

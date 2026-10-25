@@ -27,6 +27,9 @@ const ARROW_SIZE: f64 = 10.0;
 const CLUSTER_LABEL_X: f64 = 10.0;
 const CLUSTER_LABEL_Y: f64 = 14.0;
 const CLUSTER_FONT_SIZE: f64 = 12.0;
+const LIFELINE_COLOR: Color = Color::rgb(0x9a, 0xa6, 0xb8);
+const GRAPH_EDGE_PREFIX: &str = "diagram-edge";
+const SEQUENCE_MESSAGE_PREFIX: &str = "diagram-sequence-message";
 
 /// Tuning for deterministic scene rendering.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,7 +67,7 @@ pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) ->
         push_cluster(&mut scene, cluster, options);
     }
     for (index, edge) in plan.edges.iter().enumerate() {
-        push_edge(&mut scene, index, edge);
+        push_edge(&mut scene, GRAPH_EDGE_PREFIX, index, edge);
     }
     for node in &plan.nodes {
         push_node(&mut scene, node);
@@ -73,7 +76,51 @@ pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) ->
         push_node_label(&mut scene, node, options);
     }
     for (index, edge) in plan.edges.iter().enumerate() {
-        push_edge_label(&mut scene, index, edge, options);
+        push_edge_label(&mut scene, GRAPH_EDGE_PREFIX, index, edge, options);
+    }
+
+    scene
+}
+
+/// Render a sequence layout plan into a deterministic semantic scene.
+///
+/// Participants use the same box and label surface as graph nodes, messages
+/// reuse routed edges with [`SemanticRole::Edge`], and every participant gets a
+/// [`SemanticRole::Decoration`] lifeline from its header bottom to the canvas
+/// bottom. Equal plans always produce equal scenes and byte-identical SVG after
+/// resolution.
+pub fn render_sequence(plan: &DiagramLayoutPlan) -> SemanticScene {
+    render_sequence_with_options(plan, &RenderOptions::default())
+}
+
+/// Render a sequence layout plan with explicit text options.
+pub fn render_sequence_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> SemanticScene {
+    let mut scene = SemanticScene::new(plan.canvas);
+
+    for participant in &plan.nodes {
+        let center = participant.rect.center();
+        scene.push(
+            SemanticNode::new(SemanticKind::Line {
+                from: Point::new(center.x, participant.rect.bottom()),
+                to: Point::new(center.x, plan.canvas.height),
+                style: ShapeStyle::stroked(LIFELINE_COLOR, 1.0),
+            })
+            .with_id(format!("diagram-sequence-lifeline-{}", participant.id))
+            .with_role(SemanticRole::Decoration)
+            .with_source(SourceRef::element(participant.id.clone())),
+        );
+    }
+    for (index, message) in plan.edges.iter().enumerate() {
+        push_edge(&mut scene, SEQUENCE_MESSAGE_PREFIX, index, message);
+    }
+    for participant in &plan.nodes {
+        push_node(&mut scene, participant);
+    }
+    for participant in &plan.nodes {
+        push_node_label(&mut scene, participant, options);
+    }
+    for (index, message) in plan.edges.iter().enumerate() {
+        push_edge_label(&mut scene, SEQUENCE_MESSAGE_PREFIX, index, message, options);
     }
 
     scene
@@ -103,7 +150,7 @@ fn push_cluster(scene: &mut SemanticScene, cluster: &PlacedCluster, options: &Re
     }
 }
 
-fn push_edge(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge) {
+fn push_edge(scene: &mut SemanticScene, id_prefix: &str, index: usize, edge: &RoutedEdge) {
     let source = SourceRef::element(format!("{}->{}", edge.from.node, edge.to.node));
     let mut path = PathData::new().move_to(edge.points[0]);
     for &point in &edge.points[1..] {
@@ -111,7 +158,7 @@ fn push_edge(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge) {
     }
 
     let mut children =
-        vec![SemanticNode::new(SemanticKind::Path { path, style: edge_style(edge.style) }).with_id(format!("diagram-edge-{index}-line"))];
+        vec![SemanticNode::new(SemanticKind::Path { path, style: edge_style(edge.style) }).with_id(format!("{id_prefix}-{index}-line"))];
 
     if has_arrow(edge.style) {
         let end = edge.points[edge.points.len() - 1];
@@ -125,12 +172,12 @@ fn push_edge(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge) {
                 size: ARROW_SIZE,
                 style: ShapeStyle::filled(EDGE_COLOR),
             })
-            .with_id(format!("diagram-edge-{index}-arrow"))
+            .with_id(format!("{id_prefix}-{index}-arrow"))
             .with_transform(transform),
         );
     }
 
-    scene.push(SemanticNode::group(children).with_id(format!("diagram-edge-{index}")).with_role(SemanticRole::Edge).with_source(source));
+    scene.push(SemanticNode::group(children).with_id(format!("{id_prefix}-{index}")).with_role(SemanticRole::Edge).with_source(source));
 }
 
 fn push_node(scene: &mut SemanticScene, node: &PlacedNode) {
@@ -152,14 +199,14 @@ fn push_node_label(scene: &mut SemanticScene, node: &PlacedNode, options: &Rende
     );
 }
 
-fn push_edge_label(scene: &mut SemanticScene, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
+fn push_edge_label(scene: &mut SemanticScene, id_prefix: &str, index: usize, edge: &RoutedEdge, options: &RenderOptions) {
     let (Some(label), Some(label_box)) = (edge.label.as_ref(), edge.label_box)
     else {
         return;
     };
     let source = SourceRef::element(format!("{}->{}", edge.from.node, edge.to.node));
     let font_size = (options.font_size * 12.0 / 13.0).max(1.0);
-    push_centered_text(scene, &format!("diagram-edge-{index}-label"), label, label_box.center(), font_size, LabelKind::Edge, source);
+    push_centered_text(scene, &format!("{id_prefix}-{index}-label"), label, label_box.center(), font_size, LabelKind::Edge, source);
 }
 
 #[derive(Clone, Copy)]

@@ -149,7 +149,7 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         let points = route(from, to, spec.direction);
         let label = edge.label.clone().filter(|label| !label.trim().is_empty());
         let label_box = label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), options.font_size));
-        if matches!(edge.style, EdgeStyle::DottedArrow) {
+        if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
                 format!(
@@ -187,6 +187,148 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         .collect();
 
     DiagramLayoutPlan { canvas, nodes: placed_nodes, edges: routed, clusters: placed_clusters, diagnostics }
+}
+
+/// Compile a sequence diagram into a deterministic time-ordered layout plan.
+///
+/// A sequence spec reuses the graph types: nodes are participants and edges are
+/// messages. [`DiagramSpec::direction`] is ignored because participants always
+/// advance to the right and messages advance downwards in source order. Every
+/// participant header is measured from its label, every message occupies one
+/// row, and the canvas covers all columns and rows plus the configured margin.
+/// Lifelines are not stored in the plan: [`crate::render::render_sequence`]
+/// derives them from each participant rectangle and the canvas, so the plan
+/// stays a pure geometry result.
+///
+/// Degradation is explicit and never silent:
+///
+/// - A duplicate participant id keeps the first declaration with a diagnostic.
+/// - A message that references an unknown participant is skipped with a
+///   diagnostic.
+/// - A self message is skipped with a diagnostic because the row layout has no
+///   loop route.
+/// - A dotted message is drawn as a solid line because the scene style has no
+///   dash surface, with an approximation diagnostic.
+/// - Cluster and ordering-constraint declarations are ignored with a diagnostic
+///   because sequence rows come from source position.
+pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    let mut diagnostics = Vec::new();
+    if !spec.clusters.is_empty() {
+        diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence layout ignores {} cluster declarations", spec.clusters.len())));
+    }
+    if !spec.constraints.is_empty() {
+        diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence layout ignores {} ordering constraints", spec.constraints.len())));
+    }
+
+    let mut participants: Vec<ResolvedNode> = Vec::with_capacity(spec.nodes.len());
+    let mut indices: BTreeMap<String, usize> = BTreeMap::new();
+    for node in &spec.nodes {
+        if node.id.is_empty() {
+            diagnostics.push(warning(codes::UNSUPPORTED, "sequence participant with an empty id is ignored"));
+            continue;
+        }
+        if indices.contains_key(&node.id) {
+            diagnostics.push(warning(
+                codes::UNSUPPORTED,
+                format!("duplicate participant id `{}`, the first declaration is kept", node.id),
+            ));
+            continue;
+        }
+        indices.insert(node.id.clone(), participants.len());
+        participants.push(ResolvedNode {
+            id: node.id.clone(),
+            label: node.label.clone(),
+            shape: node.shape,
+            ports: Vec::new(),
+            cluster: None,
+        });
+    }
+
+    if participants.is_empty() {
+        return DiagramLayoutPlan {
+            canvas: Size::ZERO,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            clusters: Vec::new(),
+            diagnostics,
+        };
+    }
+
+    let sizes: Vec<Size> = participants.iter().map(|participant| node_size(participant, options)).collect();
+    let header_height = sizes.iter().map(|size| size.height).fold(0.0, f64::max);
+    let mut cursor = options.margin;
+    let mut rects = Vec::with_capacity(participants.len());
+    for size in &sizes {
+        rects.push(Rect::new(cursor, options.margin, size.width, size.height));
+        cursor += size.width + options.node_gap;
+    }
+    let right = cursor - options.node_gap;
+    let header_bottom = options.margin + header_height;
+    let row_height = options.font_size * 1.4 + options.padding_y * 2.0;
+    let first_row = header_bottom + options.layer_gap;
+
+    let mut messages: Vec<RoutedEdge> = Vec::with_capacity(spec.edges.len());
+    for edge in &spec.edges {
+        let (Some(&from_index), Some(&to_index)) = (indices.get(&edge.from.node), indices.get(&edge.to.node)) else {
+            let missing = if indices.contains_key(&edge.from.node) { edge.to.node.as_str() } else { edge.from.node.as_str() };
+            diagnostics.push(warning(
+                codes::UNSUPPORTED,
+                format!(
+                    "sequence message `{}->{}` references unknown participant `{missing}` and is skipped",
+                    edge.from.node, edge.to.node
+                ),
+            ));
+            continue;
+        };
+        if from_index == to_index {
+            diagnostics.push(warning(
+                codes::UNSUPPORTED,
+                format!("self sequence message `{}->{}` is not routed and is skipped", edge.from.node, edge.to.node),
+            ));
+            continue;
+        }
+        let line_y = first_row + row_height * (messages.len() as f64 + 0.5);
+        let from = Point::new(rects[from_index].center().x, line_y);
+        let to = Point::new(rects[to_index].center().x, line_y);
+        let label = edge.label.clone().filter(|label| !label.trim().is_empty());
+        let label_box = label
+            .as_ref()
+            .map(|label| estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), options.font_size));
+        if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
+            diagnostics.push(warning(
+                codes::APPROXIMATED,
+                format!(
+                    "dotted sequence message `{}->{}` is rendered as a solid line because the scene style has no dash surface",
+                    edge.from.node, edge.to.node
+                ),
+            ));
+        }
+        messages.push(RoutedEdge {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            points: vec![from, to],
+            label,
+            label_box,
+            style: edge.style,
+        });
+    }
+
+    let content_bottom = first_row + row_height * messages.len() as f64;
+    let canvas = Size::new(right + options.margin, content_bottom + options.margin);
+    let placed_nodes = participants
+        .iter()
+        .enumerate()
+        .map(|(index, participant)| PlacedNode {
+            id: participant.id.clone(),
+            label: resolved_label(participant),
+            shape: participant.shape,
+            rect: rects[index],
+            cluster: None,
+            ports: BTreeMap::new(),
+        })
+        .collect();
+
+    DiagramLayoutPlan { canvas, nodes: placed_nodes, edges: messages, clusters: Vec::new(), diagnostics }
 }
 
 fn resolve_nodes(spec: &DiagramSpec, diagnostics: &mut Vec<Diagnostic>) -> Vec<ResolvedNode> {
@@ -514,12 +656,15 @@ fn reachable(successors: &[Vec<usize>], from: usize, to: usize) -> bool {
 }
 
 fn node_size(node: &ResolvedNode, options: &LayoutOptions) -> Size {
-    let label = resolved_label(node);
+    label_size(&resolved_label(node), node.shape, options)
+}
+
+fn label_size(label: &str, shape: NodeShape, options: &LayoutOptions) -> Size {
     let lines: Vec<&str> = label.split('\n').collect();
     let longest = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
     let width = (longest as f64 * options.font_size * 0.6 + options.padding_x * 2.0).max(options.min_node_width);
     let height = (lines.len() as f64 * options.font_size * 1.4 + options.padding_y * 2.0).max(options.min_node_height);
-    if matches!(node.shape, NodeShape::Circle) {
+    if matches!(shape, NodeShape::Circle) {
         let side = width.max(height);
         Size::new(side, side)
     }

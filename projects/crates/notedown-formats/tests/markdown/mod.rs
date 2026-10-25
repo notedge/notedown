@@ -271,15 +271,15 @@ fn markdown_reference_links_resolve_definitions_and_reopen_as_inline_links() {
     let links = content
         .iter()
         .filter_map(|inline| match inline {
-            Inline::Link { target, display, .. } => Some((target, display)),
+            Inline::Link { target, display, title } => Some((target, display, title)),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(links.len(), 2, "{content:#?}; output={markdown:?}");
-    assert!(links.iter().all(|(target, _)| **target == RelationEndpoint::ExternalUri("https://example.com/guide".into())));
-    assert_eq!(links.iter().map(|(_, display)| display[0].plain_text()).collect::<Vec<_>>(), vec!["the guide", "guide"]);
+    assert!(links.iter().all(|(target, _, _)| **target == RelationEndpoint::ExternalUri("https://example.com/guide".into())));
+    assert_eq!(links.iter().map(|(_, display, _)| display[0].plain_text()).collect::<Vec<_>>(), vec!["the guide", "guide"]);
+    assert_eq!(links.iter().map(|(_, _, title)| title.as_deref()).collect::<Vec<_>>(), vec![Some("Guide"), Some("Guide")]);
     assert!(graph.validate().is_valid());
-    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.markdown.reference_definition_title"));
 }
 
 #[test]
@@ -565,7 +565,7 @@ fn markdown_inline_code_matches_opening_backtick_run() {
         panic!("padded paragraph expected: {:#?}", graph.blocks)
     };
     assert_eq!(content.get(1), Some(&Inline::InlineCode { text: "`a`".into() }), "{content:#?}");
-    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>(), "Use `a` here.\n", "{content:#?}");
+    assert_eq!(content.iter().map(Inline::plain_text).collect::<String>(), "Use `a` here.", "{content:#?}");
     assert!(graph.validate().is_valid());
 }
 

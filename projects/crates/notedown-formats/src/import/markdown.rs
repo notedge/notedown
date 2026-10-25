@@ -58,6 +58,7 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
         }
     }
     let mut index = 0;
+    let mut pending_footnote: Option<(usize, usize)> = None;
     while let Some(child) = children.get(index).copied() {
         index += 1;
         let RedTree::Node(node) = child
@@ -67,7 +68,37 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
         if let Some((offset, heading)) = setext_heading(node, children.get(index..).unwrap_or_default(), source, &mut context) {
             graph.push_block(heading);
             index += offset + 1;
+            pending_footnote = None;
             continue;
+        }
+        if node.element_type() == MarkdownElementType::CodeBlock {
+            let (language, content, consumed) = extract_code_block(node, source, children.get(index..).unwrap_or_default());
+            index += consumed;
+            let block = match language {
+                Some(language) if is_diagram_language(&language) => Block::Diagram { language, source: content },
+                language => Block::Code { language, content },
+            };
+            graph.push_block(block);
+            pending_footnote = None;
+            continue;
+        }
+        if node.element_type() == MarkdownElementType::FootnoteDefinition {
+            graph.push_block(Block::Opaque {
+                kind: "footnote_definition".into(),
+                payload_hint: node.text(source).into_owned(),
+                status: SemanticStatus::Resolved,
+            });
+            pending_footnote = Some((graph.blocks.len() - 1, node.span().end));
+            continue;
+        }
+        if let Some((block_index, definition_end)) = pending_footnote {
+            if node.element_type() == MarkdownElementType::Paragraph
+                && append_footnote_continuation(&mut graph, block_index, definition_end, node, source)
+            {
+                pending_footnote = Some((block_index, node.span().end));
+                continue;
+            }
+            pending_footnote = None;
         }
         match lower_block_node(node, source, &mut context, &mut graph) {
             BlockOutcome::Block(block) => {
@@ -104,8 +135,13 @@ enum BlockOutcome {
 
 #[derive(Default)]
 struct LinkContext {
-    definitions: HashMap<String, String>,
+    definitions: HashMap<String, LinkDefinition>,
     losses: Vec<LossMarker>,
+}
+
+struct LinkDefinition {
+    destination: String,
+    title: Option<String>,
 }
 
 /// Promote a CommonMark setext heading before the underline is lowered as a
@@ -162,15 +198,8 @@ fn register_link_definition_node(node: RedNode<MarkdownLanguage>, source: &Sourc
     }
     let text = node.text(source);
     let raw = text.trim();
-    if let Some((label, destination, has_title)) = parse_link_definition(raw) {
-        context.definitions.entry(label).or_insert(destination);
-        if has_title {
-            context.losses.push(LossMarker {
-                code: "import.markdown.reference_definition_title".into(),
-                message: "reference-link definition title is not represented in the current link IR".into(),
-                status: SemanticStatus::Lossy,
-            });
-        }
+    if let Some((label, destination, title)) = parse_link_definition(raw) {
+        context.definitions.entry(label).or_insert(LinkDefinition { destination, title });
         return;
     }
     if raw.starts_with('[') && raw.contains("]:") {
@@ -182,20 +211,18 @@ fn register_link_definition_node(node: RedNode<MarkdownLanguage>, source: &Sourc
     }
 }
 
-fn parse_link_definition(raw: &str) -> Option<(String, String, bool)> {
+fn parse_link_definition(raw: &str) -> Option<(String, String, Option<String>)> {
     let close = reference_label_close(raw.strip_prefix('[')?)? + 1;
     if !raw[close..].starts_with("]:") {
         return None;
     }
     let label = raw.get(1..close)?.trim();
     let remainder = raw.get(close + 2..)?.trim();
-    let destination = remainder.split_whitespace().next()?;
+    let (destination, title) = split_destination_and_title(remainder);
     if label.is_empty() || destination.is_empty() {
         return None;
     }
-    let has_title = remainder.strip_prefix(destination).is_some_and(|tail| !tail.trim().is_empty());
-    let destination = destination.strip_prefix('<').and_then(|value| value.strip_suffix('>')).unwrap_or(destination);
-    Some((normalize_link_label(label), decode_escaped_text(destination), has_title))
+    Some((normalize_link_label(label), destination, title))
 }
 
 fn normalize_link_label(label: &str) -> String {
@@ -257,7 +284,8 @@ fn lower_block_node(
                 BlockOutcome::Skip
             }
             else {
-                let content = collect_inlines(node, source, context);
+                let mut content = collect_inlines(node, source, context);
+                trim_trailing_line_break(&mut content);
                 if content.is_empty() {
                     // Markdown blank lines and container-trailing newlines are not
                     // paragraphs: an empty inline result must never reach the graph.
@@ -267,20 +295,13 @@ fn lower_block_node(
             }
         }
         MarkdownElementType::CodeBlock => {
-            let (language, content) = extract_code_block(node, source);
-            match language {
-                Some(language) if is_diagram_language(&language) => BlockOutcome::Block(Block::Diagram { language, source: content }),
-                language => BlockOutcome::Block(Block::Code { language, content }),
-            }
+            // Fenced code is lowered in `lower_markdown_tree` because a premature
+            // short closing fence needs lookahead over the following siblings.
+            BlockOutcome::Skip
         }
         MarkdownElementType::MathBlock => {
             BlockOutcome::Block(Block::Math { content: strip_math_delimiters(&node.text(source), "$$"), language: Some("latex".into()) })
         }
-        MarkdownElementType::FootnoteDefinition => BlockOutcome::Block(Block::Opaque {
-            kind: "footnote_definition".into(),
-            payload_hint: node.text(source).into_owned(),
-            status: SemanticStatus::Resolved,
-        }),
         MarkdownElementType::List => {
             let (ordered, items) = extract_list(node, source, context, graph);
             BlockOutcome::Block(Block::List { ordered, items })
@@ -394,6 +415,31 @@ fn push_soft_break(inlines: &mut Vec<Inline>) {
     inlines.push(Inline::Break { kind: BreakKind::Soft });
 }
 
+/// A paragraph's final line break terminates the block in the source; it is
+/// not authored content and must not survive into the inline stream.
+fn trim_trailing_line_break(inlines: &mut Vec<Inline>) {
+    let Some(Inline::Text { text }) = inlines.last_mut()
+    else {
+        return;
+    };
+    let trim = if text.ends_with("\r\n") {
+        2
+    }
+    else if text.ends_with('\n') || text.ends_with('\r') {
+        1
+    }
+    else {
+        0
+    };
+    if trim > 0 {
+        let length = text.len();
+        text.truncate(length - trim);
+    }
+    if text.is_empty() {
+        inlines.pop();
+    }
+}
+
 /// Strip CommonMark code-span delimiters: a matching backtick run on both
 /// sides plus the optional single space padding inside the span.
 fn inline_code_text(raw: &str) -> String {
@@ -416,30 +462,30 @@ fn inline_code_text(raw: &str) -> String {
 
 fn parse_inline_link(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Option<Inline> {
     let raw = node.text(source);
-    if let Some((text, url)) = resolve_link_destination(raw.as_ref(), context) {
-        return Some(Inline::Link { target: RelationEndpoint::ExternalUri(url), display: vec![Inline::Text { text }], title: None });
+    if let Some((text, url, title)) = resolve_link_destination(raw.as_ref(), context) {
+        return Some(Inline::Link { target: RelationEndpoint::ExternalUri(url), display: vec![Inline::Text { text }], title });
     }
     Some(Inline::Text { text: decode_escaped_text(raw.trim_end()) })
 }
 
 fn parse_inline_image(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Option<Inline> {
     let raw = node.text(source);
-    let Some((alt, url)) = resolve_link_destination(raw.as_ref(), context)
+    let Some((alt, url, title)) = resolve_link_destination(raw.as_ref(), context)
     else {
         return Some(Inline::Text { text: decode_escaped_text(raw.trim_end()) });
     };
-    Some(Inline::Image { source: url, alt: vec![Inline::Text { text: alt }], title: None, asset: None })
+    Some(Inline::Image { source: url, alt: vec![Inline::Text { text: alt }], title, asset: None })
 }
 
 /// Resolve an inline or reference destination, recording explicit unresolved
 /// labels.
-fn resolve_link_destination(raw: &str, context: &mut LinkContext) -> Option<(String, String)> {
-    if let Some((text, url)) = split_markdown_link(raw) {
-        return Some((text, url));
+fn resolve_link_destination(raw: &str, context: &mut LinkContext) -> Option<(String, String, Option<String>)> {
+    if let Some((text, url, title)) = split_markdown_link(raw) {
+        return Some((text, url, title));
     }
     if let Some((text, label, explicit)) = split_reference_link(raw.trim_end()) {
-        if let Some(destination) = context.definitions.get(&normalize_link_label(&label)) {
-            return Some((text, destination.clone()));
+        if let Some(definition) = context.definitions.get(&normalize_link_label(&label)) {
+            return Some((text, definition.destination.clone(), definition.title.clone()));
         }
         if explicit {
             context.losses.push(LossMarker {
@@ -452,17 +498,71 @@ fn resolve_link_destination(raw: &str, context: &mut LinkContext) -> Option<(Str
     None
 }
 
-fn split_markdown_link(raw: &str) -> Option<(String, String)> {
+fn split_markdown_link(raw: &str) -> Option<(String, String, Option<String>)> {
     let start = raw.find("](")?;
     let label = raw[..start].trim();
     let text = decode_escaped_text(label.strip_prefix("![").or_else(|| label.strip_prefix('['))?);
     let destination = &raw[start + 2..];
     let close = link_destination_close(destination)?;
-    let url = decode_escaped_text(destination[..close].trim());
+    let (url, title) = split_destination_and_title(destination[..close].trim());
     if text.is_empty() || url.is_empty() {
         return None;
     }
-    Some((text, url))
+    Some((text, url, title))
+}
+
+/// Split a CommonMark destination from its optional trailing title.
+///
+/// A bare destination ends at the first unescaped whitespace, an angle-bracket
+/// destination ends at `>`, and the title must be wrapped in `"`, `'`, or
+/// parentheses. Titles are part of the link IR, so they survive a round trip
+/// instead of being folded into the URL.
+fn split_destination_and_title(raw: &str) -> (String, Option<String>) {
+    let raw = raw.trim();
+    if let Some(rest) = raw.strip_prefix('<') {
+        if let Some(end) = rest.find('>') {
+            let title = parse_link_title(rest[end + 1..].trim());
+            return (decode_escaped_text(&rest[..end]), title);
+        }
+        return (decode_escaped_text(raw), None);
+    }
+    match unescaped_whitespace(raw) {
+        Some(index) => (decode_escaped_text(&raw[..index]), parse_link_title(raw[index..].trim())),
+        None => (decode_escaped_text(raw), None),
+    }
+}
+
+fn unescaped_whitespace(text: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character.is_whitespace() {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn parse_link_title(raw: &str) -> Option<String> {
+    let mut characters = raw.chars();
+    let open = characters.next()?;
+    let close = match open {
+        '"' => '"',
+        '\'' => '\'',
+        '(' => ')',
+        _ => return None,
+    };
+    if raw.len() < 2 || !raw.ends_with(close) {
+        return None;
+    }
+    Some(decode_escaped_text(&raw[open.len_utf8()..raw.len() - close.len_utf8()]))
 }
 
 fn strip_math_delimiters(text: &str, delimiter: &str) -> String {
@@ -522,15 +622,31 @@ fn is_diagram_language(language: &str) -> bool {
 /// `Link "["` and `Text "Start"`). Rebuilding the body token by token dropped
 /// every element the lowering did not know about, so the content is taken from
 /// the source byte range instead.
-fn extract_code_block(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (Option<String>, String) {
+///
+/// `oak-markdown` closes a fence at the first fence run of the same character
+/// regardless of length. CommonMark requires the closing fence to be at least
+/// as long as the opening one, so a shorter run inside a longer fence splits
+/// the block. The returned `consumed` count is the number of following siblings
+/// that the repaired body swallowed.
+fn extract_code_block(
+    node: RedNode<MarkdownLanguage>,
+    source: &SourceText,
+    trailing: &[RedTree<MarkdownLanguage>],
+) -> (Option<String>, String, usize) {
     let node_span = node.span();
     let mut language = None;
     let mut body_start = None;
     let mut body_end = node_span.end;
+    let mut opening = None;
+    let mut closing = None;
     for child in node.children() {
         match child.kind::<MarkdownElementType>() {
-            MarkdownElementType::CodeFence if body_start.is_none() => body_start = Some(child.span().end),
+            MarkdownElementType::CodeFence if body_start.is_none() => {
+                opening = fence_run(&child.text(source));
+                body_start = Some(child.span().end);
+            }
             MarkdownElementType::CodeFence => {
+                closing = fence_run(&child.text(source));
                 body_end = child.span().start;
                 break;
             }
@@ -545,9 +661,68 @@ fn extract_code_block(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (
             _ => {}
         }
     }
+    if let (Some(opening), Some(closing), Some(start)) = (opening, closing, body_start) {
+        if closing.length < opening.length {
+            if let Some((close_start, close_end)) = find_closing_fence(source, node_span.end, opening) {
+                let raw = source.slice((start.min(close_start)..close_start).into());
+                let consumed = trailing.iter().take_while(|child| child.span().start < close_end).count();
+                return (language, strip_fence_line_remainder(&raw).to_string(), consumed);
+            }
+        }
+    }
     let start = body_start.unwrap_or(node_span.start).min(body_end);
     let raw = source.slice((start..body_end).into());
-    (language, strip_fence_line_remainder(&raw).to_string())
+    (language, strip_fence_line_remainder(&raw).to_string(), 0)
+}
+
+#[derive(Clone, Copy)]
+struct FenceRun {
+    character: char,
+    length: usize,
+}
+
+fn fence_run(text: &str) -> Option<FenceRun> {
+    let trimmed = text.trim_start_matches([' ', '\t']);
+    let character = trimmed.chars().next()?;
+    if character != '`' && character != '~' {
+        return None;
+    }
+    let length = trimmed.chars().take_while(|item| *item == character).count();
+    (length > 0).then_some(FenceRun { character, length })
+}
+
+/// Find the first line at or after `from` that closes `opening` per CommonMark:
+/// only the same fence character repeated at least as many times, with no info
+/// string.
+fn find_closing_fence(source: &SourceText, from: usize, opening: FenceRun) -> Option<(usize, usize)> {
+    let text = source.text();
+    let length = text.len();
+    let mut offset = from.min(length);
+    while offset < length {
+        let rest = &text[offset..];
+        let line_end = rest.find(['\r', '\n']).map(|index| offset + index).unwrap_or(length);
+        let line = &text[offset..line_end];
+        if let Some(run) = fence_run(line) {
+            let remainder = &line.trim_start_matches([' ', '\t'])[run.length..];
+            if run.character == opening.character && run.length >= opening.length && remainder.trim().is_empty() {
+                let after = if line_end >= length {
+                    line_end
+                }
+                else if rest[line_end - offset..].starts_with("\r\n") {
+                    line_end + 2
+                }
+                else {
+                    line_end + 1
+                };
+                return Some((offset, after.min(length)));
+            }
+        }
+        if line_end >= length {
+            break;
+        }
+        offset = line_end + 1;
+    }
+    None
 }
 
 /// A fence body starts on the line after the opening fence and its info
@@ -569,6 +744,35 @@ fn strip_leading_line_break(text: &str) -> &str {
 
 fn strip_trailing_line_break(text: &str) -> &str {
     text.strip_suffix("\r\n").or_else(|| text.strip_suffix('\n')).or_else(|| text.strip_suffix('\r')).unwrap_or(text)
+}
+
+/// GFM footnote definitions continue on the immediately following lines when
+/// those lines are indented by at least four spaces. `oak-markdown` ends the
+/// definition at the first line, so the continuation arrives as a separate
+/// paragraph and would move into the document body. Append its raw source to
+/// the definition payload instead.
+fn append_footnote_continuation(
+    graph: &mut DocumentGraph,
+    block_index: usize,
+    definition_end: usize,
+    node: RedNode<MarkdownLanguage>,
+    source: &SourceText,
+) -> bool {
+    let continuation = source.slice((definition_end..node.span().end).into());
+    let after_break = strip_leading_line_break(continuation.as_ref());
+    if after_break.len() == continuation.len() || after_break.starts_with(['\n', '\r']) {
+        return false;
+    }
+    if !(after_break.starts_with("    ") || after_break.starts_with('\t')) {
+        return false;
+    }
+    let Some(Block::Opaque { payload_hint, .. }) = graph.blocks.get_mut(block_index).map(|item| &mut item.block)
+    else {
+        return false;
+    };
+    payload_hint.push('\n');
+    payload_hint.push_str(strip_trailing_line_break(after_break));
+    true
 }
 
 fn list_item_marker(node: RedNode<MarkdownLanguage>, source: &SourceText) -> Option<String> {
@@ -700,7 +904,9 @@ fn lower_blockquote_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText
                             lower_blockquote_inlines(child_node, source, context)
                         }
                         else {
-                            collect_inlines(child_node, source, context)
+                            let mut content = collect_inlines(child_node, source, context);
+                            trim_trailing_line_break(&mut content);
+                            content
                         };
                         for inline in nested {
                             push_inline(&mut inlines, inline);
@@ -738,13 +944,20 @@ fn extract_table(node: RedNode<MarkdownLanguage>, source: &SourceText, context: 
             if cell_node.element_type() != MarkdownElementType::TableCell {
                 continue;
             }
-            let content = trim_inline_edges(collect_inlines(cell_node, source, context));
+            let content = decode_table_cell_inline_code(trim_inline_edges(collect_inlines(cell_node, source, context)));
             cells.push(TableCell { content, colspan: 1, rowspan: 1 });
         }
         if cells.last().is_some_and(|cell| inline_text(&cell.content).is_empty()) {
             cells.pop();
         }
         if cells.is_empty() || is_table_separator_row(&cells) {
+            if cells.iter().any(|cell| inline_text(&cell.content).contains(':')) {
+                context.losses.push(LossMarker {
+                    code: "import.markdown.table_alignment".into(),
+                    message: "GFM column alignment is not represented in the table IR, so the reopened table uses default alignment".into(),
+                    status: SemanticStatus::Partial,
+                });
+            }
             continue;
         }
         let is_header = header_pending;
@@ -769,6 +982,19 @@ fn trim_inline_edges(mut inlines: Vec<Inline>) -> Vec<Inline> {
     }
     inlines.retain(|inline| !matches!(inline, Inline::Text { text } if text.is_empty()));
     inlines
+}
+
+/// Inside a GFM table row a `\|` is a literal pipe even in a code span, so the
+/// code text is decoded on the way into the IR.
+fn decode_table_cell_inline_code(inlines: Vec<Inline>) -> Vec<Inline> {
+    inlines
+        .into_iter()
+        .map(|inline| match inline {
+            Inline::InlineCode { text } => Inline::InlineCode { text: text.replace("\\|", "|") },
+            Inline::Styled { style, children } => Inline::Styled { style, children: decode_table_cell_inline_code(children) },
+            other => other,
+        })
+        .collect()
 }
 
 fn inline_text(inlines: &[Inline]) -> String {

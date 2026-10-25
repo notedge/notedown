@@ -118,7 +118,7 @@ fn write_block(
             out.push('\n');
         }
         Block::Table { rows, .. } => {
-            write_table(out, rows)?;
+            write_table(out, rows, image_urls)?;
             out.push('\n');
         }
         Block::Math { content, language } => {
@@ -176,7 +176,7 @@ fn write_list(
     Ok(())
 }
 
-fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
+fn write_table(out: &mut String, rows: &[TableRow], image_urls: Option<&HashMap<String, String>>) -> Result<(), FormatError> {
     if rows.is_empty() {
         return Ok(());
     }
@@ -184,7 +184,7 @@ fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
         out.push('|');
         for cell in &row.cells {
             out.push(' ');
-            write_table_cell(out, &cell.content)?;
+            write_table_cell(out, &cell.content, image_urls)?;
             out.push_str(" |");
         }
         out.push('\n');
@@ -206,10 +206,10 @@ fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
     Ok(())
 }
 
-fn write_table_cell(out: &mut String, inlines: &[Inline]) -> Result<(), FormatError> {
-    let text = inlines.iter().map(inline_plain_text).collect::<String>();
-    write_markdown_text(out, &text.replace('\n', " "));
-    Ok(())
+/// Table cells carry the full inline IR, so emphasis, code spans, links, and
+/// images must be written as Markdown rather than flattened to plain text.
+fn write_table_cell(out: &mut String, inlines: &[Inline], image_urls: Option<&HashMap<String, String>>) -> Result<(), FormatError> {
+    write_inlines_in_table_cell(out, inlines, image_urls, true)
 }
 
 fn inline_plain_text(inline: &Inline) -> String {
@@ -217,13 +217,27 @@ fn inline_plain_text(inline: &Inline) -> String {
 }
 
 fn write_inlines(out: &mut String, inlines: &[Inline], image_urls: Option<&HashMap<String, String>>) -> Result<(), FormatError> {
+    write_inlines_in_table_cell(out, inlines, image_urls, false)
+}
+
+fn write_inlines_in_table_cell(
+    out: &mut String,
+    inlines: &[Inline],
+    image_urls: Option<&HashMap<String, String>>,
+    in_table_cell: bool,
+) -> Result<(), FormatError> {
     for inline in inlines {
-        write_inline(out, inline, image_urls)?;
+        write_inline(out, inline, image_urls, in_table_cell)?;
     }
     Ok(())
 }
 
-fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<String, String>>) -> Result<(), FormatError> {
+fn write_inline(
+    out: &mut String,
+    inline: &Inline,
+    image_urls: Option<&HashMap<String, String>>,
+    in_table_cell: bool,
+) -> Result<(), FormatError> {
     match inline {
         Inline::Text { text } => {
             write_markdown_text(out, text);
@@ -236,7 +250,12 @@ fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<S
             if needs_padding {
                 out.push(' ');
             }
-            out.push_str(text);
+            if in_table_cell {
+                out.push_str(&text.replace('|', "\\|"));
+            }
+            else {
+                out.push_str(text);
+            }
             if needs_padding {
                 out.push(' ');
             }
@@ -252,7 +271,7 @@ fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<S
                 }
             };
             out.push_str(wrapper.0);
-            write_inlines(out, children, image_urls)?;
+            write_inlines_in_table_cell(out, children, image_urls, in_table_cell)?;
             out.push_str(wrapper.1);
         }
         Inline::InlineMath { content, language } => {
@@ -268,20 +287,21 @@ fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<S
             ));
         }
         Inline::Link { target, display, title } => {
-            let url = markdown_link_destination(target, title.as_deref())?;
+            let url = markdown_link_destination(target)?;
             out.push('[');
-            write_inlines(out, display, image_urls)?;
+            write_inlines_in_table_cell(out, display, image_urls, in_table_cell)?;
             out.push_str("](");
             write_markdown_destination(out, url);
+            write_markdown_title(out, title.as_deref())?;
             out.push(')');
         }
         Inline::Image { source, alt, title, asset: _ } => {
-            ensure_markdown_inline_title(title.as_deref())?;
             let url = image_urls.and_then(|map| map.get(source)).map(String::as_str).unwrap_or(source.as_str());
             out.push_str("![");
             write_markdown_text(out, &alt.iter().map(inline_plain_text).collect::<String>());
             out.push_str("](");
             write_markdown_destination(out, url);
+            write_markdown_title(out, title.as_deref())?;
             out.push(')');
         }
         Inline::Note { label, display } => {
@@ -296,8 +316,22 @@ fn write_inline(out: &mut String, inline: &Inline, image_urls: Option<&HashMap<S
             out.push(']');
         }
         Inline::Break { kind } => match kind {
-            BreakKind::Soft => out.push('\n'),
-            BreakKind::Hard => out.push_str("  \n"),
+            BreakKind::Soft => {
+                if in_table_cell {
+                    out.push(' ');
+                }
+                else {
+                    out.push('\n');
+                }
+            }
+            BreakKind::Hard => {
+                if in_table_cell {
+                    out.push(' ');
+                }
+                else {
+                    out.push_str("  \n");
+                }
+            }
         },
         Inline::Citation { .. } | Inline::Attributed { .. } => {
             return Err(FormatError::unsupported(
@@ -328,23 +362,31 @@ fn ensure_latex_math(content: &str, language: Option<&str>) -> Result<(), Format
 /// Resolve a semantic link target to a Markdown destination.
 ///
 /// Only external URIs have a stable Markdown spelling. Node and asset endpoints
-/// are reported instead of being flattened into text, and a link title is
-/// rejected because the import side does not read titles back yet.
-fn markdown_link_destination<'a>(target: &'a RelationEndpoint, title: Option<&str>) -> Result<&'a str, FormatError> {
-    ensure_markdown_inline_title(title)?;
+/// are reported instead of being flattened into text. Titles are read back by
+/// the importer, so they are written next to the destination.
+fn markdown_link_destination(target: &RelationEndpoint) -> Result<&str, FormatError> {
     match target {
         RelationEndpoint::ExternalUri(url) => Ok(url),
         other => Err(FormatError::unsupported("markdown", format!("link target `{other:?}` has no stable Markdown destination mapping"))),
     }
 }
 
-fn ensure_markdown_inline_title(title: Option<&str>) -> Result<(), FormatError> {
-    if title.is_some() {
-        return Err(FormatError::unsupported(
-            "markdown",
-            "inline title is not read back by the Markdown importer yet, so it cannot be written silently lossy",
-        ));
+fn write_markdown_title(out: &mut String, title: Option<&str>) -> Result<(), FormatError> {
+    let Some(title) = title
+    else {
+        return Ok(());
+    };
+    if title.contains(['\n', '\r']) {
+        return Err(FormatError::unsupported("markdown", "inline title cannot contain a line break"));
     }
+    out.push_str(" \"");
+    for character in title.chars() {
+        if matches!(character, '\\' | '"') {
+            out.push('\\');
+        }
+        out.push(character);
+    }
+    out.push('"');
     Ok(())
 }
 

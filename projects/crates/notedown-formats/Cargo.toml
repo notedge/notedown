@@ -56,6 +56,11 @@ path = "tests/markdown/mod.rs"
 required-features = ["markdown"]
 
 [[test]]
+name = "markdown_roundtrip"
+path = "tests/markdown/roundtrip.rs"
+required-features = ["markdown"]
+
+[[test]]
 name = "markdown_export_project"
 path = "tests/markdown/export_project.rs"
 required-features = ["markdown"]

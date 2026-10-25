@@ -190,11 +190,8 @@ fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
         out.push('\n');
         if row.is_header {
             out.push('|');
-            for cell in &row.cells {
-                let dashes = "-".repeat(cell.colspan.max(1) as usize);
-                out.push(' ');
-                out.push_str(&dashes);
-                out.push_str(" |");
+            for _ in &row.cells {
+                out.push_str(" --- |");
             }
             out.push('\n');
         }

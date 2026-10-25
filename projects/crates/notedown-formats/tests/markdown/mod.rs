@@ -160,6 +160,25 @@ fn markdown_tables_lower_header_and_rows() {
 }
 
 #[test]
+fn markdown_table_export_uses_three_hyphen_delimiters() {
+    let source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    let graph = import_markdown_bytes("table-delimiter.md", source).expect("import markdown");
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.starts_with("| A | B |\n| --- | --- |\n"), "{markdown:?}");
+    let reopened = import_markdown_bytes("table-delimiter-roundtrip.md", &markdown).expect("reopen markdown");
+    let Block::Table { rows, .. } = &reopened.blocks[0].block
+    else {
+        panic!("reopened table expected: {:#?}", reopened.blocks)
+    };
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].is_header);
+    assert_eq!(
+        rows[1].cells.iter().map(|cell| cell.content.iter().map(Inline::plain_text).collect::<String>()).collect::<Vec<_>>(),
+        vec!["1".to_string(), "2".to_string()]
+    );
+}
+
+#[test]
 fn markdown_inline_code_strips_backticks() {
     let source = "Use `code` here.\n";
     let graph = import_markdown_bytes("inline-code.md", source).expect("import markdown");

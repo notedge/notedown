@@ -341,6 +341,53 @@ fn docx_imports_ordered_lists_from_numbering_xml() {
 }
 
 #[test]
+fn docx_imports_nested_ordered_lists_with_sequential_numbers() {
+    const NESTED_NUMBERING_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0">
+      <w:numFmt w:val="decimal"/>
+    </w:lvl>
+    <w:lvl w:ilvl="1">
+      <w:numFmt w:val="decimal"/>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1">
+    <w:abstractNumId w:val="0"/>
+  </w:num>
+</w:numbering>"#;
+    let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Parent</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Child one</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Child two</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Second</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let zip = stored_zip(&[("word/document.xml", document_xml), ("word/numbering.xml", NESTED_NUMBERING_XML)]);
+    let graph = import_docx_bytes("nested-ol.docx", &zip).expect("import docx");
+    assert!(graph.validate().is_valid(), "{:#?}", graph.validate().issues);
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("1. Parent"), "{markdown:?}");
+    assert!(markdown.contains("  1. Child one"), "{markdown:?}");
+    assert!(markdown.contains("  2. Child two"), "{markdown:?}");
+    assert!(markdown.contains("2. Second"), "{markdown:?}");
+}
+
+#[test]
 fn docx_imports_numbered_paragraphs_as_list() {
     let document_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">

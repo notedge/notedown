@@ -161,6 +161,11 @@ path = "tests/typst/mod.rs"
 required-features = ["typst"]
 
 [[test]]
+name = "diagram_fidelity"
+path = "tests/integration/diagram_fidelity.rs"
+required-features = ["markdown", "html", "docx", "pdf"]
+
+[[test]]
 name = "markdown_to_docx"
 path = "tests/integration/markdown_to_docx.rs"
 required-features = ["docx", "markdown"]

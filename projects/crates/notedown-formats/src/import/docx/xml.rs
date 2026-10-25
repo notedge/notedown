@@ -678,6 +678,11 @@ fn paragraph_inlines(paragraph: &ParagraphState) -> Option<Vec<Inline>> {
 }
 
 fn push_paragraph(graph: &mut DocumentGraph, paragraph: &ParagraphState) {
+    if let Some(language) = diagram_language(&paragraph.style) {
+        let source = paragraph.inlines.iter().map(Inline::plain_text).collect::<String>();
+        graph.push_block(Block::Diagram { language, source });
+        return;
+    }
     let Some(inlines) = paragraph_inlines(paragraph)
     else {
         return;
@@ -694,6 +699,13 @@ fn push_paragraph(graph: &mut DocumentGraph, paragraph: &ParagraphState) {
         });
     }
     graph.push_block(Block::Paragraph { content: inlines });
+}
+
+/// Diagram paragraphs carry their language in the paragraph style written by
+/// the DOCX exporter, so the block reopens with the same language and source.
+fn diagram_language(style: &Option<String>) -> Option<String> {
+    let language = style.as_deref()?.strip_prefix("Diagram:")?.trim();
+    (!language.is_empty()).then(|| language.to_string())
 }
 
 fn heading_level(style: &Option<String>) -> Option<u8> {

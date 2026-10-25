@@ -92,9 +92,19 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
                 write_block(out, &child.block, graph, rels)?;
             }
         }
-        Block::Code { content, .. } | Block::Diagram { source: content, .. } => {
+        Block::Code { content, .. } => {
             out.push_str("<w:p>");
             write_run_text(out, content)?;
+            out.push_str("</w:p>");
+        }
+        Block::Diagram { language, source } => {
+            // The diagram language has no WordprocessingML paragraph property,
+            // so it travels in the paragraph style and is read back by the
+            // importer. The source stays plain text.
+            out.push_str("<w:p><w:pPr><w:pStyle w:val=\"Diagram:");
+            write_xml_text(out, language)?;
+            out.push_str("\"/></w:pPr>");
+            write_run_text(out, source)?;
             out.push_str("</w:p>");
         }
         Block::Quote { content } => {

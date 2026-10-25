@@ -116,8 +116,8 @@ impl<'a> TypstLowerer<'a> {
     fn lower_root(&mut self, items: &[TypstItem], region_end: usize, sink: &mut Sink) {
         let mut index = 0;
         while index < items.len() {
-            if let Some((lines, end)) = self.ordered_list_ahead() {
-                self.lower_list_items(lines, true, sink);
+            if let Some((lines, ordered, end)) = self.list_ahead() {
+                self.lower_list_items(lines, ordered, sink);
                 self.cursor = end;
                 self.lower_tail(end, region_end, sink);
                 return;
@@ -441,22 +441,28 @@ impl<'a> TypstLowerer<'a> {
         Inline::Link { target: RelationEndpoint::ExternalUri(link.url.clone()), display, title: None }
     }
 
-    fn ordered_list_ahead(&self) -> Option<(Vec<ListLine>, usize)> {
+    fn list_ahead(&self) -> Option<(Vec<ListLine>, bool, usize)> {
         if !(self.cursor == 0 || self.source.as_bytes().get(self.cursor - 1) == Some(&b'\n')) {
             return None;
         }
         let mut offset = self.cursor;
         let mut lines = Vec::new();
+        let mut ordered = None;
         while offset < self.source.len() {
             let end = self.source[offset..].find('\n').map(|index| offset + index).unwrap_or(self.source.len());
             let line = self.source[offset..end].trim_end_matches('\r');
-            let Some((number, content)) = list_marker(line, true) else {
+            let Some((line_ordered, number, content)) = list_marker(line) else {
                 break;
             };
+            if ordered.is_some_and(|ordered| ordered != line_ordered) {
+                break;
+            }
+            ordered = Some(line_ordered);
             lines.push(ListLine { number, content: content.to_string() });
             offset = if end < self.source.len() { end + 1 } else { end };
         }
-        if lines.is_empty() { None } else { Some((lines, offset)) }
+        let ordered = ordered?;
+        Some((lines, ordered, offset))
     }
 
     fn advance_text(&mut self, text: &str) {
@@ -525,11 +531,13 @@ fn split_list_lines(raw: &str, ordered: bool) -> (Vec<ListLine>, Option<usize>) 
     let mut saw_item = false;
     for segment in raw.split_inclusive('\n') {
         let line = segment.trim_end_matches('\n').trim_end_matches('\r');
-        if let Some((number, content)) = list_marker(line, ordered) {
-            lines.push(ListLine { number, content: content.to_string() });
-            saw_item = true;
-            offset += segment.len();
-            continue;
+        if let Some((line_ordered, number, content)) = list_marker(line) {
+            if line_ordered == ordered {
+                lines.push(ListLine { number, content: content.to_string() });
+                saw_item = true;
+                offset += segment.len();
+                continue;
+            }
         }
         if !saw_item {
             return (lines, None);
@@ -543,19 +551,18 @@ fn split_list_lines(raw: &str, ordered: bool) -> (Vec<ListLine>, Option<usize>) 
     (lines, None)
 }
 
-fn list_marker(line: &str, ordered: bool) -> Option<(Option<u32>, &str)> {
-    if ordered {
-        let digits: String = line.chars().take_while(|character| character.is_ascii_digit()).collect();
-        if digits.is_empty() {
-            return None;
-        }
-        let rest = &line[digits.len()..];
-        let rest = rest.strip_prefix('.')?;
-        let rest = rest.strip_prefix(' ').or_else(|| rest.strip_prefix('\t'))?;
-        return Some((digits.parse().ok(), rest.trim_end_matches('\r')));
+fn list_marker(line: &str) -> Option<(bool, Option<u32>, &str)> {
+    if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("+ ")).or_else(|| line.strip_prefix("-\t")) {
+        return Some((false, None, rest.trim_end_matches('\r')));
     }
-    let rest = line.strip_prefix("- ").or_else(|| line.strip_prefix("+ ")).or_else(|| line.strip_prefix("-\t"))?;
-    Some((None, rest.trim_end_matches('\r')))
+    let digits: String = line.chars().take_while(|character| character.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let rest = &line[digits.len()..];
+    let rest = rest.strip_prefix('.')?;
+    let rest = rest.strip_prefix(' ').or_else(|| rest.strip_prefix('\t'))?;
+    Some((true, digits.parse().ok(), rest.trim_end_matches('\r')))
 }
 
 fn expression_kind(line: &str) -> String {

@@ -172,8 +172,8 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 /// Nested subgraphs are flattened: a node joins every ancestor cluster of the
 /// block that declares it, so an outer frame still contains nested members.
 ///
-/// Sequence and class diagrams lower through [`mermaid_to_scene`], which selects
-/// their family-specific compile pass.
+/// Sequence and class diagrams lower through [`mermaid_to_scene`], which
+/// selects their family-specific compile pass.
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
     match single_diagram(&root)? {
@@ -187,11 +187,11 @@ pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
 /// Lower Mermaid source to a layout plan and resolved display scene.
 ///
 /// The pipeline is `spec -> compile -> render -> resolve`. Flowcharts and class
-/// diagrams use layered graph layout, sequence diagrams use time-ordered layout.
-/// Diagnostics come from the layout plan; rendering and resolution have no loss
-/// surface because every plan construct has a deterministic scene mapping.
-/// Unsupported sequence statements fail before compilation so the host keeps the
-/// authored source visible instead of dropping the diagram silently.
+/// diagrams use layered graph layout, sequence diagrams use time-ordered
+/// layout. Diagnostics come from the layout plan; rendering and resolution have
+/// no loss surface because every plan construct has a deterministic scene
+/// mapping. Unsupported sequence statements fail before compilation so the host
+/// keeps the authored source visible instead of dropping the diagram silently.
 pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let root = parse_mermaid(source)?;
     match single_diagram(&root)? {
@@ -286,13 +286,7 @@ fn sequence_spec(sequence: &SequenceDiagram) -> Result<DiagramSpec, DiagramError
         }
         for endpoint in [from, to] {
             if known.insert(endpoint.to_string()) {
-                spec.nodes.push(DiagramNode {
-                    id: endpoint.to_string(),
-                    label: None,
-                    shape: NodeShape::Box,
-                    ports: Vec::new(),
-                    cluster: None,
-                });
+                spec.nodes.push(DiagramNode { id: endpoint.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None });
             }
         }
         spec.edges.push(DiagramEdge {
@@ -334,10 +328,10 @@ struct ClassRelationLine {
 ///
 /// Relation kinds keep their UML end marker: inheritance uses a hollow arrow,
 /// composition a filled diamond, aggregation a hollow diamond, association a
-/// filled arrow, and dependency a dotted arrow. The Oak class AST keeps only the
-/// relation kind and endpoint order, so the authored arrow spelling is matched
-/// back to the relation to place the marker on the correct operand. This keeps
-/// `A <|-- B` and `A --|> B` pointing at the same superclass.
+/// filled arrow, and dependency a dotted arrow. The Oak class AST keeps only
+/// the relation kind and endpoint order, so the authored arrow spelling is
+/// matched back to the relation to place the marker on the correct operand.
+/// This keeps `A <|-- B` and `A --|> B` pointing at the same superclass.
 fn class_spec(diagram: &ClassDiagram, source: &str) -> Result<DiagramSpec, DiagramError> {
     let mut spec = DiagramSpec::new(Direction::BottomUp);
     let mut known: BTreeSet<String> = BTreeSet::new();
@@ -367,13 +361,7 @@ fn class_spec(diagram: &ClassDiagram, source: &str) -> Result<DiagramSpec, Diagr
         }
         for endpoint in [source_name, target_name] {
             if known.insert(endpoint.to_string()) {
-                spec.nodes.push(DiagramNode {
-                    id: endpoint.to_string(),
-                    label: None,
-                    shape: NodeShape::Box,
-                    ports: Vec::new(),
-                    cluster: None,
-                });
+                spec.nodes.push(DiagramNode { id: endpoint.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None });
             }
         }
 
@@ -521,11 +509,11 @@ const DIAGRAM_HEADERS: &[&str] = &[
 
 /// Reject sequence statements outside the documented lowering subset.
 ///
-/// `oak-mermaid` skips statements such as `Note`, `loop`, `alt`, `activate`, and
-/// `autonumber`. Skipping them in the AST would render a silently incomplete
-/// sequence, so this guard checks the authored sequence section before lowering:
-/// blank lines, comments, participant/actor declarations, and message arrows are
-/// accepted, and every other statement produces a structured
+/// `oak-mermaid` skips statements such as `Note`, `loop`, `alt`, `activate`,
+/// and `autonumber`. Skipping them in the AST would render a silently
+/// incomplete sequence, so this guard checks the authored sequence section
+/// before lowering: blank lines, comments, participant/actor declarations, and
+/// message arrows are accepted, and every other statement produces a structured
 /// `davinci.diagram.unsupported` error so the host falls back to the authored
 /// source. The guard classifies statement starts only, it does not build a
 /// second AST.
@@ -559,8 +547,7 @@ fn validate_sequence_source(source: &str) -> Result<(), DiagramError> {
 }
 
 fn starts_with_keyword(line: &str, keyword: &str) -> bool {
-    line.strip_prefix(keyword)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':'))
+    line.strip_prefix(keyword).is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':'))
 }
 
 fn require_id(id: &str) -> Result<String, DiagramError> {

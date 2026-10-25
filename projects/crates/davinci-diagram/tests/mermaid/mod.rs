@@ -98,11 +98,7 @@ fn dotted_sequence_messages_are_approximated_with_diagnostics() {
     assert_eq!(lowered.plan.nodes.len(), 2, "message endpoints become implicit participants");
     assert_eq!(lowered.plan.edges.len(), 2);
     assert_eq!(lowered.diagnostics.len(), 2, "both dotted styles lose their dash surface: {:?}", lowered.diagnostics);
-    assert!(
-        lowered.diagnostics.iter().all(|diagnostic| diagnostic.code().as_str() == codes::APPROXIMATED),
-        "{:?}",
-        lowered.diagnostics
-    );
+    assert!(lowered.diagnostics.iter().all(|diagnostic| diagnostic.code().as_str() == codes::APPROXIMATED), "{:?}", lowered.diagnostics);
 }
 
 #[test]

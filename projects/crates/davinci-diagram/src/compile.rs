@@ -228,30 +228,15 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
             continue;
         }
         if indices.contains_key(&node.id) {
-            diagnostics.push(warning(
-                codes::UNSUPPORTED,
-                format!("duplicate participant id `{}`, the first declaration is kept", node.id),
-            ));
+            diagnostics.push(warning(codes::UNSUPPORTED, format!("duplicate participant id `{}`, the first declaration is kept", node.id)));
             continue;
         }
         indices.insert(node.id.clone(), participants.len());
-        participants.push(ResolvedNode {
-            id: node.id.clone(),
-            label: node.label.clone(),
-            shape: node.shape,
-            ports: Vec::new(),
-            cluster: None,
-        });
+        participants.push(ResolvedNode { id: node.id.clone(), label: node.label.clone(), shape: node.shape, ports: Vec::new(), cluster: None });
     }
 
     if participants.is_empty() {
-        return DiagramLayoutPlan {
-            canvas: Size::ZERO,
-            nodes: Vec::new(),
-            edges: Vec::new(),
-            clusters: Vec::new(),
-            diagnostics,
-        };
+        return DiagramLayoutPlan { canvas: Size::ZERO, nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), diagnostics };
     }
 
     let sizes: Vec<Size> = participants.iter().map(|participant| node_size(participant, options)).collect();
@@ -269,14 +254,12 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
 
     let mut messages: Vec<RoutedEdge> = Vec::with_capacity(spec.edges.len());
     for edge in &spec.edges {
-        let (Some(&from_index), Some(&to_index)) = (indices.get(&edge.from.node), indices.get(&edge.to.node)) else {
+        let (Some(&from_index), Some(&to_index)) = (indices.get(&edge.from.node), indices.get(&edge.to.node))
+        else {
             let missing = if indices.contains_key(&edge.from.node) { edge.to.node.as_str() } else { edge.from.node.as_str() };
             diagnostics.push(warning(
                 codes::UNSUPPORTED,
-                format!(
-                    "sequence message `{}->{}` references unknown participant `{missing}` and is skipped",
-                    edge.from.node, edge.to.node
-                ),
+                format!("sequence message `{}->{}` references unknown participant `{missing}` and is skipped", edge.from.node, edge.to.node),
             ));
             continue;
         };
@@ -303,14 +286,7 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
                 ),
             ));
         }
-        messages.push(RoutedEdge {
-            from: edge.from.clone(),
-            to: edge.to.clone(),
-            points: vec![from, to],
-            label,
-            label_box,
-            style: edge.style,
-        });
+        messages.push(RoutedEdge { from: edge.from.clone(), to: edge.to.clone(), points: vec![from, to], label, label_box, style: edge.style });
     }
 
     let content_bottom = first_row + row_height * messages.len() as f64;

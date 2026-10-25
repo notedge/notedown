@@ -127,7 +127,11 @@ fn html_export_preserves_list_children_and_their_reference_targets() {
     let quote = graph.push_block(Block::Quote { content: vec![Inline::Text { text: "child quote".into() }] });
     let nested_list = graph.push_block(Block::List {
         ordered: true,
-        items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "nested item".into() }], children: Vec::new(), number: Some(1) }],
+        items: vec![notedown_ir::ListItem {
+            content: vec![Inline::Text { text: "nested item".into() }],
+            children: Vec::new(),
+            number: Some(1),
+        }],
     });
     graph.push_block(Block::List {
         ordered: false,

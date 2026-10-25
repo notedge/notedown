@@ -98,17 +98,10 @@ fn write_block(
             write_inlines(out, content, image_urls)?;
             out.push_str("\n\n");
         }
-        Block::Code { language, content } => {
-            let fence = "`".repeat(longest_backtick_run(content).max(2) + 1);
-            out.push_str(&fence);
-            if let Some(language) = language {
-                out.push_str(language);
-            }
-            out.push('\n');
-            out.push_str(content);
-            out.push('\n');
-            out.push_str(&fence);
-            out.push_str("\n\n");
+        Block::Code { language, content } => write_fenced(out, language.as_deref(), content),
+        Block::Diagram { language, source } => {
+            ensure_mermaid(language)?;
+            write_fenced(out, Some(language), source);
         }
         Block::Quote { content } => {
             let mut line = String::new();
@@ -364,6 +357,34 @@ fn write_markdown_destination(out: &mut String, destination: &str) {
             out.push('\\');
         }
         out.push(character);
+    }
+}
+
+fn write_fenced(out: &mut String, language: Option<&str>, content: &str) {
+    let fence = "`".repeat(longest_backtick_run(content).max(2) + 1);
+    out.push_str(&fence);
+    if let Some(language) = language {
+        out.push_str(language);
+    }
+    out.push('\n');
+    out.push_str(content);
+    out.push('\n');
+    out.push_str(&fence);
+    out.push_str("\n\n");
+}
+
+/// A diagram only round-trips through Markdown when the importer promotes the
+/// same fence back to `Block::Diagram`. Any other language would silently
+/// reopen as a plain code block, so it is reported instead.
+fn ensure_mermaid(language: &str) -> Result<(), FormatError> {
+    if language.eq_ignore_ascii_case("mermaid") {
+        Ok(())
+    }
+    else {
+        Err(FormatError::unsupported(
+            "markdown",
+            format!("diagram language `{language}` has no Markdown reopen rule and would reopen as a code block"),
+        ))
     }
 }
 

@@ -92,7 +92,7 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
                 write_block(out, &child.block, graph, rels)?;
             }
         }
-        Block::Code { content, language: _ } => {
+        Block::Code { content, .. } | Block::Diagram { source: content, .. } => {
             out.push_str("<w:p>");
             write_run_text(out, content)?;
             out.push_str("</w:p>");

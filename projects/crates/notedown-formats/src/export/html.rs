@@ -86,6 +86,15 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             escape_text(out, content);
             out.push_str("</code></pre>");
         }
+        Block::Diagram { language, source } => {
+            out.push_str(r#"<pre data-diagram-language=""#);
+            escape_attribute(out, language);
+            out.push_str(r#"" data-diagram-source-hex=""#);
+            out.push_str(&encode_hex(source));
+            out.push_str(r#""><code>"#);
+            escape_text(out, source);
+            out.push_str("</code></pre>");
+        }
         Block::Math { content, language } => {
             out.push_str(r#"<div class="math""#);
             if let Some(language) = language {
@@ -293,6 +302,16 @@ fn is_valid_attribute_name(name: &str) -> bool {
 
 fn inline_plain_text(inline: &Inline) -> String {
     inline.plain_text()
+}
+
+/// Diagram source keeps its exact bytes through HTML, where attribute decoding
+/// and whitespace normalization would otherwise rewrite the authored lines.
+fn encode_hex(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2);
+    for byte in text.as_bytes() {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }
 
 fn escape_text(out: &mut String, value: &str) {

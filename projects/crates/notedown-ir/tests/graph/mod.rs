@@ -91,6 +91,22 @@ fn ordered_list_number_survives_wire_roundtrip() {
 }
 
 #[test]
+fn diagram_source_survives_wire_roundtrip() {
+    let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
+    graph.push_block(Block::Diagram { language: "mermaid".into(), source: "flowchart TD\n  A --> B".into() });
+
+    let json = serde_json::to_string(&graph).expect("serialize");
+    assert!(
+        json.contains(r#""Diagram":{"language":"mermaid","source":"flowchart TD\n  A --> B"}"#),
+        "diagram keeps only language and raw source on the wire: {json}"
+    );
+
+    let restored: DocumentGraph = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(restored.blocks[0].block, Block::Diagram { language: "mermaid".into(), source: "flowchart TD\n  A --> B".into() });
+    assert!(restored.validate().is_valid());
+}
+
+#[test]
 fn unordered_list_skips_number_on_wire() {
     use notedown_ir::ListItem;
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());

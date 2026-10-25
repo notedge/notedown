@@ -268,7 +268,10 @@ fn lower_block_node(
         }
         MarkdownElementType::CodeBlock => {
             let (language, content) = extract_code_block(node, source);
-            BlockOutcome::Block(Block::Code { language, content })
+            match language {
+                Some(language) if is_diagram_language(&language) => BlockOutcome::Block(Block::Diagram { language, source: content }),
+                language => BlockOutcome::Block(Block::Code { language, content }),
+            }
         }
         MarkdownElementType::MathBlock => {
             BlockOutcome::Block(Block::Math { content: strip_math_delimiters(&node.text(source), "$$"), language: Some("latex".into()) })
@@ -502,6 +505,14 @@ fn link_destination_close(destination: &str) -> Option<usize> {
 
 fn is_markdown_marker(text: &str) -> bool {
     matches!(text, "*" | "**" | "_" | "__" | "~~" | "`" | "[" | "]" | "(" | ")" | "![")
+}
+
+/// Only an explicit `mermaid` info string becomes a `Block::Diagram`.
+///
+/// Unknown or absent language tags stay `Block::Code` instead of being guessed
+/// as diagrams.
+fn is_diagram_language(language: &str) -> bool {
+    language.eq_ignore_ascii_case("mermaid")
 }
 
 /// Fenced code keeps the raw source slice between the two fences.

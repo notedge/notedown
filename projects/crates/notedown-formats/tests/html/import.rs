@@ -2,7 +2,18 @@ use notedown_formats::{
     export::html::export_html,
     import::html::{HtmlLinkRole, import_html_text, import_html_with_links},
 };
-use notedown_ir::{Block, BreakKind, Inline, RelationKind, SemanticStatus, SourceKind};
+use notedown_ir::{Block, BreakKind, DocumentGraph, DocumentId, Inline, RelationKind, SemanticStatus, SourceKind};
+
+#[test]
+fn html_diagram_round_trips_through_the_diagram_attribute() {
+    let mut graph = DocumentGraph::new(DocumentId(1));
+    graph.push_block(Block::Diagram { language: "mermaid".into(), source: "flowchart TD\n  A --> B".into() });
+
+    let html = export_html(&graph).expect("export html");
+    assert!(html.contains(r#"data-diagram-language="mermaid""#), "{html}");
+    let reopened = import_html_text("diagram.html", &html).expect("import html");
+    assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
+}
 
 #[test]
 fn html_import_records_block_source_spans() {

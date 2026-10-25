@@ -52,6 +52,17 @@ pub enum Block {
         /// Optional language tag such as `latex`.
         language: Option<String>,
     },
+    /// Authored diagram source with a declared diagram language.
+    ///
+    /// The IR stores only the raw source. Lowering it into a render scene and
+    /// registering that scene belongs to a diagram subsystem, so neither render
+    /// results nor geometry are duplicated here.
+    Diagram {
+        /// Diagram language tag such as `mermaid`.
+        language: String,
+        /// Raw diagram source exactly as authored inside the fence.
+        source: String,
+    },
     /// Format-specific payload retained without pretending full semantics.
     Opaque {
         /// Opaque payload kind identifier.

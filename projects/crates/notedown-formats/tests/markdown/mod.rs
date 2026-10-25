@@ -579,25 +579,59 @@ fn code_block_content(markdown: &str) -> (Option<String>, String) {
     (language.clone(), content.clone())
 }
 
-#[test]
-fn markdown_fenced_code_keeps_raw_mermaid_source() {
-    let source = "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n";
-    let (language, content) = code_block_content(source);
-    assert_eq!(language.as_deref(), Some("mermaid"));
-    assert_eq!(content, "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]");
+fn diagram_block(markdown: &str) -> (String, String) {
+    let graph = import_markdown_bytes("fenced-diagram.md", markdown).expect("import markdown");
+    let Block::Diagram { language, source } = &graph.blocks[0].block
+    else {
+        panic!("diagram block expected: {:#?}", graph.blocks)
+    };
+    assert!(graph.validate().is_valid(), "{:#?}", graph.validate().issues);
+    (language.clone(), source.clone())
 }
 
 #[test]
-fn markdown_fenced_code_keeps_indented_body_lines() {
-    let (language, content) = code_block_content("```mermaid\n  A[Start] --> B{Done?}\n    nested[Node]\n```\n");
-    assert_eq!(language.as_deref(), Some("mermaid"));
-    assert_eq!(content, "  A[Start] --> B{Done?}\n    nested[Node]");
+fn markdown_mermaid_fence_lowers_to_a_diagram_block() {
+    let source = "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n";
+    let (language, body) = diagram_block(source);
+    assert_eq!(language, "mermaid");
+    assert_eq!(body, "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]");
+}
+
+#[test]
+fn markdown_diagram_round_trips_through_a_mermaid_fence() {
+    let graph = import_markdown_bytes(
+        "diagram-roundtrip.md",
+        "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n",
+    )
+    .expect("import markdown");
+
+    let markdown = export_markdown(&graph).expect("export diagram markdown");
+    assert!(markdown.contains("```mermaid"), "{markdown:?}");
+    let reopened = import_markdown_bytes("diagram-reopen.md", &markdown).expect("reopen markdown");
+    assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
+    assert!(reopened.validate().is_valid());
+}
+
+#[test]
+fn markdown_diagram_export_rejects_languages_without_a_reopen_rule() {
+    let mut graph = DocumentGraph::new(DocumentId(3));
+    graph.push_block(Block::Diagram { language: "plantuml".into(), source: "@startuml\nA -> B\n@enduml".into() });
+
+    let error = export_markdown(&graph).expect_err("a non-mermaid diagram cannot silently reopen as code");
+    assert!(error.to_string().contains("plantuml"), "{error}");
+}
+
+#[test]
+fn markdown_diagram_keeps_indented_source_lines() {
+    let (language, body) = diagram_block("```mermaid\n  A[Start] --> B{Done?}\n    nested[Node]\n```\n");
+    assert_eq!(language, "mermaid");
+    assert_eq!(body, "  A[Start] --> B{Done?}\n    nested[Node]");
 }
 
 #[test]
 fn markdown_fenced_code_supports_tilde_and_long_backtick_fences() {
-    let (tilde_language, tilde_content) = code_block_content("~~~mermaid\nA[Start] --> B{Done?}\n~~~\n");
-    assert_eq!(tilde_language.as_deref(), Some("mermaid"));
+    let (tilde_language, tilde_content) = diagram_block("~~~mermaid\nA[Start] --> B{Done?}\n~~~\n");
+    assert_eq!(tilde_language, "mermaid");
     assert_eq!(tilde_content, "A[Start] --> B{Done?}");
 
     let (backtick_language, backtick_content) = code_block_content("````js\nconst a = `b`;\n````\n");
@@ -607,13 +641,13 @@ fn markdown_fenced_code_supports_tilde_and_long_backtick_fences() {
 
 #[test]
 fn markdown_fenced_code_allows_an_indented_opening_fence() {
-    let (language, content) = code_block_content("  ```mermaid\nA[Start] --> B\n  ```\n");
-    assert_eq!(language.as_deref(), Some("mermaid"));
+    let (language, content) = diagram_block("  ```mermaid\nA[Start] --> B\n  ```\n");
+    assert_eq!(language, "mermaid");
     assert_eq!(content, "A[Start] --> B");
 
     let deep = import_markdown_bytes("deep-fence.md", "    ```mermaid\nA[Start] --> B\n    ```\n").expect("import markdown");
     assert!(
-        !matches!(&deep.blocks[0].block, Block::Code { language: Some(language), .. } if language == "mermaid"),
+        !matches!(&deep.blocks[0].block, Block::Diagram { .. }),
         "four spaces must not open a fence: {:#?}",
         deep.blocks[0].block
     );

@@ -278,6 +278,17 @@ fn attribute(element: &Element, name: &str) -> Option<String> {
     element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case(name)).and_then(|attribute| attribute.value.clone())
 }
 
+fn decode_hex(text: &str) -> Option<String> {
+    if text.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(text.len() / 2);
+    for pair in text.as_bytes().chunks_exact(2) {
+        bytes.push(u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?);
+    }
+    String::from_utf8(bytes).ok()
+}
+
 fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std::ops::Range<usize>)> {
     let tag = element.tag_name.to_ascii_lowercase();
     let span: std::ops::Range<usize> = element.span.clone().into();
@@ -287,18 +298,26 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
         }
         "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph) }, span)],
         "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph) }, span)],
-        "pre" => vec![(
-            Block::Code {
-                language: element
-                    .children
-                    .iter()
-                    .filter_map(as_element)
-                    .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
-                    .and_then(|child| attribute(child, "class")),
-                content: text_content(element),
-            },
-            span,
-        )],
+        "pre" => match attribute(element, "data-diagram-language").filter(|language| !language.trim().is_empty()) {
+            Some(language) => {
+                let source = attribute(element, "data-diagram-source-hex")
+                    .and_then(|hex| decode_hex(&hex))
+                    .unwrap_or_else(|| text_content(element));
+                vec![(Block::Diagram { language, source }, span)]
+            }
+            None => vec![(
+                Block::Code {
+                    language: element
+                        .children
+                        .iter()
+                        .filter_map(as_element)
+                        .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                        .and_then(|child| attribute(child, "class")),
+                    content: text_content(element),
+                },
+                span,
+            )],
+        },
         "ul" | "ol" => {
             let items = element
                 .children

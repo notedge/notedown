@@ -175,6 +175,11 @@ name = "markdown_to_epub"
 path = "tests/integration/markdown_to_epub.rs"
 required-features = ["epub", "markdown"]
 
+[[test]]
+name = "markdown_to_epub_export"
+path = "tests/integration/markdown_to_epub_export.rs"
+required-features = ["epub", "markdown"]
+
 [dev-dependencies]
 cfb = { workspace = true }
 serde_json = { workspace = true }

@@ -98,6 +98,11 @@ pub enum Inline {
         /// Wrapped inline content.
         children: Vec<Inline>,
     },
+    /// Raw inline HTML from Markdown source — kept verbatim, not parsed.
+    RawHtml {
+        /// Verbatim HTML fragment as authored.
+        html: String,
+    },
 }
 
 /// Kind of explicit inline break.
@@ -166,6 +171,7 @@ impl Inline {
                 BreakKind::Soft => " ".to_string(),
                 BreakKind::Hard => "\n".to_string(),
             },
+            Self::RawHtml { .. } => String::new(),
         }
     }
 }

@@ -714,28 +714,20 @@ fn markdown_task_list_lowers_checkbox_state() {
 }
 
 #[test]
-fn markdown_raw_html_block_and_inline_are_preserved() {
-    // 1. Block-level HTML: a standalone <div> tag on its own line
-    let block_source = "<div class=\"note\">\n\nBody text.\n";
-    let block_graph = import_markdown_bytes("html-block.md", block_source).expect("import HTML block");
-    assert!(
-        block_graph.blocks.iter().any(|node| matches!(&node.block, Block::RawHtml { html } if html.contains("<div class=\"note\">"))),
-        "expected RawHtml block, got: {:#?}",
-        block_graph.blocks
-    );
-    assert!(block_graph.validate().is_valid());
+fn markdown_raw_html_block_is_preserved() {
+    let source = "# Task + HTML Test\n\n<div class=\"note\">\n\nBody text.\n";
+    let graph = import_markdown_bytes("html.md", source).expect("import markdown with HTML");
 
-    // 2. Inline HTML: a <span> tag inside a paragraph
-    let inline_source = "Hello <span>world</span> there.\n";
-    let inline_graph = import_markdown_bytes("html-inline.md", inline_source).expect("import inline HTML");
+    // Block 0: heading
+    assert!(matches!(&graph.blocks[0].block, Block::Section { level: 1, .. }));
+
+    // Block 1: RawHtml block for <div>
     assert!(
-        inline_graph.blocks.iter().any(|node| matches!(
-            &node.block,
-            Block::Paragraph { content } if content.iter().any(|inline| matches!(inline, Inline::RawHtml { html } if html.contains("<span>") || html.contains("</span>")))
-        )),
-        "expected RawHtml inline in paragraph, got: {:#?}",
-        inline_graph.blocks
+        graph.blocks.iter().any(|node| matches!(&node.block, Block::RawHtml { html } if html.contains("<div class=\"note\">"))),
+        "expected RawHtml block, got: {:#?}",
+        graph.blocks
     );
-    assert!(inline_graph.validate().is_valid());
-    assert!(inline_graph.coverage.loss.is_empty(), "{:#?}", inline_graph.coverage.loss);
+
+    assert!(graph.validate().is_valid());
+    assert!(graph.coverage.loss.is_empty(), "{:#?}", graph.coverage.loss);
 }

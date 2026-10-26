@@ -19,7 +19,7 @@ pub fn nav_xhtml(graph: &DocumentGraph, chapters: &[ChapterPlan]) -> Result<Stri
     out.push_str("\" lang=\"");
     out.push_str(&escape_xml(lang));
     out.push_str(
-        r##"">
+        r##" epub:type="nav">
   <head>
     <meta charset="UTF-8"/>
     <title>"##,

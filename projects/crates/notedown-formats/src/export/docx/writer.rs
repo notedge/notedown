@@ -127,6 +127,9 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
                 format!("opaque block kind `{kind}` is not supported by the conservative DOCX exporter yet"),
             ));
         }
+        Block::RawHtml { .. } => {
+            return Err(FormatError::unsupported("docx", "RawHtml block is not representable by the conservative DOCX exporter yet"));
+        }
     }
     Ok(())
 }
@@ -360,6 +363,9 @@ fn write_inline_with_properties(
         },
         Inline::Citation { .. } | Inline::Attributed { .. } => {
             return Err(FormatError::unsupported("docx", "inline semantic node is not representable by the conservative DOCX exporter yet"));
+        }
+        Inline::RawHtml { .. } => {
+            return Err(FormatError::unsupported("docx", "RawHtml inline is not representable by the conservative DOCX exporter yet"));
         }
     }
     Ok(())

@@ -184,6 +184,10 @@ fn write_block(
                 format!("opaque block kind `{kind}` is not representable"),
             ));
         }
+        Block::RawHtml { html } => {
+            out.push_str(html);
+            out.push('\n');
+        }
     }
     Ok(())
 }
@@ -361,6 +365,7 @@ fn write_inlines(
                     "inline Citation is not representable by the conservative EPUB exporter",
                 ));
             }
+            Inline::RawHtml { html } => out.push_str(html),
         }
     }
     Ok(())

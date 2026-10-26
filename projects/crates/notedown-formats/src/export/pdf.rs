@@ -194,6 +194,12 @@ fn render_block(lines: &mut Vec<RenderLine>, graph: &DocumentGraph, block: &Bloc
             }
         }
         Block::Opaque { kind, .. } => return Err(FormatError::unsupported("pdf", format!("opaque block `{kind}`"))),
+        Block::RawHtml { html } => {
+            // PDF cannot render raw HTML — emit as escaped text lines.
+            for line in html.lines() {
+                lines.push(RenderLine::Text(line.to_owned()));
+            }
+        }
     }
     Ok(())
 }
@@ -290,6 +296,7 @@ fn inline_text(graph: &DocumentGraph, inlines: &[Inline]) -> Result<String, Form
             Inline::Citation { .. } => {
                 return Err(FormatError::unsupported("pdf", "inline semantic node is not representable by the conservative PDF exporter yet"));
             }
+            Inline::RawHtml { .. } => {}
         }
         Ok(output)
     })

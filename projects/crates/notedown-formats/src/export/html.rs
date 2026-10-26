@@ -119,6 +119,9 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
         Block::Opaque { kind, .. } => {
             return Err(FormatError::unsupported("html", format!("opaque block kind {kind} is not supported by the HTML exporter")));
         }
+        Block::RawHtml { html } => {
+            out.push_str(html);
+        }
     }
     Ok(())
 }
@@ -267,6 +270,7 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) -> Result<(), FormatError
                     "inline semantic node is not representable by the conservative IR HTML exporter yet",
                 ));
             }
+            Inline::RawHtml { html } => out.push_str(html),
         }
     }
     Ok(())

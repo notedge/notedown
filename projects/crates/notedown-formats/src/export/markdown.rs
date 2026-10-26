@@ -139,6 +139,10 @@ fn write_block(
                 ));
             }
         }
+        Block::RawHtml { html } => {
+            out.push_str(html);
+            out.push_str("\n\n");
+        }
     }
     Ok(())
 }
@@ -338,6 +342,10 @@ fn write_inline(
                 "markdown",
                 "inline semantic node is not representable by the conservative IR markdown exporter yet",
             ));
+        }
+        Inline::RawHtml { html } => {
+            // Raw inline HTML stays verbatim in Markdown output.
+            out.push_str(html);
         }
     }
     Ok(())

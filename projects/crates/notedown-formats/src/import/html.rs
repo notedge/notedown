@@ -375,7 +375,7 @@ fn lower_list_item(item: &Element, graph: &mut DocumentGraph) -> notedown_ir::Li
             }
         }
     }
-    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children, number: None }
+    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children, number: None, is_task: false, is_checked: None }
 }
 
 fn is_block_element(element: &Element) -> bool {

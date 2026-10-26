@@ -76,7 +76,7 @@ fn lower_root_blocks(node: RedNode<NoteLanguage>, source: &SourceText) -> Vec<Bl
                     };
                     let mut content = collect_inlines(child_node, source);
                     strip_list_marker(&mut content);
-                    let item = ListItem { content, children: Vec::new(), number };
+                    let item = ListItem { content, children: Vec::new(), number, is_task: false, is_checked: None };
                     match &mut pending_list {
                         Some((list_ordered, items)) if *list_ordered == ordered => {
                             items.push(item);
@@ -177,12 +177,12 @@ fn promote_list_item(node: RedNode<NoteLanguage>, source: &SourceText) -> Option
     let text = node.text(source).into_owned();
     let raw = text.trim();
     if let Some(content) = raw.strip_prefix("- ").or_else(|| raw.strip_prefix("* ")).or_else(|| raw.strip_prefix("+ ")) {
-        return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None }));
+        return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None, is_task: false, is_checked: None }));
     }
     if let Some((prefix, content)) = raw.split_once(". ") {
         if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) && !content.is_empty() {
             let number = prefix.parse::<u32>().ok();
-            return Some((true, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number }));
+            return Some((true, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number, is_task: false, is_checked: None }));
         }
     }
     let inlines = collect_inlines(node, source);
@@ -191,7 +191,7 @@ fn promote_list_item(node: RedNode<NoteLanguage>, source: &SourceText) -> Option
     }
     if let Inline::Text { text } = &inlines[0] {
         if let Some(content) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")).or_else(|| text.strip_prefix("+ ")) {
-            return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None }));
+            return Some((false, ListItem { content: vec![Inline::Text { text: content.trim().to_string() }], children: Vec::new(), number: None, is_task: false, is_checked: None }));
         }
     }
     None

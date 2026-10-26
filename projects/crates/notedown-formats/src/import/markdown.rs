@@ -33,6 +33,9 @@ fn markdown_import_language() -> MarkdownLanguage {
     language.allow_fenced_code_blocks = true;
     language.allow_tables = true;
     language.allow_horizontal_rules = true;
+    language.allow_task_lists = true;
+    language.allow_html = true;
+    language.allow_html_tag_filter = false;
     language
 }
 
@@ -311,6 +314,9 @@ fn lower_block_node(
         MarkdownElementType::HorizontalRule => {
             BlockOutcome::Block(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial })
         }
+        MarkdownElementType::HtmlTag | MarkdownElementType::HtmlComment => {
+            BlockOutcome::Block(Block::RawHtml { html: node.text(source).into_owned() })
+        }
         _ => BlockOutcome::Loss(LossMarker {
             code: "import.markdown.unsupported_block".into(),
             message: format!("unsupported markdown block: {kind:?}"),
@@ -392,6 +398,7 @@ fn lower_inline_node(node: RedNode<MarkdownLanguage>, source: &SourceText, conte
             Some(Inline::Note { label, display: None })
         }
         MarkdownElementType::Strikethrough => Some(Inline::Styled { style: "strike".into(), children: collect_inlines(node, source, context) }),
+        MarkdownElementType::HtmlTag | MarkdownElementType::HtmlComment => Some(Inline::RawHtml { html: node.text(source).into_owned() }),
         _ => None,
     }
 }
@@ -810,10 +817,29 @@ fn extract_list(
         else {
             None
         };
+        let (is_task, is_checked) = extract_task_marker(item_node, source);
         let (content, children) = lower_list_item(item_node, source, context, graph);
-        items.push(ListItem { content, children, number });
+        items.push(ListItem { content, children, number, is_task, is_checked });
     }
     (ordered, items)
+}
+
+/// Scan a `ListItem` node for a `TaskMarker` child (`[x]` / `[ ]` / `[X]`).
+///
+/// Returns `(is_task, is_checked)`. A plain list item yields `(false, None)`.
+fn extract_task_marker(node: RedNode<MarkdownLanguage>, source: &SourceText) -> (bool, Option<bool>) {
+    for child in node.children() {
+        let RedTree::Node(child_node) = child
+        else {
+            continue;
+        };
+        if child_node.element_type() == MarkdownElementType::TaskMarker {
+            let text = child_node.text(source);
+            let checked = text.contains('x') || text.contains('X');
+            return (true, Some(checked));
+        }
+    }
+    (false, None)
 }
 
 fn lower_list_item(
@@ -851,7 +877,11 @@ fn lower_list_item(
             RedTree::Node(child_node) => {
                 skip_marker_space = false;
                 line_start = false;
-                if child_node.element_type() == MarkdownElementType::List {
+                if child_node.element_type() == MarkdownElementType::TaskMarker {
+                    // The task marker `[x]` / `[ ]` is already captured by
+                    // `extract_task_marker`. Do not push its text into content.
+                }
+                else if child_node.element_type() == MarkdownElementType::List {
                     let (nested_ordered, nested_items) = extract_list(child_node, source, context, graph);
                     children.push(graph.push_block(Block::List { ordered: nested_ordered, items: nested_items }));
                 }

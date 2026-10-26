@@ -656,7 +656,7 @@ fn build_nested_items(
         // explicit non-zero number for every ordered item, so the sequential
         // position within this level is the resolved marker value.
         let number = ordered.then_some(items.len() as u32 + 1);
-        let mut item = ListItem { content: current.content.clone(), children: Vec::new(), number };
+        let mut item = ListItem { content: current.content.clone(), children: Vec::new(), number, is_task: false, is_checked: None };
         if *cursor < pending.len() && pending[*cursor].level > level {
             let child_level = pending[*cursor].level;
             let child_ordered = num_id.and_then(|id| numbering.is_ordered(id, child_level)).unwrap_or(ordered);

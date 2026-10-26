@@ -129,7 +129,16 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
 fn write_list(out: &mut String, graph: &DocumentGraph, ordered: bool, items: &[ListItem]) -> Result<(), FormatError> {
     out.push_str(if ordered { "<ol>" } else { "<ul>" });
     for item in items {
-        out.push_str("<li>");
+        if item.is_task {
+            out.push_str(r#"<li class="task-list-item"><input type="checkbox" disabled"#);
+            if item.is_checked.unwrap_or(false) {
+                out.push_str(" checked");
+            }
+            out.push_str(">");
+        }
+        else {
+            out.push_str("<li>");
+        }
         write_inlines(out, &item.content)?;
         for child_id in &item.children {
             let child = graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("list child `{child_id:?}` is missing")))?;

@@ -413,7 +413,7 @@ fn pdf_writer_emits_section_and_list_children_in_ir_order() {
     let list_child = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "list child".into() }] });
     let list = graph.push_block(Block::List {
         ordered: false,
-        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![list_child], number: None }],
+        items: vec![ListItem { content: vec![Inline::Text { text: "list item".into() }], children: vec![list_child], number: None, ..Default::default() }],
     });
     graph.push_block(Block::Section {
         level: 1,

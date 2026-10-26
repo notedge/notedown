@@ -126,3 +126,87 @@ fn epub_export_mimetype_is_stored_and_first() {
     let payload = &bytes[payload_offset..payload_offset + payload_len];
     assert_eq!(payload, b"application/epub+zip");
 }
+
+/// EPUB 3 §4.2 规定 OPF 必须声明 dc:identifier / dc:title / dc:language；
+/// §3.4 规定 nav 文档的 <html> 根元素必须带 epub:type="nav"。
+///
+/// 这些断言走原始 XML 字符串匹配，不依赖 epubcheck。
+#[test]
+fn epub_export_opf_has_required_dc_elements_and_nav_root_is_html_with_epub_type() {
+    let graph = import_markdown_bytes("book.md", make_simple_markdown()).expect("import markdown");
+    let bytes = export_epub_bytes(&graph).expect("export epub");
+
+    let package = OcfPackage::open("test.epub", bytes).expect("open as OCF");
+    let mut ledger = BudgetTracker::new(Budget::default());
+
+    // --- 1. OPF 原始 XML 必须包含三个必填 dc 元素 -----------------------------
+    let opf_bytes = package
+        .read_member(package.root_opf_path(), &mut ledger)
+        .expect("read OPF raw bytes");
+    let opf_xml = String::from_utf8(opf_bytes).expect("OPF must be UTF-8");
+
+    assert!(
+        opf_xml.contains("<dc:identifier"),
+        "OPF must declare dc:identifier (EPUB 3 §4.2.1)"
+    );
+    assert!(
+        opf_xml.contains("<dc:title>"),
+        "OPF must declare dc:title (EPUB 3 §4.2.2)"
+    );
+    assert!(
+        opf_xml.contains("<dc:language>"),
+        "OPF must declare dc:language (EPUB 3 §4.2.3)"
+    );
+    // dc:identifier 内容必须是 urn:uuid:<32 hex with dashes> 格式。
+    let uuid_start = opf_xml
+        .find("urn:uuid:")
+        .expect("dc:identifier should contain urn:uuid: prefix");
+    let uuid_body = &opf_xml[uuid_start + 9..uuid_start + 9 + 36];
+    assert_eq!(uuid_body.chars().filter(|&c| c == '-').count(), 4, "uuid must have 4 dashes");
+    let without_dashes: String = uuid_body.chars().filter(|&c| c != '-').collect();
+    assert_eq!(without_dashes.len(), 32, "uuid body must be 32 hex chars without dashes");
+    assert!(
+        without_dashes.chars().all(|c| c.is_ascii_hexdigit()),
+        "uuid body must be all hex digits, got {uuid_body}"
+    );
+
+    // --- 2. nav 文档根元素是带 epub:type="nav" 的 <html> --------------------
+    let nav_bytes = package
+        .read_member("OEBPS/nav.xhtml", &mut ledger)
+        .expect("read nav.xhtml raw bytes");
+    let nav_xml = String::from_utf8(nav_bytes).expect("nav.xhtml must be UTF-8");
+
+    assert!(
+        nav_xml.starts_with("<?xml"),
+        "nav.xhtml must begin with an XML declaration"
+    );
+    assert!(
+        nav_xml.contains(r#"<html xmlns="http://www.w3.org/1999/xhtml""#),
+        "nav.xhtml root must be <html> with the XHTML namespace"
+    );
+    assert!(
+        nav_xml.contains("xmlns:epub=\"http://www.idpf.org/2007/ops\""),
+        "nav.xhtml must declare the epub namespace on root <html>"
+    );
+    assert!(
+        nav_xml.contains(r#"epub:type="nav""#),
+        "nav.xhtml root <html> must carry epub:type=\"nav\" (EPUB 3 §3.4)"
+    );
+    // xml:lang 和 lang 属性都必须落在根 <html> 上，且值一致。
+    let xml_lang = extract_attr(&nav_xml, "xml:lang");
+    let lang = extract_attr(&nav_xml, "lang");
+    assert!(
+        xml_lang.is_some() && lang.is_some() && xml_lang == lang,
+        "nav.xhtml root <html> must have matching xml:lang and lang, got xml:lang={xml_lang:?}, lang={lang:?}"
+    );
+}
+
+/// Extract the double-quoted value of an attribute from the nav string.
+fn extract_attr(xml: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=\"");
+    let idx = xml.find(&needle)?;
+    let start = idx + needle.len();
+    let rest = &xml[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}

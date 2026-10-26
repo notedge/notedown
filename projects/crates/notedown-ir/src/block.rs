@@ -90,6 +90,24 @@ pub struct ListItem {
     /// parent list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
+    /// Whether this item is a task-list item.
+    ///
+    /// `true` means the original Markdown had a `- [x]` / `- [ ]` marker.
+    /// `false` means a plain list item — `is_checked` stays `None`.
+    #[serde(default)]
+    pub is_task: bool,
+    /// Checked state of a task-list item.
+    ///
+    /// Only meaningful when `is_task` is `true`. `Some(true)` for `[x]` /
+    /// `[X]`, `Some(false)` for `[ ]`, `None` for non-task items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_checked: Option<bool>,
+}
+
+impl Default for ListItem {
+    fn default() -> Self {
+        Self { content: Vec::new(), children: Vec::new(), number: None, is_task: false, is_checked: None }
+    }
 }
 
 /// One table row of cells.

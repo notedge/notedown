@@ -25,6 +25,8 @@ doc = ["formats", "notedown-formats/doc"]
 pdf = ["formats", "notedown-formats/pdf"]
 epub = ["formats", "notedown-formats/epub"]
 html = ["formats", "notedown-formats/html"]
+tex = ["formats", "notedown-formats/tex"]
+typst = ["formats", "notedown-formats/typst"]
 
 [package.metadata.docs.rs]
 all-features = true

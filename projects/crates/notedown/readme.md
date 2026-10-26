@@ -20,6 +20,8 @@ Default features are **empty**. Enable only what you need:
 | `pdf`      | `notedown::formats` | `notedown-formats` + `pdf`              |
 | `epub`     | `notedown::formats` | `notedown-formats` + `epub`             |
 | `html`     | `notedown::formats` | `notedown-formats` + `html`             |
+| `tex`      | `notedown::formats` | `notedown-formats` + `tex`              |
+| `typst`    | `notedown::formats` | `notedown-formats` + `typst`            |
 
 `formats` and every format feature also enable `ir`.
 

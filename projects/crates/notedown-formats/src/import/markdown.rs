@@ -35,7 +35,7 @@ fn markdown_import_language() -> MarkdownLanguage {
     language.allow_horizontal_rules = true;
     language.allow_task_lists = true;
     language.allow_html = true;
-    language.allow_html_tag_filter = false;
+    language.allow_html_tag_filter = true;
     language
 }
 
@@ -879,7 +879,9 @@ fn lower_list_item(
                 line_start = false;
                 if child_node.element_type() == MarkdownElementType::TaskMarker {
                     // The task marker `[x]` / `[ ]` is already captured by
-                    // `extract_task_marker`. Do not push its text into content.
+                    // `extract_task_marker`. Do not push its text into content
+                    // and skip the trailing whitespace that follows it.
+                    skip_marker_space = true;
                 }
                 else if child_node.element_type() == MarkdownElementType::List {
                     let (nested_ordered, nested_items) = extract_list(child_node, source, context, graph);

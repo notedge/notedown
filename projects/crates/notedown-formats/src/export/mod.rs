@@ -15,6 +15,9 @@ pub mod markdown_project;
 /// PDF export.
 #[cfg(feature = "pdf")]
 pub mod pdf;
+/// EPUB 3 export.
+#[cfg(feature = "epub")]
+pub mod epub;
 
 /// HTML export.
 pub mod html;

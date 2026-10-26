@@ -15,6 +15,8 @@ fn capabilities_do_not_overstate_partial_formats() {
     assert!(caps.iter().any(|cap| { cap.id == "docx" && cap.direction == FormatDirection::Export && cap.status == FormatStatus::Partial }));
     #[cfg(feature = "epub")]
     assert!(caps.iter().any(|cap| { cap.id == "epub" && cap.direction == FormatDirection::Import && cap.status == FormatStatus::Partial }));
+    #[cfg(feature = "epub")]
+    assert!(caps.iter().any(|cap| { cap.id == "epub" && cap.direction == FormatDirection::Export && cap.status == FormatStatus::Partial }));
     #[cfg(feature = "doc")]
     assert!(caps.iter().any(|cap| { cap.id == "doc" && cap.direction == FormatDirection::Import && cap.status == FormatStatus::Partial }));
     #[cfg(feature = "doc")]

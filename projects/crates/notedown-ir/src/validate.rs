@@ -289,7 +289,7 @@ impl DocumentGraph {
                     }
                     check_table_colspans(table_id, rows, report);
                 }
-                Block::Code { .. } | Block::Math { .. } | Block::Diagram { .. } | Block::Opaque { .. } => {}
+                Block::Code { .. } | Block::Math { .. } | Block::Diagram { .. } | Block::Opaque { .. } | Block::RawHtml { .. } => {}
             }
         }
     }

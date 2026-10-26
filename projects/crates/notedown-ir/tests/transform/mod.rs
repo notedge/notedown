@@ -50,6 +50,7 @@ fn build_sample_graph() -> (DocumentGraph, NodeId, NodeId, NodeId, NodeId, NodeI
             content: vec![],
             children: vec![p_item_body],
             number: None,
+            ..Default::default()
         }],
     });
     let sec_root = g.push_block(Block::Section {

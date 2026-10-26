@@ -71,8 +71,8 @@ fn ordered_list_number_survives_wire_roundtrip() {
     graph.push_block(Block::List {
         ordered: true,
         items: vec![
-            ListItem { content: Vec::new(), children: Vec::new(), number: Some(42) },
-            ListItem { content: Vec::new(), children: Vec::new(), number: Some(99) },
+            ListItem { content: Vec::new(), children: Vec::new(), number: Some(42), ..Default::default() },
+            ListItem { content: Vec::new(), children: Vec::new(), number: Some(99), ..Default::default() },
         ],
     });
 
@@ -113,8 +113,8 @@ fn unordered_list_skips_number_on_wire() {
     graph.push_block(Block::List {
         ordered: false,
         items: vec![
-            ListItem { content: Vec::new(), children: Vec::new(), number: None },
-            ListItem { content: Vec::new(), children: Vec::new(), number: None },
+            ListItem { content: Vec::new(), children: Vec::new(), number: None, ..Default::default() },
+            ListItem { content: Vec::new(), children: Vec::new(), number: None, ..Default::default() },
         ],
     });
 

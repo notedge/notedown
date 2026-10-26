@@ -43,7 +43,7 @@ fn markdown_lists_lower_to_list_blocks() {
         nested,
         Block::List {
             ordered: false,
-            items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "child".into() }], children: Vec::new(), number: None }]
+            items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "child".into() }], children: Vec::new(), number: None, ..Default::default() }]
         }
     );
     assert!(nested_graph.validate().is_valid());
@@ -686,4 +686,56 @@ fn markdown_setext_heading_is_not_a_thematic_break() {
     assert_eq!(graph.blocks[0].block, Block::Section { level: 2, title: vec![Inline::Text { text: "Title".into() }], children: Vec::new() });
     assert!(graph.coverage.loss.is_empty(), "{:#?}", graph.coverage.loss);
     assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn markdown_task_list_lowers_checkbox_state() {
+    let source = "- [x] done\n- [ ] pending\n- normal item\n";
+    let graph = import_markdown_bytes("task-list.md", source).expect("import task list");
+    let Block::List { ordered: false, items } = &graph.blocks[0].block
+    else {
+        panic!("unordered list expected: {:#?}", graph.blocks)
+    };
+    assert_eq!(items.len(), 3);
+
+    assert!(items[0].is_task);
+    assert_eq!(items[0].is_checked, Some(true));
+    assert_eq!(items[0].content, vec![Inline::Text { text: "done".into() }]);
+
+    assert!(items[1].is_task);
+    assert_eq!(items[1].is_checked, Some(false));
+    assert_eq!(items[1].content, vec![Inline::Text { text: "pending".into() }]);
+
+    assert!(!items[2].is_task);
+    assert_eq!(items[2].is_checked, None);
+    assert_eq!(items[2].content, vec![Inline::Text { text: "normal item".into() }]);
+
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn markdown_raw_html_block_and_inline_are_preserved() {
+    // 1. Block-level HTML: a standalone <div> tag on its own line
+    let block_source = "<div class=\"note\">\n\nBody text.\n";
+    let block_graph = import_markdown_bytes("html-block.md", block_source).expect("import HTML block");
+    assert!(
+        block_graph.blocks.iter().any(|node| matches!(&node.block, Block::RawHtml { html } if html.contains("<div class=\"note\">"))),
+        "expected RawHtml block, got: {:#?}",
+        block_graph.blocks
+    );
+    assert!(block_graph.validate().is_valid());
+
+    // 2. Inline HTML: a <span> tag inside a paragraph
+    let inline_source = "Hello <span>world</span> there.\n";
+    let inline_graph = import_markdown_bytes("html-inline.md", inline_source).expect("import inline HTML");
+    assert!(
+        inline_graph.blocks.iter().any(|node| matches!(
+            &node.block,
+            Block::Paragraph { content } if content.iter().any(|inline| matches!(inline, Inline::RawHtml { html } if html.contains("<span>") || html.contains("</span>")))
+        )),
+        "expected RawHtml inline in paragraph, got: {:#?}",
+        inline_graph.blocks
+    );
+    assert!(inline_graph.validate().is_valid());
+    assert!(inline_graph.coverage.loss.is_empty(), "{:#?}", inline_graph.coverage.loss);
 }

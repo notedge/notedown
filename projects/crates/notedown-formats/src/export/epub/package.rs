@@ -20,7 +20,8 @@ pub fn build_epub_package(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
 
         archive.extend_from_slice(b"PK\x03\x04");
         archive.extend_from_slice(&[
-            0x14, 0x00, // version needed / flags (bit 0 = encrypted, bit 11 = utf-8 filename, bit 12 = data descriptor — all zero)
+            0x14, 0x00, // version needed = 20 (STORED compatible)
+            0x00, 0x00, // flags (bit 0 = encrypted, bit 11 = utf-8 filename, bit 12 = data descriptor — all zero)
             0x00, 0x00, // compression: 0 = stored
             0x00, 0x00, // mod time
             0x00, 0x00, // mod date

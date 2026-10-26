@@ -119,8 +119,10 @@ fn epub_export_mimetype_is_stored_and_first() {
     let name = &bytes[30..30 + name_len];
     assert_eq!(name, b"mimetype");
 
-    let payload_offset = 30 + name_len;
-    let payload_len = u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]) as usize;
+    let extra_len = u16::from_le_bytes([bytes[28], bytes[29]]) as usize;
+    let payload_offset = 30 + name_len + extra_len;
+    // Compressed size lives at offset 18..22 in the local file header (APPNOTE §4.3.7).
+    let payload_len = u32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]) as usize;
     let payload = &bytes[payload_offset..payload_offset + payload_len];
     assert_eq!(payload, b"application/epub+zip");
 }

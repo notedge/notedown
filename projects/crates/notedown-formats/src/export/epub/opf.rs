@@ -3,7 +3,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use notedown_ir::DocumentGraph;
+use notedown_ir::{Block, DocumentGraph, Inline};
 
 use crate::FormatError;
 
@@ -34,6 +34,11 @@ pub fn content_opf(
     spine: &[OpfSpineItem],
 ) -> Result<String, FormatError> {
     let unique_id = stable_unique_identifier(graph);
+    let title = graph
+        .metadata
+        .title
+        .clone()
+        .or_else(|| derive_title_from_first_h1(graph));
     let mut out = String::new();
     out.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
@@ -44,7 +49,7 @@ pub fn content_opf(
         r#"</dc:identifier>
 "#,
     );
-    if let Some(title) = &graph.metadata.title {
+    if let Some(title) = &title {
         out.push_str("    <dc:title>");
         out.push_str(&escape_xml(title));
         out.push_str("</dc:title>\n");
@@ -122,4 +127,44 @@ fn escape_xml(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+/// Fallback title derivation when `graph.metadata.title` is unset.
+///
+/// Walks the top-level blocks and returns the plain text of the first
+/// `Block::Section { level: 1, .. }` title inline list, if any.
+fn derive_title_from_first_h1(graph: &DocumentGraph) -> Option<String> {
+    for node in &graph.blocks {
+        let Block::Section { level, title, .. } = &node.block else {
+            continue;
+        };
+        if *level != 1 {
+            continue;
+        }
+        let plain = plain_text(title);
+        if !plain.is_empty() {
+            return Some(plain);
+        }
+    }
+    None
+}
+
+fn plain_text(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text { text } => out.push_str(text),
+            Inline::Styled { children, .. } => out.push_str(&plain_text(children)),
+            Inline::Link { display, .. } => out.push_str(&plain_text(display)),
+            Inline::Reference { display, .. } => out.push_str(display),
+            Inline::InlineCode { text } => out.push_str(text),
+            Inline::Note { display, .. } => {
+                if let Some(display) = display {
+                    out.push_str(&plain_text(display));
+                }
+            }
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }

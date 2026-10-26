@@ -8,10 +8,18 @@ use crate::FormatError;
 /// Render the EPUB3 navigation document as XHTML.
 pub fn nav_xhtml(graph: &DocumentGraph, chapters: &[ChapterPlan]) -> Result<String, FormatError> {
     let mut out = String::new();
+    let lang = graph.metadata.language.as_deref().unwrap_or("en");
     out.push_str(
         r##"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="#" lang="#">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops""##,
+    );
+    out.push_str(" xml:lang=\"");
+    out.push_str(&escape_xml(lang));
+    out.push_str("\" lang=\"");
+    out.push_str(&escape_xml(lang));
+    out.push_str(
+        r##"">
   <head>
     <meta charset="UTF-8"/>
     <title>"##,

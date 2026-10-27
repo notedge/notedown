@@ -44,15 +44,15 @@ acorn-doc = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = 
 acorn-docx = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
 acorn-epub = { git = "https://github.com/yggdrasil-language/acorn.rs.git", rev = "fbed2df1626ec3800cb2e54b7b9c730bf8a2f996" }
 # Overlaid by local path `.cargo/config.toml` (git ignored).
-oak-core = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb" }
-oak-markdown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-notedown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-html = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-xml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-org-mode = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-tex = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-typst = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb" }
+oak-core = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53" }
+oak-markdown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-notedown = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-html = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-xml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-org-mode = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-tex = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-typst = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53" }
 
 notedown = { path = "projects/crates/notedown" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
@@ -66,8 +66,8 @@ davinci-diagram = { path = "projects/crates/davinci-diagram" }
 davinci-chart = { path = "projects/crates/davinci-chart" }
 davinci-runtime = { path = "projects/crates/davinci-runtime" }
 davinci-motion = { path = "projects/crates/davinci-motion" }
-oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
-oak-uml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "6f1fdc6d435955734c04d344178284e0900da4eb", default-features = false, features = ["serde"] }
+oak-mermaid = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
+oak-uml = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = "468c1feada73d65b7fc90317507414f9aed2dc53", default-features = false, features = ["serde"] }
 
 # External dependencies
 serde = { version = "1.0.229", features = ["derive"] }

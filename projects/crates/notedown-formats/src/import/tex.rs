@@ -14,16 +14,26 @@
 //! - `\limits` / `\nolimits` markers become adjacent `tex-limits` inline
 //!   markers plus a loss marker, because the IR has no large-operator
 //!   attachment.
+//!
+//! Math mode keeps one authored source per semantic node: `$...$` and
+//! `\(...\)` both become inline math, `$$...$$` and `\[...\]` both become a
+//! display math block, and a math environment (`equation`, `align`, `cases`,
+//! `aligned`, ...) becomes a display math block holding the whole
+//! `\begin{...}...\end{...}` source, so environment type, alignment tabs and row
+//! breaks survive for the math layout stage. Equation numbering has no IR field,
+//! so a numbered environment records that gap as a loss marker instead of
+//! dropping it silently.
 
 use std::path::Path;
 
 use notedown_ir::{
-    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, TableCell, TableRow,
+    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, SourceKind, SourceRef, TableCell,
+    TableRow,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_tex::{
     TexBuilder, TexLanguage,
-    ast::{TexArgument, TexCommand, TexEnvironment, TexItem, TexLeftRightPair, TexLimits, TexRoot},
+    ast::{MathDelimiter, TexArgument, TexCommand, TexEnvironment, TexItem, TexLeftRightPair, TexLimits, TexMath, TexRoot},
 };
 
 use super::common::register_image_assets;
@@ -126,15 +136,25 @@ impl<'a> TexLowerer<'a> {
         self.graph.push_loss(LossMarker { code: code.into(), message: message.into(), status });
     }
 
-    fn push_block(&mut self, sink: &mut Sink, block: Block) {
+    fn push_block(&mut self, sink: &mut Sink, block: Block) -> NodeId {
         sink.flush(&mut self.graph);
+        let id = self.graph.push_block(block);
         if sink.item_mode {
-            let id = self.graph.push_block(block);
             sink.children.push(id);
         }
-        else {
-            self.graph.push_block(block);
-        }
+        id
+    }
+
+    /// Push a block that came from one contiguous authored span and record that
+    /// span as its provenance.
+    fn push_spanned_block(&mut self, sink: &mut Sink, block: Block, start: usize, end: usize) -> NodeId {
+        let id = self.push_block(sink, block);
+        self.graph.attach_source(SourceRef {
+            node: id,
+            kind: SourceKind::TextSpan { start: start as u32, end: end as u32 },
+            precision: SemanticStatus::Resolved,
+        });
+        id
     }
 
     /// Lower a run of AST items while also recovering block environments that
@@ -180,10 +200,9 @@ impl<'a> TexLowerer<'a> {
                 sink.inlines.push(Inline::Styled { style: "subscript".into(), children });
             }
             TexItem::Math(math) => {
-                let raw = self.raw(math.span.start, math.span.end);
-                let (content, display) = math_source(raw);
+                let (content, display) = self.math_source(math);
                 if display {
-                    self.push_block(sink, Block::Math { content, language: Some("latex".into()) });
+                    self.push_spanned_block(sink, Block::Math { content, language: Some("latex".into()) }, math.span.start, math.span.end);
                 }
                 else {
                     sink.inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
@@ -208,6 +227,13 @@ impl<'a> TexLowerer<'a> {
     /// body keeps its own inline structure. An invisible delimiter stays the
     /// authored `"."` so it cannot be confused with a missing delimiter.
     fn left_right_inline(&mut self, pair: &TexLeftRightPair) -> Inline {
+        if pair.left_delim.is_empty() || pair.right_delim.is_empty() {
+            self.loss(
+                "import.tex.unclosed_delimiters",
+                format!("`\\left` pair has no readable delimiter pair: left `{}` right `{}`", pair.left_delim, pair.right_delim),
+                SemanticStatus::Unsupported,
+            );
+        }
         let children = self.collect_inlines(&pair.content.items, pair.span.start, pair.span.end);
         Inline::Attributed {
             attributes: Attributes {
@@ -244,10 +270,35 @@ impl<'a> TexLowerer<'a> {
         }
     }
 
+    /// Math source and display flag of one authored math span.
+    fn math_source(&mut self, math: &TexMath) -> (String, bool) {
+        let raw = self.raw(math.span.start, math.span.end);
+        match math_source_strip(raw, math.delimiter) {
+            Some(body) => (body.trim().to_string(), math.is_display),
+            None => {
+                let (open, close) = math_delimiters(math.delimiter);
+                self.loss(
+                    "import.tex.unclosed_math",
+                    format!("math span opened with `{open}` has no closing `{close}`, the authored body is kept"),
+                    SemanticStatus::Unsupported,
+                );
+                let body = raw.trim().strip_prefix(open).unwrap_or(raw.trim());
+                (body.trim().to_string(), math.is_display)
+            }
+        }
+    }
+
     fn lower_command(&mut self, command: &TexCommand, sink: &mut Sink) {
         let raw = self.raw(command.span.start, command.span.end);
         let name = command_name(raw);
         if let Some(level) = section_level(&name) {
+            if command.starred {
+                self.loss(
+                    "import.tex.starred_command",
+                    format!("`\\{name}*` is unnumbered, but the IR section kind has no numbering state"),
+                    SemanticStatus::Partial,
+                );
+            }
             let title = self
                 .required_argument(command)
                 .map(|fragment| self.lower_inline_fragment(fragment))
@@ -288,19 +339,24 @@ impl<'a> TexLowerer<'a> {
 
     fn lower_environment(&mut self, environment: &TexEnvironment, sink: &mut Sink) {
         let raw = self.raw(environment.span.start, environment.span.end);
-        let name = environment_name(raw);
+        let name = environment.name.clone();
+        self.check_environment_boundaries(environment);
+        if environment.is_math {
+            self.lower_math_environment(environment, raw, sink);
+            return;
+        }
         match name.as_str() {
             "document" => self.lower_root(&environment.content.items, environment.span.start, environment.span.end, sink),
             "verbatim" | "lstlisting" | "minted" | "Verbatim" => {
                 let content = self.code_environment_content(environment.span.start, environment.span.end);
-                self.push_block(sink, Block::Code { language: None, content });
+                self.push_spanned_block(sink, Block::Code { language: None, content }, environment.span.start, environment.span.end);
             }
             "itemize" | "enumerate" | "description" => self.lower_list(&name, environment.span.start, environment.span.end, sink),
             "tabular" | "array" => self.lower_table(environment.span.start, environment.span.end, sink),
             _ => {
                 self.loss(
                     "import.tex.unknown_environment",
-                    format!("unknown TeX environment kept opaque: {name}"),
+                    format!("unknown TeX environment kept opaque: {}", environment.name),
                     SemanticStatus::Unsupported,
                 );
                 let kind = if name.is_empty() { "tex.environment.unknown".to_string() } else { format!("tex.environment.{name}") };
@@ -309,6 +365,59 @@ impl<'a> TexLowerer<'a> {
                     Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial },
                 );
             }
+        }
+    }
+
+    /// Lower a recognized math environment.
+    ///
+    /// The whole `\begin{...}...\end{...}` source is kept as one math payload, so
+    /// the environment name, its star variant, alignment tabs and row breaks stay
+    /// available to the math layout stage instead of being flattened into plain
+    /// text. `math` itself is inline math, every other recognized math
+    /// environment is a display math block.
+    fn lower_math_environment(&mut self, environment: &TexEnvironment, raw: &'a str, sink: &mut Sink) {
+        let stated = if environment.starred { format!("{}*", environment.name) } else { environment.name.clone() };
+        if math_environment_is_numbered(&environment.name, environment.starred) {
+            self.loss(
+                "import.tex.math_numbering",
+                format!("math environment `{stated}` carries an equation number, but `Block::Math` has no number or anchor field to hold it"),
+                SemanticStatus::Partial,
+            );
+        }
+        if environment.name == "math" {
+            let inlines = self.collect_inlines(&environment.content.items, environment.span.start, environment.span.end);
+            sink.inlines.extend(inlines);
+            return;
+        }
+        self.push_spanned_block(
+            sink,
+            Block::Math { content: raw.trim().to_string(), language: Some("latex".into()) },
+            environment.span.start,
+            environment.span.end,
+        );
+    }
+
+    /// Compare the authored `\begin{...}` and `\end{...}` names of an environment.
+    ///
+    /// The parser matches the closing keyword without checking the name, so a
+    /// mismatched or missing closing marker has to be reported here instead of
+    /// passing as a well-formed environment.
+    fn check_environment_boundaries(&mut self, environment: &TexEnvironment) {
+        let raw = self.raw(environment.span.start, environment.span.end);
+        let Some((begin_name, _)) = parse_begin(raw.trim_start()) else {
+            return;
+        };
+        let Some(footer) = raw.rfind("\\end{") else {
+            self.loss("import.tex.unclosed_environment", format!("environment `{begin_name}` has no closing marker"), SemanticStatus::Unsupported);
+            return;
+        };
+        let end_name = raw[footer..].strip_prefix("\\end{").and_then(|rest| rest.split('}').next()).map(|name| name.trim()).unwrap_or("");
+        if end_name != begin_name {
+            self.loss(
+                "import.tex.mismatched_end",
+                format!("environment opens as `{begin_name}` but closes as `{end_name}`"),
+                SemanticStatus::Unsupported,
+            );
         }
     }
 
@@ -623,7 +732,7 @@ impl<'a> TexLowerer<'a> {
                     inlines.push(Inline::Styled { style: "subscript".into(), children });
                 }
                 TexItem::Math(math) => {
-                    let (content, _) = math_source(self.raw(math.span.start, math.span.end));
+                    let (content, _) = self.math_source(math);
                     inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
                 }
                 TexItem::Command(command) => {
@@ -650,17 +759,21 @@ impl<'a> TexLowerer<'a> {
                 }
                 TexItem::Environment(environment) => {
                     let raw = self.raw(environment.span.start, environment.span.end);
-                    let name = environment_name(raw);
-                    if matches!(name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
+                    let name = environment.name.clone();
+                    if matches!(environment.name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
                         self.loss(
                             "import.tex.block_in_inline_context",
                             format!("block environment {name} cannot be represented as inline content"),
                             SemanticStatus::Partial,
                         );
                     }
-                    else if matches!(name.as_str(), "verbatim" | "lstlisting" | "minted" | "Verbatim") {
+                    else if matches!(environment.name.as_str(), "verbatim" | "lstlisting" | "minted" | "Verbatim") {
                         let text = self.code_environment_content(environment.span.start, environment.span.end);
                         inlines.push(Inline::InlineCode { text });
+                    }
+                    else if environment.is_math {
+                        self.check_environment_boundaries(environment);
+                        inlines.push(Inline::InlineMath { content: raw.trim().to_string(), language: Some("latex".into()) });
                     }
                     else {
                         self.loss(
@@ -754,10 +867,6 @@ fn command_name(raw: &str) -> String {
     }
 }
 
-fn environment_name(raw: &str) -> String {
-    parse_begin(raw.trim_start()).map(|(name, _)| name).unwrap_or_default()
-}
-
 /// Parse a `\begin{name}` header at the start of `raw`.
 fn parse_begin(raw: &str) -> Option<(String, usize)> {
     let rest = raw.strip_prefix("\\begin{")?;
@@ -805,21 +914,39 @@ enum InlineOutcome {
     Unknown,
 }
 
-fn math_source(raw: &str) -> (String, bool) {
+/// Authored opening and closing markers of one math delimiter style.
+fn math_delimiters(delimiter: MathDelimiter) -> (&'static str, &'static str) {
+    match delimiter {
+        MathDelimiter::Dollar => ("$", "$"),
+        MathDelimiter::DoubleDollar => ("$$", "$$"),
+        MathDelimiter::Paren => ("\\(", "\\)"),
+        MathDelimiter::Bracket => ("\\[", "\\]"),
+        MathDelimiter::Environment => ("", ""),
+    }
+}
+
+/// Split the authored math source into its body.
+///
+/// Every delimiter form strips its own opening and closing marker, so `$x$` and
+/// `\(x\)` produce the same inline payload and `$$x$$` and `\[x\]` produce the
+/// same display payload. A missing closing marker yields `None`, so the caller
+/// keeps the authored body and records the defect instead of dropping the span.
+fn math_source_strip<'a>(raw: &'a str, delimiter: MathDelimiter) -> Option<&'a str> {
     let trimmed = raw.trim();
-    if let Some(inner) = trimmed.strip_prefix("$$").and_then(|value| value.strip_suffix("$$")) {
-        return (inner.trim().to_string(), true);
+    let (open, close) = math_delimiters(delimiter);
+    if open.is_empty() {
+        return Some(trimmed);
     }
-    if let Some(inner) = trimmed.strip_prefix("\\[").and_then(|value| value.strip_suffix("\\]")) {
-        return (inner.trim().to_string(), true);
-    }
-    if trimmed.starts_with("\\begin{") {
-        return (trimmed.to_string(), true);
-    }
-    if let Some(inner) = trimmed.strip_prefix('$').and_then(|value| value.strip_suffix('$')) {
-        return (inner.trim().to_string(), false);
-    }
-    (trimmed.to_string(), false)
+    let body = trimmed.strip_prefix(open)?;
+    body.strip_suffix(close)
+}
+
+/// Whether a math environment emits an equation number in LaTeX.
+///
+/// Starred variants and the inner environments (`aligned`, `gathered`, `split`,
+/// `cases`, matrix family, `math`, `displaymath`) never number their content.
+fn math_environment_is_numbered(name: &str, starred: bool) -> bool {
+    !starred && matches!(name, "equation" | "align" | "gather" | "multline" | "eqnarray" | "flalign" | "alignat")
 }
 
 fn split_paragraphs(text: &str) -> Vec<&str> {

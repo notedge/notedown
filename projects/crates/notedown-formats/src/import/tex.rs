@@ -5,16 +5,26 @@
 //! code. Everything that only makes sense to a TeX engine (macro definitions,
 //! packages, floats, arbitrary layout commands) stays an explicit opaque block
 //! or a recorded loss marker instead of being silently dropped.
+//!
+//! Two AST constructs have no dedicated IR semantic and are carried structurally
+//! instead of being flattened into text:
+//!
+//! - `\left...\right` pairs keep the authored opening and closing delimiters as
+//!   `tex-delimiter-pair` attributes around the lowered body content.
+//! - `\limits` / `\nolimits` markers become adjacent `tex-limits` inline
+//!   markers plus a loss marker, because the IR has no large-operator
+//!   attachment.
 
 use std::path::Path;
 
 use notedown_ir::{
-    Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, TableCell, TableRow,
+    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus,
+    TableCell, TableRow,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_tex::{
     TexBuilder, TexLanguage,
-    ast::{TexArgument, TexCommand, TexEnvironment, TexItem, TexRoot},
+    ast::{TexArgument, TexCommand, TexEnvironment, TexItem, TexLeftRightPair, TexLimits, TexRoot},
 };
 
 use super::common::register_image_assets;
@@ -156,6 +166,7 @@ impl<'a> TexLowerer<'a> {
     fn lower_item(&mut self, item: &TexItem, sink: &mut Sink) {
         match item {
             TexItem::Text { content, .. } => self.push_text(content, sink),
+            // Comments carry no document semantics, so dropping them is intended.
             TexItem::Comment { .. } => {}
             TexItem::Group(group) => {
                 let inlines = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
@@ -181,6 +192,56 @@ impl<'a> TexLowerer<'a> {
             }
             TexItem::Command(command) => self.lower_command(command, sink),
             TexItem::Environment(environment) => self.lower_environment(environment, sink),
+            TexItem::LeftRightPair(pair) => {
+                let inline = self.left_right_inline(pair);
+                sink.inlines.push(inline);
+            }
+            TexItem::Limits(limits) => {
+                let inline = self.limits_inline(limits);
+                sink.inlines.push(inline);
+            }
+        }
+    }
+
+    /// Lower a `\left...\right` pair.
+    ///
+    /// The pair keeps its authored delimiters as inline attributes while the
+    /// body keeps its own inline structure. An invisible delimiter stays the
+    /// authored `"."` so it cannot be confused with a missing delimiter.
+    fn left_right_inline(&mut self, pair: &TexLeftRightPair) -> Inline {
+        let children = self.collect_inlines(&pair.content.items, pair.span.start, pair.span.end);
+        Inline::Attributed {
+            attributes: Attributes {
+                id: None,
+                classes: vec!["tex-delimiter-pair".into()],
+                pairs: vec![
+                    AttributePair { key: "data-tex-left".into(), value: pair.left_delim.clone() },
+                    AttributePair { key: "data-tex-right".into(), value: pair.right_delim.clone() },
+                ],
+            },
+            children,
+        }
+    }
+
+    /// Lower a `\limits` / `\nolimits` marker.
+    ///
+    /// The marker is recorded as an adjacent inline because the IR has no
+    /// large-operator attachment, and a loss marker states that attachment
+    /// limitation instead of discarding the construct.
+    fn limits_inline(&mut self, limits: &TexLimits) -> Inline {
+        let value = if limits.is_limits { "limits" } else { "nolimits" };
+        self.loss(
+            "import.tex.limits_marker",
+            format!("\\{value} marker is kept as an inline marker because the IR has no large-operator attachment"),
+            SemanticStatus::Partial,
+        );
+        Inline::Attributed {
+            attributes: Attributes {
+                id: None,
+                classes: vec!["tex-limits".into()],
+                pairs: vec![AttributePair { key: "data-tex-limits".into(), value: value.into() }],
+            },
+            children: Vec::new(),
         }
     }
 
@@ -548,6 +609,7 @@ impl<'a> TexLowerer<'a> {
             self.record_dropped_regions_loss(cursor, start);
             match item {
                 TexItem::Text { content, .. } => push_text_inlines(&mut inlines, content),
+                // Comments carry no document semantics, so dropping them is intended.
                 TexItem::Comment { .. } => {}
                 TexItem::Group(group) => {
                     let nested = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
@@ -609,6 +671,14 @@ impl<'a> TexLowerer<'a> {
                         );
                     }
                 }
+                TexItem::LeftRightPair(pair) => {
+                    let inline = self.left_right_inline(pair);
+                    inlines.push(inline);
+                }
+                TexItem::Limits(limits) => {
+                    let inline = self.limits_inline(limits);
+                    inlines.push(inline);
+                }
             }
             cursor = end;
         }
@@ -654,6 +724,10 @@ impl<'a> TexLowerer<'a> {
     }
 }
 
+/// Source span of a `TexItem`.
+///
+/// The match is exhaustive over the closed `oak-tex` AST enum, so a new variant
+/// fails to compile here instead of losing its source span silently.
 fn item_span(item: &TexItem) -> Option<(usize, usize)> {
     match item {
         TexItem::Command(command) => Some((command.span.start, command.span.end)),
@@ -662,6 +736,8 @@ fn item_span(item: &TexItem) -> Option<(usize, usize)> {
         TexItem::Math(math) => Some((math.span.start, math.span.end)),
         TexItem::Superscript(superscript) => Some((superscript.span.start, superscript.span.end)),
         TexItem::Subscript(subscript) => Some((subscript.span.start, subscript.span.end)),
+        TexItem::LeftRightPair(pair) => Some((pair.span.start, pair.span.end)),
+        TexItem::Limits(limits) => Some((limits.span.start, limits.span.end)),
         TexItem::Text { span, .. } | TexItem::Comment { span, .. } => Some((span.start, span.end)),
     }
 }

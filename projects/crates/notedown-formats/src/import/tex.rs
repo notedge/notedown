@@ -430,6 +430,8 @@ impl<'a> TexLowerer<'a> {
                 content: item_sink.item_content,
                 children: item_sink.children,
                 number: ordered.then_some((index + 1) as u32),
+                is_task: false,
+                is_checked: None,
             });
         }
         self.push_block(sink, Block::List { ordered, items });

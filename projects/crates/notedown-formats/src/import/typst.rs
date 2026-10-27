@@ -333,7 +333,7 @@ impl<'a> TypstLowerer<'a> {
         let mut items = Vec::new();
         for line in lines {
             let content = self.lower_inline_fragment(&line.content);
-            items.push(ListItem { content, children: Vec::new(), number: line.number });
+            items.push(ListItem { content, children: Vec::new(), number: line.number, is_task: false, is_checked: None });
         }
         if items.is_empty() {
             self.loss("import.typst.empty_list", "list markup contains no item line", SemanticStatus::Partial);

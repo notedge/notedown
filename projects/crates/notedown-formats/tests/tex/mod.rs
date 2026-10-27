@@ -218,3 +218,119 @@ fn includegraphics_becomes_image_and_registers_asset() {
     assert!(asset.is_some());
     assert_eq!(graph.assets.len(), 1);
 }
+
+#[test]
+fn left_right_pairs_keep_authored_delimiters() {
+    let text = "\\left( x + y \\right) \\left[ a \\right] \\left\\{ b \\right\\}\n";
+    let graph = import_tex_bytes("delimiters.tex", text).unwrap();
+    let pairs: Vec<(String, String, String)> = paragraph_inlines(&graph)
+        .into_iter()
+        .filter_map(delimiter_pair)
+        .map(|(left, right, children)| (left.to_string(), right.to_string(), children.iter().map(Inline::plain_text).collect()))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            ("(".to_string(), ")".to_string(), "x+y".to_string()),
+            ("[".to_string(), "]".to_string(), "a".to_string()),
+            ("\\{".to_string(), "\\}".to_string(), "b".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn nested_left_right_pairs_keep_inner_structure() {
+    let graph = import_tex_bytes("nested_delimiters.tex", "\\left( \\left[ x \\right] \\right)\n").unwrap();
+    let inlines = paragraph_inlines(&graph);
+    let outer = inlines.iter().find_map(|inline| delimiter_pair(inline)).expect("outer delimiter pair");
+    assert_eq!((outer.0, outer.1), ("(", ")"));
+    let inner = outer.2.iter().find_map(delimiter_pair).expect("inner delimiter pair");
+    assert_eq!((inner.0, inner.1), ("[", "]"));
+    assert_eq!(inner.2.iter().map(Inline::plain_text).collect::<String>(), "x");
+    // The inner pair stays its own node instead of flattening into the outer body
+    // text.
+    assert!(matches!(outer.2, [Inline::Attributed { .. }]));
+}
+
+#[test]
+fn limits_marker_stays_adjacent_to_its_operator() {
+    let graph = import_tex_bytes("limits.tex", "\\sum\\limits_{i=1}^{n}\n").unwrap();
+    assert!(
+        blocks(&graph)
+            .iter()
+            .any(|node| matches!(&node.block, Block::Opaque { kind, payload_hint, .. } if kind == "tex.sum" && payload_hint == "\\sum"))
+    );
+
+    let inlines = paragraph_inlines(&graph);
+    let marker = inlines.first().expect("limits marker inline");
+    assert_eq!(limits_value(marker), Some("limits"));
+    assert!(matches!(marker, Inline::Attributed { children, .. } if children.is_empty()));
+
+    let scripts: Vec<(&str, String)> = inlines[1..]
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Styled { style, children } => Some((style.as_str(), children.iter().map(Inline::plain_text).collect())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(scripts, vec![("subscript", "i=1".to_string()), ("superscript", "n".to_string())]);
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.tex.limits_marker"));
+}
+
+#[test]
+fn nolimits_marker_records_the_nolimits_variant() {
+    let graph = import_tex_bytes("nolimits.tex", "\\int\\nolimits_0^1\n").unwrap();
+    assert!(
+        blocks(&graph)
+            .iter()
+            .any(|node| matches!(&node.block, Block::Opaque { kind, payload_hint, .. } if kind == "tex.int" && payload_hint == "\\int"))
+    );
+
+    let inlines = paragraph_inlines(&graph);
+    let marker = inlines.first().expect("nolimits marker inline");
+    assert_eq!(limits_value(marker), Some("nolimits"));
+
+    let scripts: Vec<(&str, String)> = inlines[1..]
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Styled { style, children } => Some((style.as_str(), children.iter().map(Inline::plain_text).collect())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(scripts, vec![("subscript", "0".to_string()), ("superscript", "1".to_string())]);
+}
+
+/// Inline content of every paragraph block in document order.
+fn paragraph_inlines(graph: &DocumentGraph) -> Vec<&Inline> {
+    blocks(graph)
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Paragraph { content } => Some(content.iter()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// Authored `\left...\right` delimiters plus the lowered body of the pair.
+fn delimiter_pair(inline: &Inline) -> Option<(&str, &str, &[Inline])> {
+    let Inline::Attributed { attributes, children } = inline else {
+        return None;
+    };
+    if !attributes.classes.iter().any(|class| class == "tex-delimiter-pair") {
+        return None;
+    }
+    let value = |key: &str| attributes.pairs.iter().find(|pair| pair.key == key).map(|pair| pair.value.as_str());
+    Some((value("data-tex-left")?, value("data-tex-right")?, children.as_slice()))
+}
+
+/// Authored `\limits` / `\nolimits` variant recorded by the marker inline.
+fn limits_value(inline: &Inline) -> Option<&str> {
+    let Inline::Attributed { attributes, .. } = inline else {
+        return None;
+    };
+    if !attributes.classes.iter().any(|class| class == "tex-limits") {
+        return None;
+    }
+    attributes.pairs.iter().find(|pair| pair.key == "data-tex-limits").map(|pair| pair.value.as_str())
+}

@@ -6,8 +6,8 @@
 //! packages, floats, arbitrary layout commands) stays an explicit opaque block
 //! or a recorded loss marker instead of being silently dropped.
 //!
-//! Two AST constructs have no dedicated IR semantic and are carried structurally
-//! instead of being flattened into text:
+//! Two AST constructs have no dedicated IR semantic and are carried
+//! structurally instead of being flattened into text:
 //!
 //! - `\left...\right` pairs keep the authored opening and closing delimiters as
 //!   `tex-delimiter-pair` attributes around the lowered body content.
@@ -18,8 +18,7 @@
 use std::path::Path;
 
 use notedown_ir::{
-    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus,
-    TableCell, TableRow,
+    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, TableCell, TableRow,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_tex::{

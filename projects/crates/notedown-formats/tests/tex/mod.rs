@@ -548,3 +548,75 @@ fn limits_value(inline: &Inline) -> Option<&str> {
     }
     attributes.pairs.iter().find(|pair| pair.key == "data-tex-limits").map(|pair| pair.value.as_str())
 }
+
+#[test]
+fn math_style_commands_record_loss_when_encountered_outside_math_source() {
+    // These commands belong inside math mode; lowering still accepts them and
+    // records a dedicated loss code, then produces no inline/block node so the
+    // math layout stage keeps working from the authored source.
+    let graph = import_tex_bytes(
+        "math_style_cmds.tex",
+        "Pre formula text.\n\n\\displaystyle\n\\textstyle\n\\scriptstyle\n\\scriptscriptstyle\n\nPost formula text.\n",
+    )
+    .unwrap();
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "math style commands must not stay opaque"
+    );
+    assert_eq!(loss_count(&graph, "import.tex.math_style_command"), 4);
+    assert!(graph.coverage.loss.iter().all(|loss| loss.status == notedown_ir::SemanticStatus::Partial));
+}
+
+#[test]
+fn math_font_commands_record_loss_when_encountered() {
+    let graph = import_tex_bytes(
+        "math_font_cmds.tex",
+        "See \\mathbf{A} and \\mathit{B} and \\mathrm{C} and \\mathcal{D} and \\mathbb{E} and \\mathfrak{F}.\n",
+    )
+    .unwrap();
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "math font commands must not stay opaque"
+    );
+    assert_eq!(loss_count(&graph, "import.tex.math_font_command"), 6);
+}
+
+#[test]
+fn math_font_commands_do_not_stay_opaque() {
+    // Math font commands are consumed by the lowering without producing a
+    // dangling opaque block, even when they carry an argument.
+    let graph = import_tex_bytes("math_font_arg.tex", "Before \\mathbf{abc} after.\n").unwrap();
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "math font commands with arguments must not stay opaque"
+    );
+    assert_eq!(loss_count(&graph, "import.tex.math_font_command"), 1);
+}
+
+#[test]
+fn math_limits_command_loss_covers_both_parser_paths() {
+    // `\limits` / `\nolimits` usually become `TexItem::Limits`, but the plain
+    // command path also emits the same dedicated loss code.
+    let graph = import_tex_bytes("math_limits_loss.tex", "\\sum\\limits_{i=1}^{n}\n").unwrap();
+    assert!(has_loss(&graph, "import.tex.limits_marker"));
+    assert!(has_loss(&graph, "import.tex.math_limits_command"));
+    assert_eq!(loss_count(&graph, "import.tex.math_limits_command"), 1);
+}
+
+#[test]
+fn combined_math_losses_stack_in_one_paragraph() {
+    let graph = import_tex_bytes(
+        "combined_math_loss.tex",
+        "\\displaystyle \\mathbf{x} \\nolimits_{i} a_{i}\n",
+    )
+    .unwrap();
+    assert!(has_loss(&graph, "import.tex.math_style_command"));
+    assert!(has_loss(&graph, "import.tex.math_font_command"));
+    assert!(has_loss(&graph, "import.tex.math_limits_command"));
+    // No opaque blocks: lowering consumed the style/font commands as
+    // dedicated loss markers, and the limits became an attributed inline.
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "no opaque blocks expected when math commands are recognized"
+    );
+}

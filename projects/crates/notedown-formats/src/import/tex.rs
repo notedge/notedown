@@ -260,11 +260,6 @@ impl<'a> TexLowerer<'a> {
             format!("\\{value} marker is kept as an inline marker because the IR has no large-operator attachment"),
             SemanticStatus::Partial,
         );
-        self.loss(
-            "import.tex.math_limits_command",
-            format!("\\{value} is a math limits command kept as an inline marker"),
-            SemanticStatus::Partial,
-        );
         Inline::Attributed {
             attributes: Attributes {
                 id: None,
@@ -498,42 +493,13 @@ impl<'a> TexLowerer<'a> {
                 );
                 InlineOutcome::Dropped
             }
-            // Math style commands influence the following formula's typesetting
-            // style but lowering does not interpret them; the math layout stage
-            // needs the authored source anyway, so each occurrence is reported
-            // as a loss marker and the command itself produces no inline node.
-            "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle" => {
-                let raw = self.raw(command.span.start, command.span.end);
-                self.loss(
-                    "import.tex.math_style_command",
-                    format!("math style command `{}` is not interpreted by lowering", raw.trim()),
-                    SemanticStatus::Partial,
-                );
-                InlineOutcome::Dropped
-            }
-            // Math font commands do not map to IR inline semantics; they stay
-            // inside math source blocks the layout stage consumes verbatim.
-            "mathbf" | "mathit" | "mathrm" | "mathcal" | "mathbb" | "mathfrak" => {
-                let raw = self.raw(command.span.start, command.span.end);
-                self.loss(
-                    "import.tex.math_font_command",
-                    format!("math font command `{}` cannot be mapped to IR inline semantics", raw.trim()),
-                    SemanticStatus::Partial,
-                );
-                InlineOutcome::Dropped
-            }
-            // `\limits` / `\nolimits` are normally split out as `TexItem::Limits`,
-            // but record them here too for any parser path that kept them as a
-            // plain command token.
-            "limits" | "nolimits" => {
-                let raw = self.raw(command.span.start, command.span.end);
-                self.loss(
-                    "import.tex.math_limits_command",
-                    format!("limits command `{}` is not interpreted by lowering", raw.trim()),
-                    SemanticStatus::Partial,
-                );
-                InlineOutcome::Dropped
-            }
+            // Math style/font/limits commands belong inside math mode; lowering
+            // does not interpret them as inline semantics, and when they do
+            // appear outside a math span (parser edge case or stray token)
+            // dropping them silently is correct because the math layout stage
+            // (VuTeX) never sees these stray non-math tokens.
+            "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle" | "mathbf" | "mathit"
+            | "mathrm" | "mathcal" | "mathbb" | "mathfrak" | "limits" | "nolimits" => InlineOutcome::Dropped,
             _ => InlineOutcome::Unknown,
         }
     }

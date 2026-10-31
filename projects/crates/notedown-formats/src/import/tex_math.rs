@@ -376,13 +376,19 @@ fn lower_environment(environment: &TexEnvironment, source: &str) -> MathExpressi
     let numbered = !environment.starred && environment_is_numbered(name);
     let rows = environment_rows(environment, source, &kind, numbered);
     let column_alignment = column_alignment(name, &rows);
+    let column_pairs = match kind {
+        MathEnvironmentKind::AlignedAt | MathEnvironmentKind::AlignAt => {
+            environment.arguments.iter().find_map(argument_text).and_then(|text| text.trim().parse::<u32>().ok())
+        }
+        _ => None,
+    };
     MathExpression::Environment(MathEnvironment {
         kind,
         name: name.to_string(),
         starred: environment.starred,
         rows,
         column_alignment,
-        column_pairs: None,
+        column_pairs,
     })
 }
 
@@ -741,6 +747,18 @@ mod tests {
         assert!(matches!(expression, MathExpression::Accent { mark: 'ˆ', .. }));
         let expression = lower(r"\overset{!}{=}");
         assert!(matches!(expression, MathExpression::StackAbove { .. }));
+    }
+
+    #[test]
+    fn alignedat_keeps_its_declared_column_pairs() {
+        let source = r"\begin{alignedat}{2} a &= b \end{alignedat}";
+        let MathExpression::Environment(environment) = lower(source)
+        else {
+            panic!("expected an environment")
+        };
+        assert_eq!(environment.kind, MathEnvironmentKind::AlignedAt);
+        assert_eq!(environment.column_pairs, Some(2));
+        assert!(matches!(&environment.rows[0].cells[0], MathExpression::Atom(atom) if atom.text == "a"));
     }
 
     #[test]

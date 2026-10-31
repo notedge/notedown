@@ -14,6 +14,11 @@
 //! - `\limits` / `\nolimits` markers become adjacent `tex-limits` inline
 //!   markers plus a loss marker, because the IR has no large-operator
 //!   attachment.
+//! - Text-mode spacing commands (`\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`)
+//!   become `tex-space` inline markers whose `data-tex-space` value keeps the
+//!   authored distinction (thin, medium, thick, negative, quad, double-quad)
+//!   plus a loss marker, because the IR has no typographic space node. Inside
+//!   math these commands stay verbatim in the preserved math source.
 //!
 //! Math mode keeps one authored source per semantic node: `$...$` and
 //! `\(...\)` both become inline math, `$$...$$` and `\[...\]` both become a
@@ -492,6 +497,35 @@ impl<'a> TexLowerer<'a> {
                     SemanticStatus::Partial,
                 );
                 InlineOutcome::Dropped
+            }
+            // Text-mode spacing commands carry a visible typographic hint the IR
+            // cannot express as a first-class node, so each one stays a `tex-space`
+            // marker whose value keeps the authored distinction for the layout
+            // host (thin `3mu`, medium `4mu`, thick `5mu`, negative `-3mu`, quad
+            // `1em`, double-quad `2em`) plus one loss marker. Inside math the same
+            // commands survive verbatim in the preserved math source instead.
+            "," | ":" | ";" | "!" | "quad" | "qquad" => {
+                let value = match name.as_str() {
+                    "," => "thin",
+                    ":" => "medium",
+                    ";" => "thick",
+                    "!" => "negative",
+                    "quad" => "quad",
+                    _ => "double-quad",
+                };
+                self.loss(
+                    "import.tex.space_marker",
+                    format!("`\\{name}` is kept as a spacing marker because the IR has no typographic space node"),
+                    SemanticStatus::Partial,
+                );
+                InlineOutcome::Inline(Inline::Attributed {
+                    attributes: Attributes {
+                        id: None,
+                        classes: vec!["tex-space".into()],
+                        pairs: vec![AttributePair { key: "data-tex-space".into(), value: value.into() }],
+                    },
+                    children: Vec::new(),
+                })
             }
             // Math style/font/limits commands belong inside math mode; lowering
             // does not interpret them as inline semantics, and when they do

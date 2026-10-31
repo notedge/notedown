@@ -604,6 +604,51 @@ fn limits_marker_stays_inline_without_extra_loss_code() {
 }
 
 #[test]
+fn text_mode_space_commands_keep_their_authored_distinction() {
+    let graph = import_tex_bytes("spaces.tex", "a\\,b\\:c\\;d\\!e\\quad f\\qquad g\n").unwrap();
+    let spaces: Vec<String> = paragraph_inlines(&graph).into_iter().filter_map(space_value).collect();
+    assert_eq!(spaces, vec!["thin", "medium", "thick", "negative", "quad", "double-quad"]);
+    assert_eq!(loss_count(&graph, "import.tex.space_marker"), 6, "one loss per authored spacing command");
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "spacing commands must not stay opaque"
+    );
+    assert!(!has_loss(&graph, "import.tex.unsupported_command"));
+}
+
+#[test]
+fn math_mode_space_commands_stay_verbatim_in_the_preserved_source() {
+    // Inside math the authored commands are part of the preserved math payload,
+    // so the layout host can still distinguish 3mu / 4mu / 5mu values and no
+    // text-mode spacing marker or loss is emitted.
+    let graph = import_tex_bytes("math_spaces.tex", "$a\\,b\\:c\\;d\\!e\\quad f\\qquad g$\n").unwrap();
+    let inline_math: Vec<String> = paragraph_inlines(&graph)
+        .into_iter()
+        .filter_map(|inline| match inline {
+            Inline::InlineMath { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inline_math.len(), 1);
+    for command in ["\\,", "\\:", "\\;", "\\!", "\\quad", "\\qquad"] {
+        assert!(inline_math[0].contains(command), "math payload must keep `{command}` verbatim: {}", inline_math[0]);
+    }
+    assert_eq!(loss_count(&graph, "import.tex.space_marker"), 0);
+    assert_eq!(paragraph_inlines(&graph).into_iter().filter_map(space_value).count(), 0);
+}
+
+/// Authored spacing variant recorded by a `tex-space` marker inline.
+fn space_value(inline: &Inline) -> Option<String> {
+    let Inline::Attributed { attributes, .. } = inline else {
+        return None;
+    };
+    if !attributes.classes.iter().any(|class| class == "tex-space") {
+        return None;
+    }
+    attributes.pairs.iter().find(|pair| pair.key == "data-tex-space").map(|pair| pair.value.clone())
+}
+
+#[test]
 fn math_commands_outside_math_source_leave_no_loss_or_opaque_blocks() {
     let graph = import_tex_bytes(
         "combined_math_loss.tex",

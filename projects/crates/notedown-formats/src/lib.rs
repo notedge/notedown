@@ -6,6 +6,8 @@ mod error;
 pub mod export;
 pub mod import;
 pub mod inspect;
+#[cfg(feature = "tex")]
+pub mod tex_corpus;
 
 pub use capability::{FormatCapability, FormatDirection, FormatStatus};
 pub use error::{FormatError, NAMESPACE as DIAGNOSTIC_NAMESPACE, codes as diagnostic_codes, from_format_error, origin_formats};

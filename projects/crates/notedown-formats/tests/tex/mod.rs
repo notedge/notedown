@@ -847,3 +847,49 @@ fn endpoint_name(endpoint: &RelationEndpoint) -> String {
         other => format!("{other:?}"),
     }
 }
+
+#[test]
+fn shared_tex_corpus_holds_its_lowering_contract() {
+    use notedown_formats::tex_corpus::{block_kind_name, tex_conformance_corpus};
+    let cases = tex_conformance_corpus();
+    assert!(cases.len() >= 20, "the corpus must cover the joint TeX families");
+    let mut ids = std::collections::HashSet::new();
+    for case in cases {
+        assert!(ids.insert(case.id), "duplicate corpus id {}", case.id);
+        let graph = import_tex_bytes(&format!("{}.tex", case.id), case.tex)
+            .unwrap_or_else(|error| panic!("corpus {} failed to import: {error}", case.id));
+        assert!(graph.validate().is_valid(), "corpus {} must validate", case.id);
+        let kinds: Vec<&str> = blocks(&graph).iter().map(|node| block_kind_name(&node.block)).collect();
+        assert_eq!(kinds.as_slice(), case.expected_block_kinds, "corpus {} block kinds", case.id);
+        let payloads = math_payloads(&graph);
+        assert_eq!(payloads, case.expected_math_payloads, "corpus {} math payloads", case.id);
+        for code in case.expected_loss_codes {
+            assert!(has_loss(&graph, code), "corpus {} must record {code}", case.id);
+        }
+        for code in case.forbidden_loss_codes {
+            assert_eq!(loss_count(&graph, code), 0, "corpus {} must not record {code}", case.id);
+        }
+        assert_eq!(graph.metadata.title.as_deref(), case.expected_title, "corpus {} title", case.id);
+        let authors: Vec<&str> = graph.metadata.authors.iter().map(String::as_str).collect();
+        assert_eq!(authors.as_slice(), case.expected_authors, "corpus {} authors", case.id);
+    }
+}
+
+/// Math payloads kept for the layout stage, in document order.
+fn math_payloads(graph: &DocumentGraph) -> Vec<&str> {
+    let mut payloads = Vec::new();
+    for node in blocks(graph) {
+        match &node.block {
+            Block::Math { content, .. } => payloads.push(content.as_str()),
+            Block::Paragraph { content } => {
+                for inline in content {
+                    if let Inline::InlineMath { content, .. } = inline {
+                        payloads.push(content.as_str());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    payloads
+}

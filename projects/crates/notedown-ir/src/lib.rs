@@ -26,7 +26,7 @@ pub use id::{AssetId, DocumentId, LinkId, NodeId};
 pub use inline::{AttributePair, Attributes, BreakKind, Inline};
 pub use math::{
     MathAtom, MathClass, MathColumnAlignment, MathDelimiter, MathDelimiterKind, MathDisplay, MathEnvironment, MathEnvironmentKind,
-    MathExpression, MathFormula, MathRow, MathRowNumbering, MathRowPlacement, MathStyle,
+    MathExpression, MathFormula, MathRow, MathRowNumbering, MathRowPlacement, MathSpace, MathStyle, MathStyleKind, MathFractionLine,
 };
 pub use relation::{Relation, RelationEndpoint, RelationKind};
 pub use source::{CoverageReport, SourceKind, SourceRef};

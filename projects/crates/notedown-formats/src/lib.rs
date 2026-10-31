@@ -13,6 +13,10 @@ pub use capability::{FormatCapability, FormatDirection, FormatStatus};
 pub use error::{FormatError, NAMESPACE as DIAGNOSTIC_NAMESPACE, codes as diagnostic_codes, from_format_error, origin_formats};
 pub use inspect::{DocumentInspect, InspectBudget, InspectedPart};
 
+/// Lower a standalone TeX formula source into the document math semantics.
+#[cfg(feature = "tex")]
+pub use import::lower_tex_formula_source;
+
 #[cfg(feature = "docx")]
 pub use inspect::inspect_docx_bytes;
 

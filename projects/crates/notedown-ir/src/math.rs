@@ -56,6 +56,11 @@ pub enum MathExpression {
         /// Grouped body.
         body: Box<MathExpression>,
     },
+    /// A numeric literal kept as one atom, such as `10`.
+    Number {
+        /// Digits of the number.
+        text: String,
+    },
     /// A base with an optional superscript and subscript.
     Script {
         /// Base expression.
@@ -71,6 +76,8 @@ pub enum MathExpression {
         numerator: Box<MathExpression>,
         /// Denominator.
         denominator: Box<MathExpression>,
+        /// Fraction line style.
+        line: MathFractionLine,
     },
     /// A radical with an optional index.
     Radical {
@@ -96,6 +103,46 @@ pub enum MathExpression {
         style: MathStyle,
         /// Styled body.
         body: Box<MathExpression>,
+    },
+    /// An accent placed over a base, such as `\hat{x}`.
+    Accent {
+        /// Accent mark character.
+        mark: char,
+        /// True for the wide accent variants such as `\widehat`.
+        wide: bool,
+        /// Accented base.
+        base: Box<MathExpression>,
+    },
+    /// `\overset{over}{base}` — `over` stacked above `base`.
+    StackAbove {
+        /// Stacked top.
+        over: Box<MathExpression>,
+        /// Base expression.
+        base: Box<MathExpression>,
+    },
+    /// `\underset{under}{base}` — `under` stacked below `base`.
+    StackBelow {
+        /// Stacked bottom.
+        under: Box<MathExpression>,
+        /// Base expression.
+        base: Box<MathExpression>,
+    },
+    /// A wrapper that forces relation spacing, such as `\stackrel`.
+    Relation(Box<MathExpression>),
+    /// Explicit horizontal space.
+    Space {
+        /// Space amount.
+        kind: MathSpace,
+    },
+    /// Imperative style switch such as `\displaystyle`.
+    StyleSwitch {
+        /// The style the following content is set in.
+        style: MathStyleKind,
+    },
+    /// Imperative limits placement for the next scripted operator.
+    LimitsPolicy {
+        /// True for `\limits`, false for `\nolimits`.
+        limits: bool,
     },
     /// A multi-row environment.
     Environment(MathEnvironment),
@@ -132,16 +179,67 @@ pub enum MathClass {
     Identifier,
     /// A numeric literal.
     Number,
-    /// An operator such as `+` or `\sum`.
+    /// A named operator such as `\sin`.
     Operator,
+    /// A binary operator such as `+`.
+    Binary,
     /// A relation such as `=` or `\le`.
     Relation,
+    /// An opening delimiter such as `(`.
+    Opening,
+    /// A closing delimiter such as `)`.
+    Closing,
     /// Punctuation such as `,`.
     Punctuation,
-    /// An ordinary symbol such as a parenthesis or a Greek letter.
+    /// An ordinary symbol such as a Greek letter.
     Ordinary,
+    /// A large operator such as `\sum`.
+    LargeOperator,
+    /// An inner atom.
+    Inner,
     /// Explicit spacing.
     Space,
+}
+
+/// Explicit horizontal space requested by a math command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MathSpace {
+    /// `\,` thin space, 3mu.
+    Thin,
+    /// `\:` medium space, 4mu.
+    Medium,
+    /// `\;` thick space, 5mu.
+    Thick,
+    /// `\ ` interword space, 6mu.
+    Interword,
+    /// `\quad`, 18mu (one em).
+    Quad,
+    /// `\qquad`, 36mu (two em).
+    DoubleQuad,
+    /// `\!` negative thin space.
+    NegativeThin,
+}
+
+/// The math style an imperative style switch selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MathStyleKind {
+    /// `\displaystyle`.
+    Display,
+    /// `\textstyle`.
+    Text,
+    /// `\scriptstyle`.
+    Script,
+    /// `\scriptscriptstyle`.
+    ScriptScript,
+}
+
+/// Fraction line style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MathFractionLine {
+    /// A solid fraction bar.
+    Solid,
+    /// A fraction with no bar, as in `\binom`.
+    None,
 }
 
 /// A semantic delimiter, independent of how the source spelled it.
@@ -202,10 +300,17 @@ pub enum MathDelimiterKind {
 pub struct MathEnvironment {
     /// Environment family.
     pub kind: MathEnvironmentKind,
+    /// Authored environment name without the trailing star, such as
+    /// `alignedat`.
+    pub name: String,
+    /// True when the authored environment carried a `*`.
+    pub starred: bool,
     /// Rows in source order.
     pub rows: Vec<MathRow>,
     /// Declared or inferred column alignment.
     pub column_alignment: Vec<MathColumnAlignment>,
+    /// Declared column-pair count for `alignedat`, when the source carries one.
+    pub column_pairs: Option<u32>,
 }
 
 /// The family of a math environment.
@@ -215,16 +320,28 @@ pub enum MathEnvironmentKind {
     Matrix,
     /// `cases`.
     Cases,
-    /// `aligned` / `alignedat`.
+    /// `aligned`.
     Aligned,
-    /// `align` / `alignat`.
+    /// `alignedat`.
+    AlignedAt,
+    /// `align`.
     Align,
+    /// `alignat`.
+    AlignAt,
+    /// `flalign`.
+    FlAlign,
+    /// `gather` and `gather*`.
+    Gather,
     /// `gathered`.
     Gathered,
     /// `split`.
     Split,
     /// `equation`.
     Equation,
+    /// `multline`.
+    Multline,
+    /// `eqnarray`.
+    EqnArray,
     /// Any other environment, named verbatim.
     Other(String),
 }

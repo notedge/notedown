@@ -520,7 +520,7 @@ impl<'a> TexLowerer<'a> {
             if metadata.empty && metadata.labels.is_empty() && !metadata.suppressed {
                 continue;
             }
-            let number = if numbered && !metadata.suppressed {
+            let number = if numbered && (!metadata.suppressed || metadata.tag.is_some()) {
                 self.state.equation += 1;
                 let display = metadata.tag.unwrap_or_else(|| self.state.equation.to_string());
                 if first_number.is_none() {

@@ -358,10 +358,14 @@ fn delimiter(spelling: &str) -> Option<MathDelimiter> {
     let spelling = spelling.trim();
     let (kind, character) = match spelling {
         "." | "" => return None,
-        "(" | ")" => (MathDelimiterKind::Parenthesis, Some('(')),
-        "[" | "]" => (MathDelimiterKind::Bracket, Some('[')),
-        "\\{" | "\\}" | "{" | "}" => (MathDelimiterKind::Brace, Some('{')),
-        "\\langle" | "\\rangle" => (MathDelimiterKind::Angle, Some('<')),
+        "(" => (MathDelimiterKind::Parenthesis, Some('(')),
+        ")" => (MathDelimiterKind::Parenthesis, Some(')')),
+        "[" => (MathDelimiterKind::Bracket, Some('[')),
+        "]" => (MathDelimiterKind::Bracket, Some(']')),
+        "\\{" | "{" => (MathDelimiterKind::Brace, Some('{')),
+        "\\}" | "}" => (MathDelimiterKind::Brace, Some('}')),
+        "\\langle" => (MathDelimiterKind::Angle, Some('⟨')),
+        "\\rangle" => (MathDelimiterKind::Angle, Some('⟩')),
         "|" => (MathDelimiterKind::VerticalBar, Some('|')),
         "\\|" | "\\lVert" | "\\rVert" | "‖" => (MathDelimiterKind::DoubleVerticalBar, Some('‖')),
         "/" => (MathDelimiterKind::Slash, Some('/')),
@@ -473,6 +477,8 @@ fn lower_cell(cell: &TexCell, source: &str) -> MathExpression {
 
 /// Read the row's numbering intent from the command nodes inside its cells.
 fn row_numbering(cells: &[TexCell], numbered: bool) -> MathRowNumbering {
+    let mut tag = None;
+    let mut suppressed = false;
     for cell in cells {
         for item in &cell.content.items {
             let TexItem::Command(command) = item
@@ -480,17 +486,26 @@ fn row_numbering(cells: &[TexCell], numbered: bool) -> MathRowNumbering {
                 continue;
             };
             match command.name.as_str() {
-                "notag" | "nonumber" => return MathRowNumbering::Suppressed,
-                "tag" => {
-                    if let Some(label) = command.arguments.iter().find_map(argument_text) {
-                        return MathRowNumbering::Tagged(label);
-                    }
-                }
+                "notag" | "nonumber" => suppressed = true,
+                "tag" => tag = command.arguments.iter().find_map(argument_text),
                 _ => {}
             }
         }
     }
-    if numbered { MathRowNumbering::Numbered } else { MathRowNumbering::None }
+    // An explicit label is the stronger statement, so `\tag` wins over
+    // `\notag` when a row carries both.
+    if let Some(tag) = tag {
+        MathRowNumbering::Tagged(tag)
+    }
+    else if suppressed {
+        MathRowNumbering::Suppressed
+    }
+    else if numbered {
+        MathRowNumbering::Numbered
+    }
+    else {
+        MathRowNumbering::None
+    }
 }
 
 fn environment_is_numbered(name: &str) -> bool {

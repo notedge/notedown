@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     id::{AssetId, NodeId},
+    math::MathFormula,
     relation::RelationEndpoint,
 };
 
@@ -32,11 +33,12 @@ pub enum Inline {
         text: String,
     },
     /// Inline math span.
+    ///
+    /// The formula carries the authored source plus the semantic expression
+    /// from the lowering profile.
     InlineMath {
-        /// Math source text.
-        content: String,
-        /// Optional language tag such as `latex`.
-        language: Option<String>,
+        /// The inline formula.
+        formula: MathFormula,
     },
     /// Intra-document reference by node id.
     Reference {
@@ -155,7 +157,7 @@ impl Inline {
         match self {
             Self::Text { text } | Self::InlineCode { text } => text.clone(),
             Self::Styled { children, .. } | Self::Attributed { children, .. } => children.iter().map(Self::plain_text).collect(),
-            Self::InlineMath { content, .. } => content.clone(),
+            Self::InlineMath { formula } => formula.source.clone(),
             Self::Reference { display, .. } => display.clone(),
             Self::Link { display, .. } => display.iter().map(Self::plain_text).collect(),
             Self::Image { alt, .. } => alt.iter().map(Self::plain_text).collect(),

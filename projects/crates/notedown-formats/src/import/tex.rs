@@ -24,10 +24,10 @@
 //! `\(...\)` both become inline math, `$$...$$` and `\[...\]` both become a
 //! display math block, and a math environment (`equation`, `align`, `cases`,
 //! `aligned`, ...) becomes a display math block holding the whole
-//! `\begin{...}...\end{...}` source, so environment type, alignment tabs and row
-//! breaks survive for the math layout stage. Equation numbering has no IR field,
-//! so a numbered environment records that gap as a loss marker instead of
-//! dropping it silently.
+//! `\begin{...}...\end{...}` source, so environment type, alignment tabs and
+//! row breaks survive for the math layout stage. Equation numbering has no IR
+//! field, so a numbered environment records that gap as a loss marker instead
+//! of dropping it silently.
 //!
 //! Paper-level document semantics are lowered, not preserved as syntax:
 //! `\title` and `\author` fill `DocumentMetadata`, `\date` and `\maketitle`
@@ -39,12 +39,14 @@
 //! `\footnote` becomes a numbered `Inline::Note` carrying its lowered body,
 //! and `\cite` becomes `Inline::Citation` plus one `Cites` relation per key.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use notedown_ir::{
-    AttributePair, Attributes, Block, DocumentGraph, DocumentId, DocumentMetadata, Inline, LinkId, ListItem, LossMarker, NodeId, Relation,
-    RelationEndpoint, RelationKind, SemanticStatus, SourceKind, SourceRef, TableCell, TableRow,
+    AttributePair, Attributes, Block, DocumentGraph, DocumentId, DocumentMetadata, Inline, LinkId, ListItem, LossMarker, MathDisplay, NodeId,
+    Relation, RelationEndpoint, RelationKind, SemanticStatus, SourceKind, SourceRef, TableCell, TableRow,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_tex::{
@@ -52,7 +54,10 @@ use oak_tex::{
     ast::{MathDelimiter, TexArgument, TexCommand, TexEnvironment, TexItem, TexLeftRightPair, TexLimits, TexMath, TexRoot},
 };
 
-use super::common::register_image_assets;
+use super::{
+    common::register_image_assets,
+    tex_math::{environment_rows_of, lower_tex_environment, lower_tex_math, row_metadata},
+};
 use crate::FormatError;
 
 /// Import a TeX file from disk into `notedown-ir`.
@@ -231,7 +236,8 @@ impl<'a> TexLowerer<'a> {
         let mut skip_until = 0usize;
         let mut after_comment = false;
         for item in items {
-            let Some((start, end)) = item_span(item) else {
+            let Some((start, end)) = item_span(item)
+            else {
                 continue;
             };
             if start < skip_until {
@@ -270,16 +276,27 @@ impl<'a> TexLowerer<'a> {
                 sink.inlines.push(Inline::Styled { style: "subscript".into(), children });
             }
             TexItem::Math(math) => {
-                let (content, display) = self.math_source(math);
-                if display {
-                    self.push_spanned_block(sink, Block::Math { content, language: Some("latex".into()) }, math.span.start, math.span.end);
+                // Keep the authored-source closure check at the import boundary:
+                // the AST still parses an unterminated span, but the document
+                // records that its delimiters are unbalanced.
+                let _ = self.math_source(math);
+                let formula = lower_tex_math(math, self.source);
+                if math.is_display {
+                    self.push_spanned_block(sink, Block::Math { formula }, math.span.start, math.span.end);
                 }
                 else {
-                    sink.inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
+                    sink.inlines.push(Inline::InlineMath { formula });
                 }
             }
             TexItem::Command(command) => self.lower_command(command, sink),
             TexItem::Environment(environment) => self.lower_environment(environment, sink),
+            // Every environment body is a grid of rows and cells. A non-math
+            // environment lowers its cells as nested document content.
+            TexItem::Row(row) => {
+                for cell in &row.cells {
+                    self.lower_root(&cell.content.items, cell.span.start, cell.span.end, sink);
+                }
+            }
             TexItem::LeftRightPair(pair) => {
                 let inline = self.left_right_inline(pair);
                 sink.inlines.push(inline);
@@ -362,10 +379,7 @@ impl<'a> TexLowerer<'a> {
         let raw = self.raw(command.span.start, command.span.end);
         let name = command_name(raw);
         if let Some(level) = section_level(&name) {
-            let mut title = self
-                .required_argument(command)
-                .map(|fragment| self.lower_inline_fragment(fragment))
-                .unwrap_or_default();
+            let mut title = self.required_argument(command).map(|fragment| self.lower_inline_fragment(fragment)).unwrap_or_default();
             if command.starred {
                 self.state.last_number = None;
                 self.loss(
@@ -416,10 +430,7 @@ impl<'a> TexLowerer<'a> {
                             SemanticStatus::Unsupported,
                         );
                     }
-                    self.push_block(
-                        sink,
-                        Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial },
-                    );
+                    self.push_block(sink, Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial });
                 }
             },
         }
@@ -448,22 +459,25 @@ impl<'a> TexLowerer<'a> {
                     SemanticStatus::Unsupported,
                 );
                 let kind = if name.is_empty() { "tex.environment.unknown".to_string() } else { format!("tex.environment.{name}") };
-                self.push_block(
-                    sink,
-                    Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial },
-                );
+                self.push_block(sink, Block::Opaque { kind, payload_hint: raw.trim().to_string(), status: SemanticStatus::Partial });
             }
         }
     }
 
     /// Lower a recognized math environment.
     ///
-    /// The whole `\begin{...}...\end{...}` source is kept as one math payload, so
-    /// the environment name, its star variant, alignment tabs and row breaks stay
-    /// available to the math layout stage instead of being flattened into plain
-    /// text. `math` itself is inline math, every other recognized math
-    /// environment is a display math block.
-    fn lower_math_environment(&mut self, environment: &TexEnvironment, raw: &'a str, sink: &mut Sink) {
+    /// The whole `\begin{...}...\end{...}` source is kept as one math payload,
+    /// so the environment name, its star variant, alignment tabs and row
+    /// breaks stay available to the math layout stage instead of being
+    /// flattened into plain text. `math` itself is inline math, every other
+    /// recognized math environment is a display math block.
+    /// Lower a recognized math environment.
+    ///
+    /// The environment's rows and cells come from Oak's AST, so the lowering
+    /// never rescans the source for alignment tabs or row breaks. The formula
+    /// keeps the authored source for round-trip and diagnostics, while the
+    /// expression carries the structure consumers render.
+    fn lower_math_environment(&mut self, environment: &TexEnvironment, _raw: &'a str, sink: &mut Sink) {
         let stated = if environment.starred { format!("{}*", environment.name) } else { environment.name.clone() };
         if math_environment_is_numbered(&environment.name, environment.starred) {
             self.loss(
@@ -473,17 +487,12 @@ impl<'a> TexLowerer<'a> {
             );
         }
         if environment.name == "math" {
-            let inlines = self.collect_inlines(&environment.content.items, environment.span.start, environment.span.end, true);
-            sink.inlines.extend(inlines);
+            sink.inlines.push(Inline::InlineMath { formula: lower_tex_environment(environment, self.source, MathDisplay::Inline) });
             return;
         }
-        let node = self.push_spanned_block(
-            sink,
-            Block::Math { content: raw.trim().to_string(), language: Some("latex".into()) },
-            environment.span.start,
-            environment.span.end,
-        );
-        self.register_math_labels(raw, &environment.name, environment.starred, node);
+        let formula = lower_tex_environment(environment, self.source, MathDisplay::Display);
+        let node = self.push_spanned_block(sink, Block::Math { formula }, environment.span.start, environment.span.end);
+        self.register_math_labels(environment, &environment.name, environment.starred, node);
     }
 
     /// Increment the section counter for `level`, reset deeper levels, and
@@ -499,22 +508,21 @@ impl<'a> TexLowerer<'a> {
 
     /// Register the `\label` anchors carried by a math environment.
     ///
-    /// The environment body stays one verbatim payload, so its labels can only
-    /// be found by scanning the authored source at the environment's own
-    /// nesting depth. Each numbered row consumes one equation counter slot, a
-    /// row carrying `\notag` or `\nonumber` consumes none, and `\tag` replaces
-    /// the displayed number.
-    fn register_math_labels(&mut self, raw: &str, name: &str, starred: bool, node: NodeId) {
+    /// Labels, `\tag`, `\notag` and `\nonumber` are read from the command nodes
+    /// of Oak's row/cell AST, not by rescanning the environment source. Each
+    /// numbered row consumes one equation counter slot, a row carrying
+    /// `\notag` consumes none, and `\tag` replaces the displayed number.
+    fn register_math_labels(&mut self, environment: &TexEnvironment, name: &str, starred: bool, node: NodeId) {
         let numbered = math_environment_is_numbered(name, starred);
-        let (rows, tag) = scan_math_body(raw);
         let mut first_number: Option<String> = None;
-        for row in rows {
-            if raw[row.start..row.end].trim().is_empty() && row.labels.is_empty() && !row.notag {
+        for row in environment_rows_of(environment) {
+            let metadata = row_metadata(row);
+            if metadata.empty && metadata.labels.is_empty() && !metadata.suppressed {
                 continue;
             }
-            let number = if numbered && !row.notag {
+            let number = if numbered && !metadata.suppressed {
                 self.state.equation += 1;
-                let display = tag.clone().unwrap_or_else(|| self.state.equation.to_string());
+                let display = metadata.tag.unwrap_or_else(|| self.state.equation.to_string());
                 if first_number.is_none() {
                     first_number = Some(display.clone());
                 }
@@ -523,7 +531,7 @@ impl<'a> TexLowerer<'a> {
             else {
                 None
             };
-            for label in row.labels {
+            for label in metadata.labels {
                 if label.is_empty() {
                     continue;
                 }
@@ -540,18 +548,25 @@ impl<'a> TexLowerer<'a> {
         self.state.last_number = first_number;
     }
 
-    /// Compare the authored `\begin{...}` and `\end{...}` names of an environment.
+    /// Compare the authored `\begin{...}` and `\end{...}` names of an
+    /// environment.
     ///
     /// The parser matches the closing keyword without checking the name, so a
     /// mismatched or missing closing marker has to be reported here instead of
     /// passing as a well-formed environment.
     fn check_environment_boundaries(&mut self, environment: &TexEnvironment) {
         let raw = self.raw(environment.span.start, environment.span.end);
-        let Some((begin_name, _)) = parse_begin(raw.trim_start()) else {
+        let Some((begin_name, _)) = parse_begin(raw.trim_start())
+        else {
             return;
         };
-        let Some(footer) = raw.rfind("\\end{") else {
-            self.loss("import.tex.unclosed_environment", format!("environment `{begin_name}` has no closing marker"), SemanticStatus::Unsupported);
+        let Some(footer) = raw.rfind("\\end{")
+        else {
+            self.loss(
+                "import.tex.unclosed_environment",
+                format!("environment `{begin_name}` has no closing marker"),
+                SemanticStatus::Unsupported,
+            );
             return;
         };
         let end_name = raw[footer..].strip_prefix("\\end{").and_then(|rest| rest.split('}').next()).map(|name| name.trim()).unwrap_or("");
@@ -639,10 +654,7 @@ impl<'a> TexLowerer<'a> {
                 InlineOutcome::Dropped
             }
             "footnote" => {
-                let body = self
-                    .required_argument(command)
-                    .map(|fragment| self.lower_inline_fragment(fragment))
-                    .unwrap_or_default();
+                let body = self.required_argument(command).map(|fragment| self.lower_inline_fragment(fragment)).unwrap_or_default();
                 self.state.footnote += 1;
                 let label = self.state.footnote.to_string();
                 self.loss(
@@ -770,15 +782,16 @@ impl<'a> TexLowerer<'a> {
             // appear outside a math span (parser edge case or stray token)
             // dropping them silently is correct because the math layout stage
             // (VuTeX) never sees these stray non-math tokens.
-            "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle" | "mathbf" | "mathit"
-            | "mathrm" | "mathcal" | "mathbb" | "mathfrak" | "limits" | "nolimits" => InlineOutcome::Dropped,
+            "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle" | "mathbf" | "mathit" | "mathrm" | "mathcal" | "mathbb"
+            | "mathfrak" | "limits" | "nolimits" => InlineOutcome::Dropped,
             _ => InlineOutcome::Unknown,
         }
     }
 
     fn lower_verb(&mut self, command: &TexCommand, sink: &mut Sink) {
         let start = command.span.end;
-        let Some((content, _)) = self.verb_content(start) else {
+        let Some((content, _)) = self.verb_content(start)
+        else {
             self.loss("import.tex.verb_unterminated", "verb command has no closing delimiter", SemanticStatus::Partial);
             self.push_block(
                 sink,
@@ -840,10 +853,12 @@ impl<'a> TexLowerer<'a> {
 
     fn code_environment_content(&self, start: usize, end: usize) -> String {
         let raw = self.raw(start, end);
-        let Some(header_end) = begin_header_end(raw) else {
+        let Some(header_end) = begin_header_end(raw)
+        else {
             return raw.to_string();
         };
-        let Some(footer_start) = raw.rfind("\\end{") else {
+        let Some(footer_start) = raw.rfind("\\end{")
+        else {
             return raw[header_end.min(raw.len())..].trim_matches('\n').to_string();
         };
         if footer_start <= header_end {
@@ -854,11 +869,13 @@ impl<'a> TexLowerer<'a> {
 
     fn lower_list(&mut self, name: &str, start: usize, end: usize, sink: &mut Sink) {
         let raw = self.raw(start, end);
-        let Some(header_end) = begin_header_end(raw) else {
+        let Some(header_end) = begin_header_end(raw)
+        else {
             self.loss("import.tex.malformed_list", "list environment header is not readable", SemanticStatus::Partial);
             return;
         };
-        let Some(footer_start) = raw.rfind("\\end{") else {
+        let Some(footer_start) = raw.rfind("\\end{")
+        else {
             self.loss("import.tex.malformed_list", "list environment has no closing marker", SemanticStatus::Partial);
             return;
         };
@@ -899,11 +916,13 @@ impl<'a> TexLowerer<'a> {
 
     fn lower_table(&mut self, start: usize, end: usize, sink: &mut Sink) {
         let raw = self.raw(start, end);
-        let Some(header_end) = begin_header_end(raw) else {
+        let Some(header_end) = begin_header_end(raw)
+        else {
             self.loss("import.tex.malformed_table", "tabular environment header is not readable", SemanticStatus::Partial);
             return;
         };
-        let Some(footer_start) = raw.rfind("\\end{") else {
+        let Some(footer_start) = raw.rfind("\\end{")
+        else {
             self.loss("import.tex.malformed_table", "tabular environment has no closing marker", SemanticStatus::Partial);
             return;
         };
@@ -997,11 +1016,13 @@ impl<'a> TexLowerer<'a> {
         }
         let mut cursor = start;
         while cursor < end {
-            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{")) else {
+            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{"))
+            else {
                 return;
             };
             let begin = cursor + offset;
-            let Some((name, _)) = parse_begin(&self.source[begin..end]) else {
+            let Some((name, _)) = parse_begin(&self.source[begin..end])
+            else {
                 cursor = begin + 7;
                 continue;
             };
@@ -1009,12 +1030,9 @@ impl<'a> TexLowerer<'a> {
                 cursor = begin + 7;
                 continue;
             }
-            let Some(environment_end) = matching_environment_end(self.source, begin, end) else {
-                self.loss(
-                    "import.tex.unclosed_environment",
-                    format!("environment {name} has no closing marker"),
-                    SemanticStatus::Unsupported,
-                );
+            let Some(environment_end) = matching_environment_end(self.source, begin, end)
+            else {
+                self.loss("import.tex.unclosed_environment", format!("environment {name} has no closing marker"), SemanticStatus::Unsupported);
                 return;
             };
             match name.as_str() {
@@ -1026,7 +1044,8 @@ impl<'a> TexLowerer<'a> {
     }
 
     fn lower_fragment_into(&mut self, fragment: &str, sink: &mut Sink) {
-        let Ok(root) = parse_tex("<fragment>", fragment) else {
+        let Ok(root) = parse_tex("<fragment>", fragment)
+        else {
             self.loss("import.tex.fragment_parse_failed", "nested TeX fragment could not be parsed", SemanticStatus::Partial);
             return;
         };
@@ -1041,7 +1060,8 @@ impl<'a> TexLowerer<'a> {
     }
 
     fn lower_inline_fragment(&mut self, fragment: &str) -> Vec<Inline> {
-        let Ok(root) = parse_tex("<inline>", fragment) else {
+        let Ok(root) = parse_tex("<inline>", fragment)
+        else {
             self.loss("import.tex.fragment_parse_failed", "inline TeX fragment could not be parsed", SemanticStatus::Partial);
             return Vec::new();
         };
@@ -1063,7 +1083,8 @@ impl<'a> TexLowerer<'a> {
         let mut skip_until = 0usize;
         let mut after_comment = false;
         for item in items {
-            let Some((start, end)) = item_span(item) else {
+            let Some((start, end)) = item_span(item)
+            else {
                 continue;
             };
             if start < skip_until {
@@ -1090,8 +1111,8 @@ impl<'a> TexLowerer<'a> {
                     inlines.push(Inline::Styled { style: "subscript".into(), children });
                 }
                 TexItem::Math(math) => {
-                    let (content, _) = self.math_source(math);
-                    inlines.push(Inline::InlineMath { content, language: Some("latex".into()) });
+                    let _ = self.math_source(math);
+                    inlines.push(Inline::InlineMath { formula: lower_tex_math(math, self.source) });
                 }
                 TexItem::Command(command) => {
                     let raw = self.raw(command.span.start, command.span.end);
@@ -1117,7 +1138,6 @@ impl<'a> TexLowerer<'a> {
                     }
                 }
                 TexItem::Environment(environment) => {
-                    let raw = self.raw(environment.span.start, environment.span.end);
                     let name = environment.name.clone();
                     if matches!(environment.name.as_str(), "itemize" | "enumerate" | "description" | "tabular" | "array") {
                         self.loss(
@@ -1132,7 +1152,7 @@ impl<'a> TexLowerer<'a> {
                     }
                     else if environment.is_math {
                         self.check_environment_boundaries(environment);
-                        inlines.push(Inline::InlineMath { content: raw.trim().to_string(), language: Some("latex".into()) });
+                        inlines.push(Inline::InlineMath { formula: lower_tex_environment(environment, self.source, MathDisplay::Inline) });
                     }
                     else {
                         self.loss(
@@ -1150,6 +1170,12 @@ impl<'a> TexLowerer<'a> {
                     let inline = self.limits_inline(limits);
                     inlines.push(inline);
                 }
+                // Every environment body is a grid of rows and cells.
+                TexItem::Row(row) => {
+                    for cell in &row.cells {
+                        inlines.extend(self.collect_inlines(&cell.content.items, cell.span.start, cell.span.end, math));
+                    }
+                }
             }
             cursor = end;
         }
@@ -1163,11 +1189,13 @@ impl<'a> TexLowerer<'a> {
         }
         let mut cursor = start;
         while cursor < end {
-            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{")) else {
+            let Some(offset) = self.source.get(cursor..end).and_then(|rest| rest.find("\\begin{"))
+            else {
                 return;
             };
             let begin = cursor + offset;
-            let Some((name, _)) = parse_begin(&self.source[begin..end]) else {
+            let Some((name, _)) = parse_begin(&self.source[begin..end])
+            else {
                 cursor = begin + 7;
                 continue;
             };
@@ -1178,7 +1206,8 @@ impl<'a> TexLowerer<'a> {
                     SemanticStatus::Partial,
                 );
             }
-            let Some(environment_end) = matching_environment_end(self.source, begin, end) else {
+            let Some(environment_end) = matching_environment_end(self.source, begin, end)
+            else {
                 return;
             };
             cursor = environment_end;
@@ -1209,21 +1238,18 @@ fn item_span(item: &TexItem) -> Option<(usize, usize)> {
         TexItem::Subscript(subscript) => Some((subscript.span.start, subscript.span.end)),
         TexItem::LeftRightPair(pair) => Some((pair.span.start, pair.span.end)),
         TexItem::Limits(limits) => Some((limits.span.start, limits.span.end)),
+        TexItem::Row(row) => Some((row.span.start, row.span.end)),
         TexItem::Text { span, .. } | TexItem::Comment { span, .. } => Some((span.start, span.end)),
     }
 }
 
 fn command_name(raw: &str) -> String {
     let name = raw.trim_start().strip_prefix('\\').unwrap_or(raw.trim_start());
-    let Some(first) = name.chars().next() else {
+    let Some(first) = name.chars().next()
+    else {
         return String::new();
     };
-    if first.is_ascii_alphabetic() {
-        name.chars().take_while(|character| character.is_ascii_alphabetic()).collect()
-    }
-    else {
-        first.to_string()
-    }
+    if first.is_ascii_alphabetic() { name.chars().take_while(|character| character.is_ascii_alphabetic()).collect() } else { first.to_string() }
 }
 
 /// Parse a `\begin{name}` header at the start of `raw`.
@@ -1310,97 +1336,6 @@ fn math_environment_is_numbered(name: &str, starred: bool) -> bool {
     !starred && matches!(name, "equation" | "align" | "gather" | "multline" | "eqnarray" | "flalign" | "alignat")
 }
 
-/// Row segment of a math environment body at the environment's own depth.
-struct MathRow {
-    start: usize,
-    end: usize,
-    labels: Vec<String>,
-    notag: bool,
-}
-
-/// Scan the authored environment source for row breaks, labels, and a `\tag`
-/// override, tracking `\begin`/`\end` depth so nested environment bodies do
-/// not contribute rows or labels to the outer environment.
-fn scan_math_body(raw: &str) -> (Vec<MathRow>, Option<String>) {
-    let bytes = raw.as_bytes();
-    let mut rows: Vec<MathRow> = Vec::new();
-    let mut tag: Option<String> = None;
-    let mut depth = 0usize;
-    let mut row_start = 0usize;
-    let mut row_labels: Vec<String> = Vec::new();
-    let mut row_notag = false;
-    let mut terminated = false;
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] != b'\\' {
-            index += 1;
-            continue;
-        }
-        let rest = &raw[index..];
-        if let Some(after) = rest.strip_prefix("\\begin{") {
-            depth += 1;
-            index += "\\begin{".len() + after.find('}').map_or(after.len(), |closing| closing + 1);
-            continue;
-        }
-        if let Some(after) = rest.strip_prefix("\\end{") {
-            if depth == 1 {
-                rows.push(MathRow { start: row_start, end: index, labels: std::mem::take(&mut row_labels), notag: row_notag });
-                row_notag = false;
-                terminated = true;
-            }
-            depth = depth.saturating_sub(1);
-            index += "\\end{".len() + after.find('}').map_or(after.len(), |closing| closing + 1);
-            continue;
-        }
-        if rest.starts_with("\\\\") {
-            if depth == 1 {
-                rows.push(MathRow { start: row_start, end: index, labels: std::mem::take(&mut row_labels), notag: row_notag });
-                row_notag = false;
-                row_start = index + 2;
-            }
-            index += 2;
-            continue;
-        }
-        if depth == 1 {
-            if let Some(after) = rest.strip_prefix("\\label{") {
-                if let Some(closing) = after.find('}') {
-                    row_labels.push(after[..closing].trim().to_string());
-                    index += "\\label{".len() + closing + 1;
-                    continue;
-                }
-            }
-            if let Some(after) = rest.strip_prefix("\\tag") {
-                let mut consumed = "\\tag".len();
-                let mut tail = after;
-                if let Some(starred) = tail.strip_prefix('*') {
-                    consumed += 1;
-                    tail = starred;
-                }
-                let spaces = tail.len() - tail.trim_start().len();
-                consumed += spaces;
-                tail = tail.trim_start();
-                if let Some(inner) = tail.strip_prefix('{') {
-                    if let Some(closing) = inner.find('}') {
-                        tag = Some(inner[..closing].trim().to_string());
-                        index += consumed + closing + 1;
-                        continue;
-                    }
-                }
-            }
-            if rest.starts_with("\\notag") || rest.starts_with("\\nonumber") {
-                row_notag = true;
-                index += if rest.starts_with("\\nonumber") { "\\nonumber".len() } else { "\\notag".len() };
-                continue;
-            }
-        }
-        index += 1;
-    }
-    if !terminated {
-        rows.push(MathRow { start: row_start, end: bytes.len(), labels: row_labels, notag: row_notag });
-    }
-    (rows, tag)
-}
-
 /// Rewrite forward references once every label anchor is known and return the
 /// labels that stayed unresolved.
 fn resolve_pending_references(graph: &mut DocumentGraph, labels: &HashMap<String, LabelInfo>) -> Vec<String> {
@@ -1434,10 +1369,12 @@ fn fix_pending_refs(inlines: &mut Vec<Inline>, labels: &HashMap<String, LabelInf
     for inline in inlines.iter_mut() {
         match inline {
             Inline::Attributed { attributes, children } if attributes.classes.iter().any(|class| class == "tex-ref") => {
-                let Some(label) = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-label").map(|pair| pair.value.clone()) else {
+                let Some(label) = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-label").map(|pair| pair.value.clone())
+                else {
                     continue;
                 };
-                let Some(Inline::Link { target, display, .. }) = children.first_mut() else {
+                let Some(Inline::Link { target, display, .. }) = children.first_mut()
+                else {
                     continue;
                 };
                 if !matches!(target, RelationEndpoint::Unresolved { .. }) {
@@ -1839,7 +1776,8 @@ fn matching_environment_end(source: &str, begin: usize, limit: usize) -> Option<
         }
         if rest.starts_with("\\end{") {
             depth = depth.saturating_sub(1);
-            let Some(closing) = source[index..limit].find('}') else {
+            let Some(closing) = source[index..limit].find('}')
+            else {
                 return None;
             };
             index += closing + 1;

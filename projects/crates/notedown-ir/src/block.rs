@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{id::NodeId, inline::Inline, status::SemanticStatus};
+use crate::{id::NodeId, inline::Inline, math::MathFormula, status::SemanticStatus};
 
 /// Top-level block semantics (not parser syntax nodes).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,11 +46,13 @@ pub enum Block {
         content: String,
     },
     /// Display math block.
+    ///
+    /// The formula carries the authored source and the semantic expression the
+    /// lowering profile produced. Consumers render the expression; they never
+    /// parse the source again.
     Math {
-        /// Math source text.
-        content: String,
-        /// Optional language tag such as `latex`.
-        language: Option<String>,
+        /// The display formula.
+        formula: MathFormula,
     },
     /// Authored diagram source with a declared diagram language.
     ///

@@ -63,9 +63,9 @@ fn math_keeps_authored_source() {
         .iter()
         .filter_map(|node| match &node.block {
             Block::Paragraph { content } => content.iter().find_map(|inline| match inline {
-                Inline::InlineMath { content, language } => {
-                    assert_eq!(language.as_deref(), Some("typst"));
-                    Some(content.clone())
+                Inline::InlineMath { formula } => {
+                    assert_eq!(formula.language.as_deref(), Some("typst"));
+                    Some(formula.source.clone())
                 }
                 _ => None,
             }),
@@ -76,9 +76,9 @@ fn math_keeps_authored_source() {
     let display_math: Vec<&str> = blocks(&graph)
         .iter()
         .filter_map(|node| match &node.block {
-            Block::Math { content, language } => {
-                assert_eq!(language.as_deref(), Some("typst"));
-                Some(content.as_str())
+            Block::Math { formula } => {
+                assert_eq!(formula.language.as_deref(), Some("typst"));
+                Some(formula.source.as_str())
             }
             _ => None,
         })
@@ -110,14 +110,16 @@ fn unordered_and_ordered_lists_lower_with_numbers() {
         })
         .collect();
     assert_eq!(lists.len(), 2);
-    let Block::List { ordered: false, items } = lists[0] else {
+    let Block::List { ordered: false, items } = lists[0]
+    else {
         panic!("expected unordered list, got {:?}", lists[0]);
     };
-    assert_eq!(items.iter().map(|item| item.content.iter().map(Inline::plain_text).collect::<String>()).collect::<Vec<_>>(), vec![
-        "One".to_string(),
-        "Two".to_string()
-    ]);
-    let Block::List { ordered: true, items } = lists[1] else {
+    assert_eq!(
+        items.iter().map(|item| item.content.iter().map(Inline::plain_text).collect::<String>()).collect::<Vec<_>>(),
+        vec!["One".to_string(), "Two".to_string()]
+    );
+    let Block::List { ordered: true, items } = lists[1]
+    else {
         panic!("expected ordered list, got {:?}", lists[1]);
     };
     assert_eq!(items.iter().map(|item| item.number).collect::<Vec<_>>(), vec![Some(1), Some(2)]);

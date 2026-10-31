@@ -95,15 +95,15 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             escape_text(out, source);
             out.push_str("</code></pre>");
         }
-        Block::Math { content, language } => {
+        Block::Math { formula } => {
             out.push_str(r#"<div class="math""#);
-            if let Some(language) = language {
+            if let Some(language) = &formula.language {
                 out.push_str(r#" data-language=""#);
                 escape_attribute(out, language);
                 out.push('"');
             }
             out.push('>');
-            escape_text(out, content);
+            escape_text(out, &formula.source);
             out.push_str("</div>");
         }
         Block::List { ordered, items } => write_list(out, graph, *ordered, items)?,
@@ -189,15 +189,15 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) -> Result<(), FormatError
                 escape_text(out, text);
                 out.push_str("</code>");
             }
-            Inline::InlineMath { content, language } => {
+            Inline::InlineMath { formula } => {
                 out.push_str(r#"<span class="math""#);
-                if let Some(language) = language {
+                if let Some(language) = &formula.language {
                     out.push_str(r#" data-language=""#);
                     escape_attribute(out, language);
                     out.push('"');
                 }
                 out.push('>');
-                escape_text(out, content);
+                escape_text(out, &formula.source);
                 out.push_str("</span>");
             }
             Inline::Reference { display, target } => {

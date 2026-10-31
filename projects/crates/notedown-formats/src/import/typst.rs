@@ -13,9 +13,7 @@
 
 use std::path::Path;
 
-use notedown_ir::{
-    Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus,
-};
+use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus};
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_typst::{
     TypstBuilder, TypstLanguage,
@@ -133,7 +131,8 @@ impl<'a> TypstLowerer<'a> {
                     let ordered = matches!(items[index], TypstItem::EnumItem(_));
                     let mut collected = Vec::new();
                     let mut tail = None;
-                    while index < items.len() && matches!(items[index], TypstItem::EnumItem(_)) == ordered
+                    while index < items.len()
+                        && matches!(items[index], TypstItem::EnumItem(_)) == ordered
                         && matches!(items[index], TypstItem::ListItem(_) | TypstItem::EnumItem(_))
                     {
                         let span = typst_span(&items[index]);
@@ -164,7 +163,8 @@ impl<'a> TypstLowerer<'a> {
                 TypstItem::Raw(_) => {
                     let mut raw = String::new();
                     while index < items.len() {
-                        let TypstItem::Raw(chunk) = &items[index] else {
+                        let TypstItem::Raw(chunk) = &items[index]
+                        else {
                             break;
                         };
                         raw.push_str(chunk);
@@ -228,10 +228,14 @@ impl<'a> TypstLowerer<'a> {
                 self.cursor = root.span.end;
                 self.line_breaks = 0;
                 if display {
-                    self.push_block(sink, Block::Math { content, language: Some("typst".into()) });
+                    let formula =
+                        notedown_ir::MathFormula::unsupported(content, Some("typst".into()), notedown_ir::MathDisplay::Display, "typst-math");
+                    self.push_block(sink, Block::Math { formula });
                 }
                 else {
-                    sink.inlines.push(Inline::InlineMath { content, language: Some("typst".into()) });
+                    let formula =
+                        notedown_ir::MathFormula::unsupported(content, Some("typst".into()), notedown_ir::MathDisplay::Inline, "typst-math");
+                    sink.inlines.push(Inline::InlineMath { formula });
                 }
             }
             TypstItem::Link(link) => {
@@ -270,7 +274,8 @@ impl<'a> TypstLowerer<'a> {
     }
 
     fn recover_line_comment_url(&mut self, sink: &mut Sink) {
-        let scheme_terminated = matches!(sink.inlines.last(), Some(Inline::Text { text }) if text.ends_with("http:") || text.ends_with("https:"));
+        let scheme_terminated =
+            matches!(sink.inlines.last(), Some(Inline::Text { text }) if text.ends_with("http:") || text.ends_with("https:"));
         if !scheme_terminated {
             return;
         }
@@ -313,11 +318,7 @@ impl<'a> TypstLowerer<'a> {
         let line_end = raw.find('\n').unwrap_or(raw.len());
         let line = raw[..line_end].trim();
         let kind = expression_kind(line);
-        self.loss(
-            "import.typst.dynamic_content",
-            format!("Typst dynamic expression kept opaque: {line}"),
-            SemanticStatus::Unsupported,
-        );
+        self.loss("import.typst.dynamic_content", format!("Typst dynamic expression kept opaque: {line}"), SemanticStatus::Unsupported);
         self.push_block(sink, Block::Opaque { kind, payload_hint: line.to_string(), status: SemanticStatus::Partial });
         self.line_breaks = 0;
         self.cursor = span.start + line_end;
@@ -347,12 +348,17 @@ impl<'a> TypstLowerer<'a> {
         if tail.trim().is_empty() {
             return;
         }
-        let Ok(root) = parse_typst("<tail>", tail) else {
+        let Ok(root) = parse_typst("<tail>", tail)
+        else {
             self.loss("import.typst.fragment_parse_failed", "reparsed Typst tail could not be parsed", SemanticStatus::Partial);
             return;
         };
-        let mut inner =
-            TypstLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: tail, cursor: 0, line_breaks: 0 };
+        let mut inner = TypstLowerer {
+            graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))),
+            source: tail,
+            cursor: 0,
+            line_breaks: 0,
+        };
         inner.lower_root(&root.items, tail.len(), sink);
         self.graph = inner.graph;
     }
@@ -361,12 +367,17 @@ impl<'a> TypstLowerer<'a> {
         if fragment.trim().is_empty() {
             return Vec::new();
         }
-        let Ok(root) = parse_typst("<inline>", fragment) else {
+        let Ok(root) = parse_typst("<inline>", fragment)
+        else {
             self.loss("import.typst.fragment_parse_failed", "inline Typst fragment could not be parsed", SemanticStatus::Partial);
             return Vec::new();
         };
-        let mut inner =
-            TypstLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: fragment, cursor: 0, line_breaks: 0 };
+        let mut inner = TypstLowerer {
+            graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))),
+            source: fragment,
+            cursor: 0,
+            line_breaks: 0,
+        };
         let mut inlines = inner.collect_inlines(&root.items);
         trim_inlines(&mut inlines);
         self.graph = inner.graph;
@@ -400,12 +411,15 @@ impl<'a> TypstLowerer<'a> {
                 }
                 TypstItem::Math(root) => {
                     let (content, _) = math_content(self.raw(root.span.start, root.span.end));
-                    inlines.push(Inline::InlineMath { content, language: Some("typst".into()) });
+                    let formula =
+                        notedown_ir::MathFormula::unsupported(content, Some("typst".into()), notedown_ir::MathDisplay::Inline, "typst-math");
+                    inlines.push(Inline::InlineMath { formula });
                 }
                 TypstItem::Raw(_) => {
                     let mut raw = String::new();
                     while index < items.len() {
-                        let TypstItem::Raw(chunk) = &items[index] else {
+                        let TypstItem::Raw(chunk) = &items[index]
+                        else {
                             break;
                         };
                         raw.push_str(chunk);
@@ -435,9 +449,12 @@ impl<'a> TypstLowerer<'a> {
     }
 
     fn link_inline(&mut self, link: &TypstLink) -> Inline {
-        let display = link.content.as_ref().map(|content| self.collect_inlines(&content.items)).filter(|display| !display.is_empty()).unwrap_or_else(|| {
-            vec![Inline::Text { text: link.url.clone() }]
-        });
+        let display = link
+            .content
+            .as_ref()
+            .map(|content| self.collect_inlines(&content.items))
+            .filter(|display| !display.is_empty())
+            .unwrap_or_else(|| vec![Inline::Text { text: link.url.clone() }]);
         Inline::Link { target: RelationEndpoint::ExternalUri(link.url.clone()), display, title: None }
     }
 
@@ -451,7 +468,8 @@ impl<'a> TypstLowerer<'a> {
         while offset < self.source.len() {
             let end = self.source[offset..].find('\n').map(|index| offset + index).unwrap_or(self.source.len());
             let line = self.source[offset..end].trim_end_matches('\r');
-            let Some((line_ordered, number, content)) = list_marker(line) else {
+            let Some((line_ordered, number, content)) = list_marker(line)
+            else {
                 break;
             };
             if ordered.is_some_and(|ordered| ordered != line_ordered) {
@@ -599,7 +617,8 @@ fn raw_content(raw: &str) -> (String, Option<String>) {
     if ticks >= 3 {
         if let Some(newline) = inner.find('\n') {
             let first = inner[..newline].trim();
-            let is_language = !first.is_empty() && first.chars().all(|character| character.is_alphanumeric() || matches!(character, '+' | '-' | '_'));
+            let is_language =
+                !first.is_empty() && first.chars().all(|character| character.is_alphanumeric() || matches!(character, '+' | '-' | '_'));
             if is_language {
                 return (inner[newline + 1..].trim_matches('\n').to_string(), Some(first.to_string()));
             }
@@ -724,7 +743,8 @@ mod tests {
                 _ => None,
             })
             .expect("link inline");
-        let Inline::Link { target, display, title } = inline else {
+        let Inline::Link { target, display, title } = inline
+        else {
             unreachable!()
         };
         assert_eq!(target, &RelationEndpoint::ExternalUri("https://example.com".into()));
@@ -732,4 +752,3 @@ mod tests {
         assert!(title.is_none());
     }
 }
-

@@ -1,6 +1,12 @@
-use std::{collections::{HashMap, HashSet}, io::Write as _};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Write as _,
+};
 
-use acorn_codec::{CodecLimits, compression::deflate::DeflateLevel, compression::zlib::Zlib};
+use acorn_codec::{
+    CodecLimits,
+    compression::{deflate::DeflateLevel, zlib::Zlib},
+};
 
 use notedown_ir::{AssetId, AssetKind, Block, BreakKind, DocumentGraph, Inline, NodeId};
 
@@ -173,9 +179,10 @@ fn render_block(lines: &mut Vec<RenderLine>, graph: &DocumentGraph, block: &Bloc
             }
         }
         Block::Paragraph { content } | Block::Quote { content } => push_inline_lines(lines, graph, content)?,
-        Block::Code { content, .. } | Block::Diagram { source: content, .. } | Block::Math { content, .. } => {
+        Block::Code { content, .. } | Block::Diagram { source: content, .. } => {
             lines.extend(content.lines().map(|line| RenderLine::Text(line.to_owned())))
         }
+        Block::Math { formula } => lines.extend(formula.source.lines().map(|line| RenderLine::Text(line.to_owned()))),
         Block::List { items, .. } => {
             for item in items {
                 lines.push(RenderLine::Text(format!("- {}", inline_text(graph, &item.content)?)));
@@ -281,7 +288,7 @@ fn inline_text(graph: &DocumentGraph, inlines: &[Inline]) -> Result<String, Form
         match inline {
             Inline::Text { text } | Inline::InlineCode { text } => output.push_str(text),
             Inline::Styled { children, .. } => output.push_str(&inline_text(graph, children)?),
-            Inline::InlineMath { content, .. } => output.push_str(content),
+            Inline::InlineMath { formula } => output.push_str(&formula.source),
             Inline::Reference { display, .. } => output.push_str(display),
             Inline::Link { display, .. } => output.push_str(&inline_text(graph, display)?),
             Inline::Image { .. } => return Err(FormatError::unsupported("pdf", "image inline must occupy its own paragraph")),

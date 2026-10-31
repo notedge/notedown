@@ -121,10 +121,10 @@ fn write_block(
             write_table(out, rows, image_urls)?;
             out.push('\n');
         }
-        Block::Math { content, language } => {
-            ensure_latex_math(content, language.as_deref())?;
+        Block::Math { formula } => {
+            ensure_latex_math(&formula.source, formula.language.as_deref())?;
             out.push_str("$$");
-            out.push_str(content);
+            out.push_str(&formula.source);
             out.push_str("$$\n\n");
         }
         Block::Opaque { kind, payload_hint, .. } => {
@@ -278,10 +278,10 @@ fn write_inline(
             write_inlines_in_table_cell(out, children, image_urls, in_table_cell)?;
             out.push_str(wrapper.1);
         }
-        Inline::InlineMath { content, language } => {
-            ensure_latex_math(content, language.as_deref())?;
+        Inline::InlineMath { formula } => {
+            ensure_latex_math(&formula.source, formula.language.as_deref())?;
             out.push('$');
-            out.push_str(content);
+            out.push_str(&formula.source);
             out.push('$');
         }
         Inline::Reference { target, .. } => {

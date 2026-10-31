@@ -10,6 +10,7 @@ mod block;
 mod graph;
 mod id;
 mod inline;
+mod math;
 mod relation;
 mod source;
 mod status;
@@ -23,9 +24,13 @@ pub use block::{Block, BlockNode, ListItem, TableCell, TableRow};
 pub use graph::{DocumentGraph, DocumentMetadata, IdAllocator};
 pub use id::{AssetId, DocumentId, LinkId, NodeId};
 pub use inline::{AttributePair, Attributes, BreakKind, Inline};
+pub use math::{
+    MathAtom, MathClass, MathColumnAlignment, MathDelimiter, MathDelimiterKind, MathDisplay, MathEnvironment, MathEnvironmentKind,
+    MathExpression, MathFormula, MathRow, MathRowNumbering, MathRowPlacement, MathStyle,
+};
 pub use relation::{Relation, RelationEndpoint, RelationKind};
 pub use source::{CoverageReport, SourceKind, SourceRef};
 pub use status::{LossMarker, SemanticStatus};
-pub use transform_errors::{Diagnostic, RewriteResult, Traversal, TransformError};
+pub use transform_errors::{Diagnostic, RewriteResult, TransformError, Traversal};
 pub use validate::{ValidationIssue, ValidationReport};
 pub use wire::{DocumentEnvelope, SCHEMA_VERSION, WireError};

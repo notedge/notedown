@@ -43,7 +43,12 @@ fn markdown_lists_lower_to_list_blocks() {
         nested,
         Block::List {
             ordered: false,
-            items: vec![notedown_ir::ListItem { content: vec![Inline::Text { text: "child".into() }], children: Vec::new(), number: None, ..Default::default() }]
+            items: vec![notedown_ir::ListItem {
+                content: vec![Inline::Text { text: "child".into() }],
+                children: Vec::new(),
+                number: None,
+                ..Default::default()
+            }]
         }
     );
     assert!(nested_graph.validate().is_valid());
@@ -363,19 +368,30 @@ fn markdown_math_reopen_preserves_semantics_and_following_text() {
     else {
         panic!("paragraph")
     };
-    assert_eq!(
-        content,
-        &vec![
-            Inline::Text { text: "before ".into() },
-            Inline::InlineMath { content: "x^2 + y^2".into(), language: Some("latex".into()) },
-            Inline::Text { text: " after".into() },
-        ]
-    );
-    assert!(graph.blocks.iter().any(|node| node.block == Block::Math { content: "E = mc^2".into(), language: Some("latex".into()) }));
+    assert_eq!(content.len(), 3);
+    let Inline::InlineMath { formula } = &content[1]
+    else {
+        panic!("expected inline math, got {content:?}")
+    };
+    assert_eq!(formula.source, "x^2 + y^2");
+    assert_eq!(formula.language.as_deref(), Some("latex"));
+    let math_block = graph
+        .blocks
+        .iter()
+        .find_map(|node| match &node.block {
+            Block::Math { formula } => Some(formula),
+            _ => None,
+        })
+        .expect("display math block");
+    assert_eq!(math_block.source, "E = mc^2");
+    assert_eq!(math_block.language.as_deref(), Some("latex"));
     let markdown = export_markdown(&graph).expect("export");
     let reopened = import_markdown_bytes("math-round.md", &markdown).expect("reopen");
     assert_eq!(reopened.blocks[0].block, graph.blocks[0].block);
-    assert!(reopened.blocks.iter().any(|node| node.block == Block::Math { content: "E = mc^2".into(), language: Some("latex".into()) }));
+    assert!(reopened.blocks.iter().any(|node| match &node.block {
+        Block::Math { formula } => formula.source == "E = mc^2" && formula.language.as_deref() == Some("latex"),
+        _ => false,
+    }));
 }
 
 #[test]
@@ -618,11 +634,8 @@ fn markdown_mermaid_fence_lowers_to_a_diagram_block() {
 
 #[test]
 fn markdown_diagram_round_trips_through_a_mermaid_fence() {
-    let graph = import_markdown_bytes(
-        "diagram-roundtrip.md",
-        "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n",
-    )
-    .expect("import markdown");
+    let graph = import_markdown_bytes("diagram-roundtrip.md", "```mermaid\nflowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]\n```\n")
+        .expect("import markdown");
 
     let markdown = export_markdown(&graph).expect("export diagram markdown");
     assert!(markdown.contains("```mermaid"), "{markdown:?}");
@@ -665,11 +678,7 @@ fn markdown_fenced_code_allows_an_indented_opening_fence() {
     assert_eq!(content, "A[Start] --> B");
 
     let deep = import_markdown_bytes("deep-fence.md", "    ```mermaid\nA[Start] --> B\n    ```\n").expect("import markdown");
-    assert!(
-        !matches!(&deep.blocks[0].block, Block::Diagram { .. }),
-        "four spaces must not open a fence: {:#?}",
-        deep.blocks[0].block
-    );
+    assert!(!matches!(&deep.blocks[0].block, Block::Diagram { .. }), "four spaces must not open a fence: {:#?}", deep.blocks[0].block);
 }
 
 #[test]

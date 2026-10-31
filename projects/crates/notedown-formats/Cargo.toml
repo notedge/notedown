@@ -26,7 +26,7 @@ oak-typst = { workspace = true, optional = true }
 
 [features]
 default = ["markdown"]
-markdown = ["dep:oak-core", "dep:oak-markdown"]
+markdown = ["dep:oak-core", "dep:oak-markdown", "tex"]
 notedown = ["dep:oak-core", "dep:oak-notedown"]
 docx = ["dep:acorn-core", "dep:acorn-docx", "dep:oak-core", "dep:oak-xml"]
 doc = ["dep:acorn-doc"]

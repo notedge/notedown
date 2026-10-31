@@ -28,6 +28,9 @@ pub mod pdf;
 /// TeX/LaTeX import via `oak-tex`.
 #[cfg(feature = "tex")]
 pub mod tex;
+/// TeX math AST lowering into `notedown-ir::math`.
+#[cfg(feature = "tex")]
+pub(crate) mod tex_math;
 /// Typst import via `oak-typst`.
 #[cfg(feature = "typst")]
 pub mod typst;

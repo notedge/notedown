@@ -246,7 +246,8 @@ fn bidirectional_relation_is_distinct_from_backlink_index() {
 fn math_and_inferred_pdf_layout_keep_explicit_semantics() {
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
 
-    let math = graph.push_block(Block::Math { content: "E = mc^2".to_string(), language: Some("latex".to_string()) });
+    let formula = notedown_ir::MathFormula::unsupported("E = mc^2", Some("latex".to_string()), notedown_ir::MathDisplay::Display, "raw");
+    let math = graph.push_block(Block::Math { formula });
     let inferred = graph.push_block(Block::Opaque {
         kind: "pdf.reading-order".to_string(),
         payload_hint: "page-3 stream".to_string(),

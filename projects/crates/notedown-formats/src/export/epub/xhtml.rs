@@ -7,9 +7,7 @@
 
 use std::fmt::Write as _;
 
-use notedown_ir::{
-    Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, NodeId, RelationEndpoint, TableRow,
-};
+use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, NodeId, RelationEndpoint, TableRow};
 
 use super::chapter::{ChapterPlan, asset_source_map, plan_assets};
 use crate::FormatError;
@@ -28,7 +26,8 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
         out.push_str("\" lang=\"");
         escape_attribute(&mut out, lang);
         out.push('"');
-    } else {
+    }
+    else {
         out.push_str(" xml:lang=\"en\" lang=\"en\"");
     }
     out.push_str(
@@ -54,10 +53,9 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
             continue;
         }
         emitted.extend(nested_block_ids(graph, *node_id));
-        let Some(node) = graph.block(*node_id) else {
-            return Err(FormatError::invalid_input(format!(
-                "chapter block `{node_id:?}` is missing from the graph"
-            )));
+        let Some(node) = graph.block(*node_id)
+        else {
+            return Err(FormatError::invalid_input(format!("chapter block `{node_id:?}` is missing from the graph")));
         };
         write_node(&mut out, graph, &node.block, Some(&source_map))?;
     }
@@ -72,7 +70,8 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
 
 fn nested_block_ids(graph: &DocumentGraph, node_id: NodeId) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let Some(node) = graph.block(node_id) else {
+    let Some(node) = graph.block(node_id)
+    else {
         return out;
     };
     match &node.block {
@@ -117,10 +116,9 @@ fn write_block(
             write_inlines(out, title, source_map)?;
             write!(out, "</h{}>\n", level).map_err(format_error)?;
             for child_id in children {
-                let Some(child) = graph.block(*child_id) else {
-                    return Err(FormatError::invalid_input(format!(
-                        "section child `{child_id:?}` is missing"
-                    )));
+                let Some(child) = graph.block(*child_id)
+                else {
+                    return Err(FormatError::invalid_input(format!("section child `{child_id:?}` is missing")));
                 };
                 write_node(out, graph, &child.block, source_map)?;
             }
@@ -156,15 +154,15 @@ fn write_block(
             escape_text(out, source);
             out.push_str("</code></pre>\n");
         }
-        Block::Math { content, language } => {
+        Block::Math { formula } => {
             out.push_str("<div class=\"math\"");
-            if let Some(language) = language {
+            if let Some(language) = &formula.language {
                 out.push_str(" data-language=\"");
                 escape_attribute(out, language);
                 out.push('"');
             }
             out.push('>');
-            escape_text(out, content);
+            escape_text(out, &formula.source);
             out.push_str("</div>\n");
         }
         Block::List { ordered, items } => write_list(out, graph, *ordered, items, source_map)?,
@@ -179,10 +177,7 @@ fn write_block(
             out.push('\n');
         }
         Block::Opaque { kind, .. } => {
-            return Err(FormatError::unsupported(
-                "epub",
-                format!("opaque block kind `{kind}` is not representable"),
-            ));
+            return Err(FormatError::unsupported("epub", format!("opaque block kind `{kind}` is not representable")));
         }
         Block::RawHtml { html } => {
             out.push_str(html);
@@ -205,10 +200,9 @@ fn write_list(
         write_inlines(out, &item.content, source_map)?;
         out.push('\n');
         for child_id in &item.children {
-            let Some(child) = graph.block(*child_id) else {
-                return Err(FormatError::invalid_input(format!(
-                    "list item child `{child_id:?}` is missing"
-                )));
+            let Some(child) = graph.block(*child_id)
+            else {
+                return Err(FormatError::invalid_input(format!("list item child `{child_id:?}` is missing")));
             };
             write_node(out, graph, &child.block, source_map)?;
         }
@@ -218,11 +212,7 @@ fn write_list(
     Ok(())
 }
 
-fn write_table(
-    out: &mut String,
-    rows: &[TableRow],
-    source_map: Option<&std::collections::HashMap<String, String>>,
-) -> Result<(), FormatError> {
+fn write_table(out: &mut String, rows: &[TableRow], source_map: Option<&std::collections::HashMap<String, String>>) -> Result<(), FormatError> {
     out.push_str("<table>\n");
     for row in rows {
         out.push_str("  <tr>\n");
@@ -265,15 +255,15 @@ fn write_inlines(
                 escape_text(out, text);
                 out.push_str("</code>");
             }
-            Inline::InlineMath { content, language } => {
+            Inline::InlineMath { formula } => {
                 out.push_str("<span class=\"math\"");
-                if let Some(language) = language {
+                if let Some(language) = &formula.language {
                     out.push_str(" data-language=\"");
                     escape_attribute(out, language);
                     out.push('"');
                 }
                 out.push('>');
-                escape_text(out, content);
+                escape_text(out, &formula.source);
                 out.push_str("</span>");
             }
             Inline::Reference { display, target } => {
@@ -284,10 +274,7 @@ fn write_inlines(
             Inline::Styled { style, children } => {
                 if let Some(color) = style.strip_prefix("color:") {
                     if color.len() != 6 || !color.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                        return Err(FormatError::unsupported(
-                            "epub",
-                            format!("invalid color style `{style}`"),
-                        ));
+                        return Err(FormatError::unsupported("epub", format!("invalid color style `{style}`")));
                     }
                     write!(out, "<span style=\"color:#{color}\">").map_err(format_error)?;
                     write_inlines(out, children, source_map)?;
@@ -302,10 +289,7 @@ fn write_inlines(
                     "superscript" => "sup",
                     "subscript" => "sub",
                     _ => {
-                        return Err(FormatError::unsupported(
-                            "epub",
-                            format!("inline style `{style}` is not representable"),
-                        ));
+                        return Err(FormatError::unsupported("epub", format!("inline style `{style}` is not representable")));
                     }
                 };
                 write!(out, "<{}>", tag).map_err(format_error)?;
@@ -315,10 +299,7 @@ fn write_inlines(
             Inline::Link { target, display, title } => {
                 let RelationEndpoint::ExternalUri(url) = target
                 else {
-                    return Err(FormatError::unsupported(
-                        "epub",
-                        format!("link target `{target:?}` has no EPUB destination mapping"),
-                    ));
+                    return Err(FormatError::unsupported("epub", format!("link target `{target:?}` has no EPUB destination mapping")));
                 };
                 out.push_str("<a href=\"");
                 escape_attribute(out, url);
@@ -360,10 +341,7 @@ fn write_inlines(
                 out.push_str("</a></sup>");
             }
             Inline::Citation { .. } => {
-                return Err(FormatError::unsupported(
-                    "epub",
-                    "inline Citation is not representable by the conservative EPUB exporter",
-                ));
+                return Err(FormatError::unsupported("epub", "inline Citation is not representable by the conservative EPUB exporter"));
             }
             Inline::RawHtml { html } => out.push_str(html),
         }
@@ -371,11 +349,9 @@ fn write_inlines(
     Ok(())
 }
 
-fn rewrite_image_href(
-    source: &str,
-    source_map: Option<&std::collections::HashMap<String, String>>,
-) -> String {
-    let Some(map) = source_map else {
+fn rewrite_image_href(source: &str, source_map: Option<&std::collections::HashMap<String, String>>) -> String {
+    let Some(map) = source_map
+    else {
         return source.to_string();
     };
     // Try exact match, then basename match.
@@ -401,14 +377,8 @@ fn write_attributes(out: &mut String, attributes: &Attributes) -> Result<(), For
         out.push('"');
     }
     for pair in &attributes.pairs {
-        if !is_valid_attribute_name(&pair.key)
-            || pair.key.eq_ignore_ascii_case("id")
-            || pair.key.eq_ignore_ascii_case("class")
-        {
-            return Err(FormatError::unsupported(
-                "epub",
-                format!("invalid attribute name `{}`", pair.key),
-            ));
+        if !is_valid_attribute_name(&pair.key) || pair.key.eq_ignore_ascii_case("id") || pair.key.eq_ignore_ascii_case("class") {
+            return Err(FormatError::unsupported("epub", format!("invalid attribute name `{}`", pair.key)));
         }
         out.push(' ');
         out.push_str(&pair.key);

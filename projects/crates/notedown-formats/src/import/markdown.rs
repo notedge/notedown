@@ -1,12 +1,16 @@
 use std::{collections::HashMap, path::Path};
 
 use notedown_ir::{
-    Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, RelationEndpoint, SemanticStatus, TableCell, TableRow,
+    Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, MathDisplay, NodeId, RelationEndpoint, SemanticStatus,
+    TableCell, TableRow,
 };
 use oak_core::{GreenNode, Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
 use oak_markdown::{MarkdownLanguage, MarkdownParser, parser::element_type::MarkdownElementType};
 
-use super::common::{decode_escaped_text, register_image_assets};
+use super::{
+    common::{decode_escaped_text, register_image_assets},
+    tex_math::lower_formula_source,
+};
 use crate::FormatError;
 
 /// Import Markdown from disk into `notedown-ir`.
@@ -303,7 +307,9 @@ fn lower_block_node(
             BlockOutcome::Skip
         }
         MarkdownElementType::MathBlock => {
-            BlockOutcome::Block(Block::Math { content: strip_math_delimiters(&node.text(source), "$$"), language: Some("latex".into()) })
+            let raw = node.text(source);
+            let body = strip_math_delimiters(&raw, "$$");
+            BlockOutcome::Block(Block::Math { formula: lower_formula_source(&body, MathDisplay::Display, "latex") })
         }
         MarkdownElementType::List => {
             let (ordered, items) = extract_list(node, source, context, graph);
@@ -390,7 +396,9 @@ fn lower_inline_node(node: RedNode<MarkdownLanguage>, source: &SourceText, conte
         MarkdownElementType::Link => parse_inline_link(node, source, context),
         MarkdownElementType::Image => parse_inline_image(node, source, context),
         MarkdownElementType::MathInline => {
-            Some(Inline::InlineMath { content: strip_math_delimiters(&node.text(source), "$"), language: Some("latex".into()) })
+            let raw = node.text(source);
+            let body = strip_math_delimiters(&raw, "$");
+            Some(Inline::InlineMath { formula: lower_formula_source(&body, MathDisplay::Inline, "latex") })
         }
         MarkdownElementType::FootnoteReference => {
             let raw = node.text(source);

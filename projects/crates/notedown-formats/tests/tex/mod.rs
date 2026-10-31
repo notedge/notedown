@@ -70,9 +70,9 @@ fn math_keeps_authored_source() {
         .iter()
         .filter_map(|node| match &node.block {
             Block::Paragraph { content } => content.iter().find_map(|inline| match inline {
-                Inline::InlineMath { content, language } => {
-                    assert_eq!(language.as_deref(), Some("latex"));
-                    Some(content.clone())
+                Inline::InlineMath { formula } => {
+                    assert_eq!(formula.language.as_deref(), Some("latex"));
+                    Some(formula.source.clone())
                 }
                 _ => None,
             }),
@@ -83,9 +83,9 @@ fn math_keeps_authored_source() {
     let display_math: Vec<&str> = blocks(&graph)
         .iter()
         .filter_map(|node| match &node.block {
-            Block::Math { content, language } => {
-                assert_eq!(language.as_deref(), Some("latex"));
-                Some(content.as_str())
+            Block::Math { formula } => {
+                assert_eq!(formula.language.as_deref(), Some("latex"));
+                Some(formula.source.as_str())
             }
             _ => None,
         })
@@ -121,7 +121,8 @@ fn unknown_environment_stays_opaque() {
 
 #[test]
 fn unordered_and_ordered_lists_lower_with_numbers() {
-    let text = "\\begin{itemize}\n\\item One\n\\item Two\n\\end{itemize}\n\n\\begin{enumerate}\n\\item First\n\\item Second\n\\end{enumerate}\n";
+    let text =
+        "\\begin{itemize}\n\\item One\n\\item Two\n\\end{itemize}\n\n\\begin{enumerate}\n\\item First\n\\item Second\n\\end{enumerate}\n";
     let graph = import_tex_bytes("lists.tex", text).unwrap();
     let lists: Vec<&Block> = blocks(&graph)
         .iter()
@@ -131,7 +132,8 @@ fn unordered_and_ordered_lists_lower_with_numbers() {
         })
         .collect();
     assert_eq!(lists.len(), 2);
-    let Block::List { ordered: false, items } = lists[0] else {
+    let Block::List { ordered: false, items } = lists[0]
+    else {
         panic!("expected unordered list, got {:?}", lists[0]);
     };
     assert_eq!(items.len(), 2);
@@ -139,7 +141,8 @@ fn unordered_and_ordered_lists_lower_with_numbers() {
     assert_eq!(items[1].content.iter().map(Inline::plain_text).collect::<String>(), "Two");
     assert!(items.iter().all(|item| item.number.is_none()));
 
-    let Block::List { ordered: true, items } = lists[1] else {
+    let Block::List { ordered: true, items } = lists[1]
+    else {
         panic!("expected ordered list, got {:?}", lists[1]);
     };
     assert_eq!(items.iter().map(|item| item.number).collect::<Vec<_>>(), vec![Some(1), Some(2)]);
@@ -159,7 +162,8 @@ fn nested_list_becomes_list_item_child() {
     assert_eq!(outer.len(), 1);
     assert_eq!(outer[0].children.len(), 1);
     let nested = graph.block(outer[0].children[0]).expect("nested list");
-    let Block::List { ordered: true, items: nested_items } = &nested.block else {
+    let Block::List { ordered: true, items: nested_items } = &nested.block
+    else {
         panic!("expected nested list, got {:?}", nested.block);
     };
     assert_eq!(nested_items.len(), 1);
@@ -211,7 +215,8 @@ fn includegraphics_becomes_image_and_registers_asset() {
         .filter(|inline| matches!(inline, Inline::Image { .. }))
         .collect();
     assert_eq!(images.len(), 1);
-    let Inline::Image { source, asset, .. } = images[0] else {
+    let Inline::Image { source, asset, .. } = images[0]
+    else {
         unreachable!()
     };
     assert_eq!(source, "figure.png");
@@ -307,9 +312,9 @@ fn math_delimiters_share_inline_and_display_semantics() {
     let inline_math: Vec<String> = paragraph_inlines(&graph)
         .into_iter()
         .filter_map(|inline| match inline {
-            Inline::InlineMath { content, language } => {
-                assert_eq!(language.as_deref(), Some("latex"));
-                Some(content.clone())
+            Inline::InlineMath { formula } => {
+                assert_eq!(formula.language.as_deref(), Some("latex"));
+                Some(formula.source.clone())
             }
             _ => None,
         })
@@ -349,14 +354,22 @@ fn math_environments_lower_to_math_blocks_with_source_spans() {
 
 #[test]
 fn numbered_math_environments_record_the_missing_number_anchor() {
-    let text =
-        "\\begin{align}a&=b\\\\c&=d\\end{align}\n\n\\begin{align*}a&=b\\end{align*}\n\n\\begin{equation}x=1\\end{equation}\n\n\\begin{equation*}y=2\\end{equation*}\n";
+    let text = "\\begin{align}a&=b\\\\c&=d\\end{align}\n\n\\begin{align*}a&=b\\end{align*}\n\n\\begin{equation}x=1\\end{equation}\n\n\\begin{equation*}y=2\\end{equation*}\n";
     let graph = import_tex_bytes("numbering.tex", text).unwrap();
     let maths = math_blocks(&graph);
     let opened: Vec<String> = maths.iter().map(|(content, _, _)| content.lines().next().unwrap_or("").to_string()).collect();
-    assert_eq!(opened, vec!["\\begin{align}a&=b\\\\c&=d\\end{align}".to_string(), "\\begin{align*}a&=b\\end{align*}".to_string(), "\\begin{equation}x=1\\end{equation}".to_string(), "\\begin{equation*}y=2\\end{equation*}".to_string()]);
+    assert_eq!(
+        opened,
+        vec![
+            "\\begin{align}a&=b\\\\c&=d\\end{align}".to_string(),
+            "\\begin{align*}a&=b\\end{align*}".to_string(),
+            "\\begin{equation}x=1\\end{equation}".to_string(),
+            "\\begin{equation*}y=2\\end{equation*}".to_string()
+        ]
+    );
 
-    let numbering: Vec<&str> = graph.coverage.loss.iter().filter(|loss| loss.code == "import.tex.math_numbering").map(|loss| loss.message.as_str()).collect();
+    let numbering: Vec<&str> =
+        graph.coverage.loss.iter().filter(|loss| loss.code == "import.tex.math_numbering").map(|loss| loss.message.as_str()).collect();
     assert_eq!(numbering.len(), 2, "only the unstarred equation and align carry a number");
     assert!(numbering.iter().any(|message| message.contains("align`")));
     assert!(numbering.iter().any(|message| message.contains("equation`")));
@@ -390,11 +403,11 @@ fn math_environment_in_inline_context_stays_inline_math() {
     let inline_math: Vec<String> = paragraph_inlines(&graph)
         .into_iter()
         .flat_map(|inline| match inline {
-            Inline::InlineMath { content, .. } => vec![content.clone()],
+            Inline::InlineMath { formula, .. } => vec![formula.source.clone()],
             Inline::Styled { children, .. } | Inline::Attributed { children, .. } => children
                 .iter()
                 .filter_map(|child| match child {
-                    Inline::InlineMath { content, .. } => Some(content.clone()),
+                    Inline::InlineMath { formula, .. } => Some(formula.source.clone()),
                     _ => None,
                 })
                 .collect(),
@@ -444,7 +457,7 @@ fn unclosed_math_delimiter_records_loss_and_keeps_the_authored_body() {
     let inline_math: Vec<String> = paragraph_inlines(&graph)
         .into_iter()
         .filter_map(|inline| match inline {
-            Inline::InlineMath { content, .. } => Some(content.clone()),
+            Inline::InlineMath { formula, .. } => Some(formula.source.clone()),
             _ => None,
         })
         .collect();
@@ -494,13 +507,13 @@ fn math_blocks(graph: &DocumentGraph) -> Vec<(String, notedown_ir::NodeId, u32)>
     blocks(graph)
         .iter()
         .filter_map(|node| match &node.block {
-            Block::Math { content, language } => {
-                assert_eq!(language.as_deref(), Some("latex"));
+            Block::Math { formula } => {
+                assert_eq!(formula.language.as_deref(), Some("latex"));
                 let start = match block_span(graph, node.id) {
                     Some((start, _)) => start,
                     None => 0,
                 };
-                Some((content.clone(), node.id, start))
+                Some((formula.source.clone(), node.id, start))
             }
             _ => None,
         })
@@ -536,7 +549,8 @@ fn paragraph_inlines(graph: &DocumentGraph) -> Vec<&Inline> {
 
 /// Authored `\left...\right` delimiters plus the lowered body of the pair.
 fn delimiter_pair(inline: &Inline) -> Option<(&str, &str, &[Inline])> {
-    let Inline::Attributed { attributes, children } = inline else {
+    let Inline::Attributed { attributes, children } = inline
+    else {
         return None;
     };
     if !attributes.classes.iter().any(|class| class == "tex-delimiter-pair") {
@@ -548,7 +562,8 @@ fn delimiter_pair(inline: &Inline) -> Option<(&str, &str, &[Inline])> {
 
 /// Authored `\limits` / `\nolimits` variant recorded by the marker inline.
 fn limits_value(inline: &Inline) -> Option<&str> {
-    let Inline::Attributed { attributes, .. } = inline else {
+    let Inline::Attributed { attributes, .. } = inline
+    else {
         return None;
     };
     if !attributes.classes.iter().any(|class| class == "tex-limits") {
@@ -568,10 +583,7 @@ fn math_style_commands_outside_math_source_are_dropped_silently() {
         "Pre formula text.\n\n\\displaystyle\n\\textstyle\n\\scriptstyle\n\\scriptscriptstyle\n\nPost formula text.\n",
     )
     .unwrap();
-    assert!(
-        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
-        "math style commands must not stay opaque"
-    );
+    assert!(blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })), "math style commands must not stay opaque");
     assert_eq!(loss_count(&graph, "import.tex.math_style_command"), 0);
 }
 
@@ -582,10 +594,7 @@ fn math_font_commands_outside_math_source_are_dropped_silently() {
         "See \\mathbf{A} and \\mathit{B} and \\mathrm{C} and \\mathcal{D} and \\mathbb{E} and \\mathfrak{F}.\n",
     )
     .unwrap();
-    assert!(
-        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
-        "math font commands must not stay opaque"
-    );
+    assert!(blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })), "math font commands must not stay opaque");
     assert_eq!(loss_count(&graph, "import.tex.math_font_command"), 0);
 }
 
@@ -617,10 +626,7 @@ fn text_mode_space_commands_keep_their_authored_distinction() {
     let spaces: Vec<String> = paragraph_inlines(&graph).into_iter().filter_map(space_value).collect();
     assert_eq!(spaces, vec!["thin", "medium", "thick", "negative", "quad", "double-quad"]);
     assert_eq!(loss_count(&graph, "import.tex.space_marker"), 6, "one loss per authored spacing command");
-    assert!(
-        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
-        "spacing commands must not stay opaque"
-    );
+    assert!(blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })), "spacing commands must not stay opaque");
     assert!(!has_loss(&graph, "import.tex.unsupported_command"));
 }
 
@@ -633,7 +639,7 @@ fn math_mode_space_commands_stay_verbatim_in_the_preserved_source() {
     let inline_math: Vec<String> = paragraph_inlines(&graph)
         .into_iter()
         .filter_map(|inline| match inline {
-            Inline::InlineMath { content, .. } => Some(content.clone()),
+            Inline::InlineMath { formula, .. } => Some(formula.source.clone()),
             _ => None,
         })
         .collect();
@@ -647,7 +653,8 @@ fn math_mode_space_commands_stay_verbatim_in_the_preserved_source() {
 
 /// Authored spacing variant recorded by a `tex-space` marker inline.
 fn space_value(inline: &Inline) -> Option<String> {
-    let Inline::Attributed { attributes, .. } = inline else {
+    let Inline::Attributed { attributes, .. } = inline
+    else {
         return None;
     };
     if !attributes.classes.iter().any(|class| class == "tex-space") {
@@ -658,11 +665,7 @@ fn space_value(inline: &Inline) -> Option<String> {
 
 #[test]
 fn math_commands_outside_math_source_leave_no_loss_or_opaque_blocks() {
-    let graph = import_tex_bytes(
-        "combined_math_loss.tex",
-        "\\displaystyle \\mathbf{x} \\nolimits_{i} a_{i}\n",
-    )
-    .unwrap();
+    let graph = import_tex_bytes("combined_math_loss.tex", "\\displaystyle \\mathbf{x} \\nolimits_{i} a_{i}\n").unwrap();
     assert_eq!(loss_count(&graph, "import.tex.math_style_command"), 0);
     assert_eq!(loss_count(&graph, "import.tex.math_font_command"), 0);
     assert_eq!(loss_count(&graph, "import.tex.math_limits_command"), 0);
@@ -682,10 +685,7 @@ fn title_and_author_fill_document_metadata() {
     assert_eq!(graph.metadata.authors, vec!["A. Chen".to_string(), "B. Wu".to_string()]);
     assert!(has_loss(&graph, "import.tex.metadata_date"));
     assert!(has_loss(&graph, "import.tex.maketitle_dropped"));
-    assert!(
-        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
-        "metadata commands must not stay opaque"
-    );
+    assert!(blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })), "metadata commands must not stay opaque");
 }
 
 #[test]
@@ -764,19 +764,15 @@ fn footnote_becomes_numbered_note_with_lowered_body() {
     let notes: Vec<(String, String)> = paragraph_inlines(&graph)
         .into_iter()
         .filter_map(|inline| match inline {
-            Inline::Note { label, display } => Some((
-                label.clone(),
-                display.as_ref().map(|display| display.iter().map(Inline::plain_text).collect()).unwrap_or_default(),
-            )),
+            Inline::Note { label, display } => {
+                Some((label.clone(), display.as_ref().map(|display| display.iter().map(Inline::plain_text).collect()).unwrap_or_default()))
+            }
             _ => None,
         })
         .collect();
     assert_eq!(notes, vec![("1".to_string(), "A note.".to_string())]);
     assert!(has_loss(&graph, "import.tex.footnote_body"));
-    assert!(
-        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
-        "footnote must not stay an opaque block"
-    );
+    assert!(blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })), "footnote must not stay an opaque block");
     assert!(graph.validate().is_valid());
 }
 
@@ -802,8 +798,7 @@ fn cite_splits_keys_and_pushes_cites_relations_once_per_key() {
 
 #[test]
 fn notag_and_tag_shape_equation_numbering() {
-    let text =
-        "\\begin{align}a&=b\\notag\\\\c&=d\\label{eq:kept}\\end{align}\n\\begin{equation}\\tag{7}\\label{eq:tagged}x=1\\end{equation}\nSee \\eqref{eq:kept} and \\eqref{eq:tagged}.\n";
+    let text = "\\begin{align}a&=b\\notag\\\\c&=d\\label{eq:kept}\\end{align}\n\\begin{equation}\\tag{7}\\label{eq:tagged}x=1\\end{equation}\nSee \\eqref{eq:kept} and \\eqref{eq:tagged}.\n";
     let graph = import_tex_bytes("notag.tex", text).unwrap();
     assert!(graph.validate().is_valid());
     let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
@@ -815,7 +810,8 @@ fn notag_and_tag_shape_equation_numbering() {
 /// Reference kind, authored label, lowered link target, and display text of a
 /// `tex-ref` marker inline.
 fn reference_marker(inline: &Inline) -> Option<(&str, &str, String, String)> {
-    let Inline::Attributed { attributes, children } = inline else {
+    let Inline::Attributed { attributes, children } = inline
+    else {
         return None;
     };
     if !attributes.classes.iter().any(|class| class == "tex-ref") {
@@ -823,7 +819,8 @@ fn reference_marker(inline: &Inline) -> Option<(&str, &str, String, String)> {
     }
     let kind = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-kind")?.value.as_str();
     let label = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-label")?.value.as_str();
-    let Inline::Link { target, display, .. } = children.first()? else {
+    let Inline::Link { target, display, .. } = children.first()?
+    else {
         return None;
     };
     Some((kind, label, endpoint_name(target), display.iter().map(Inline::plain_text).collect()))
@@ -880,11 +877,11 @@ fn math_payloads(graph: &DocumentGraph) -> Vec<&str> {
     let mut payloads = Vec::new();
     for node in blocks(graph) {
         match &node.block {
-            Block::Math { content, .. } => payloads.push(content.as_str()),
+            Block::Math { formula, .. } => payloads.push(formula.source.as_str()),
             Block::Paragraph { content } => {
                 for inline in content {
-                    if let Inline::InlineMath { content, .. } = inline {
-                        payloads.push(content.as_str());
+                    if let Inline::InlineMath { formula, .. } = inline {
+                        payloads.push(formula.source.as_str());
                     }
                 }
             }

@@ -516,7 +516,7 @@ impl<'a> TexLowerer<'a> {
         let numbered = math_environment_is_numbered(name, starred);
         let mut first_number: Option<String> = None;
         for row in environment_rows_of(environment) {
-            let metadata = row_metadata(row);
+            let metadata = row_metadata(row, self.source);
             if metadata.empty && metadata.labels.is_empty() && !metadata.suppressed {
                 continue;
             }

@@ -101,11 +101,27 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
         let item = &items[index];
         match item {
             TexItem::Superscript(script) => {
-                attach_script(&mut expressions, Some(lower_root(&script.content.items, source)), None);
+                if expressions.is_empty() {
+                    expressions.push(MathExpression::Unsupported {
+                        kind: "script-base".into(),
+                        source: slice(source, script.span.start, script.span.end),
+                    });
+                }
+                else {
+                    attach_script(&mut expressions, Some(lower_root(&script.content.items, source)), None);
+                }
                 index += 1;
             }
             TexItem::Subscript(script) => {
-                attach_script(&mut expressions, None, Some(lower_root(&script.content.items, source)));
+                if expressions.is_empty() {
+                    expressions.push(MathExpression::Unsupported {
+                        kind: "script-base".into(),
+                        source: slice(source, script.span.start, script.span.end),
+                    });
+                }
+                else {
+                    attach_script(&mut expressions, None, Some(lower_root(&script.content.items, source)));
+                }
                 index += 1;
             }
             TexItem::Limits(limits) => {
@@ -116,6 +132,11 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                     kind: "limits-base".into(),
                     source: slice(source, limits.span.start, limits.span.end),
                 });
+                // Consecutive `\limits`/`\nolimits` replace each other: the last
+                // policy before the scripts is the one that applies.
+                if matches!(expressions.last(), Some(MathExpression::LimitsPolicy { .. })) {
+                    expressions.pop();
+                }
                 let mut superscript = None;
                 let mut subscript = None;
                 let mut next = index + 1;
@@ -131,10 +152,9 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                 expressions.push(script_expression(base, superscript, subscript));
                 index = next;
             }
-            TexItem::Command(command) if is_row_metadata(command) => index += 1,
             _ => {
                 if let Some(expression) = lower_item(item, source) {
-                    expressions.push(expression);
+                    append_expression(&mut expressions, expression);
                 }
                 index += 1;
             }
@@ -143,7 +163,22 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
     sequence(expressions)
 }
 
+/// Append an expression, flattening nested sequences into the enclosing list.
+fn append_expression(expressions: &mut Vec<MathExpression>, expression: MathExpression) {
+    match expression {
+        MathExpression::Sequence(items) => {
+            for item in items {
+                append_expression(expressions, item);
+            }
+        }
+        other => expressions.push(other),
+    }
+}
+
 fn script_expression(base: MathExpression, superscript: Option<MathExpression>, subscript: Option<MathExpression>) -> MathExpression {
+    if superscript.is_none() && subscript.is_none() {
+        return base;
+    }
     MathExpression::Script { base: Box::new(base), superscript: superscript.map(Box::new), subscript: subscript.map(Box::new) }
 }
 
@@ -336,6 +371,18 @@ fn argument_text(argument: &TexArgument) -> Option<String> {
     }
 }
 
+/// The authored text of an argument, kept verbatim for metadata such as `\tag`.
+fn argument_source(argument: &TexArgument, source: &str) -> Option<String> {
+    match argument {
+        TexArgument::Optional(root) | TexArgument::Required(root) => {
+            let text = slice(source, root.span.start, root.span.end);
+            let trimmed = text.trim();
+            let body = trimmed.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')).map(str::trim).unwrap_or(trimmed);
+            (!body.is_empty()).then(|| body.to_string())
+        }
+    }
+}
+
 fn item_text(item: &TexItem) -> Option<String> {
     match item {
         TexItem::Text { content, .. } => Some(content.clone()),
@@ -448,7 +495,7 @@ fn environment_rows(environment: &TexEnvironment, source: &str, kind: &MathEnvir
         .map(|(index, row)| MathRow {
             cells: row.cells.iter().map(|cell| lower_cell(cell, source)).collect(),
             placement: row_placement(kind, index, total),
-            numbering: row_numbering(&row.cells, numbered),
+            numbering: row_numbering(&row.cells, numbered, source),
         })
         .collect()
 }
@@ -472,11 +519,19 @@ fn row_placement(kind: &MathEnvironmentKind, index: usize, total: usize) -> Math
 }
 
 fn lower_cell(cell: &TexCell, source: &str) -> MathExpression {
-    lower_root(&cell.content.items, source)
+    // Row metadata describes the row; it is not an atom of the cell.
+    let items: Vec<TexItem> = cell
+        .content
+        .items
+        .iter()
+        .filter(|item| !matches!(item, TexItem::Command(command) if is_row_metadata(command)))
+        .cloned()
+        .collect();
+    lower_root(&items, source)
 }
 
 /// Read the row's numbering intent from the command nodes inside its cells.
-fn row_numbering(cells: &[TexCell], numbered: bool) -> MathRowNumbering {
+fn row_numbering(cells: &[TexCell], numbered: bool, source: &str) -> MathRowNumbering {
     let mut tag = None;
     let mut suppressed = false;
     for cell in cells {
@@ -487,7 +542,7 @@ fn row_numbering(cells: &[TexCell], numbered: bool) -> MathRowNumbering {
             };
             match command.name.as_str() {
                 "notag" | "nonumber" => suppressed = true,
-                "tag" => tag = command.arguments.iter().find_map(argument_text),
+                "tag" => tag = command.arguments.iter().find_map(|argument| argument_source(argument, source)),
                 _ => {}
             }
         }
@@ -539,7 +594,7 @@ pub(crate) fn environment_rows_of(environment: &TexEnvironment) -> Vec<&TexRow> 
 }
 
 /// Read labels, tag and suppression from the command nodes of one row.
-pub(crate) fn row_metadata(row: &TexRow) -> RowMetadata {
+pub(crate) fn row_metadata(row: &TexRow, source: &str) -> RowMetadata {
     let mut metadata = RowMetadata { empty: true, ..RowMetadata::default() };
     for cell in &row.cells {
         for item in &cell.content.items {
@@ -551,7 +606,7 @@ pub(crate) fn row_metadata(row: &TexRow) -> RowMetadata {
                             metadata.labels.push(label);
                         }
                     }
-                    "tag" => metadata.tag = command.arguments.iter().find_map(argument_text),
+                    "tag" => metadata.tag = command.arguments.iter().find_map(|argument| argument_source(argument, source)),
                     "notag" | "nonumber" => metadata.suppressed = true,
                     _ => metadata.empty = false,
                 },

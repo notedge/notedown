@@ -1,5 +1,5 @@
 use notedown_formats::{FormatDirection, FormatStatus, capabilities, import::tex::import_tex_bytes};
-use notedown_ir::{Block, DocumentGraph, Inline};
+use notedown_ir::{Block, DocumentGraph, Inline, RelationEndpoint, RelationKind};
 
 fn blocks(graph: &DocumentGraph) -> &[notedown_ir::BlockNode] {
     &graph.blocks
@@ -41,7 +41,7 @@ fn sections_keep_hierarchy() {
             _ => None,
         })
         .collect();
-    assert_eq!(titles, vec!["One".to_string(), "Two".to_string(), "Three".to_string()]);
+    assert_eq!(titles, vec!["1 One".to_string(), "1.1 Two".to_string(), "1.1.1 Three".to_string()]);
     assert!(paragraph_text(&graph).iter().any(|text| text == "Body."));
 }
 
@@ -408,8 +408,16 @@ fn math_environment_in_inline_context_stays_inline_math() {
 #[test]
 fn comments_leave_no_text_artifacts() {
     let graph = import_tex_bytes("comments.tex", "a % note to self\nb\n").unwrap();
-    assert_eq!(paragraph_text(&graph), vec!["ab".to_string()]);
+    assert_eq!(paragraph_text(&graph), vec!["a b".to_string()]);
     assert!(graph.coverage.loss.iter().all(|loss| !loss.code.contains("comment")));
+    let graph = import_tex_bytes("gobble.tex", "a% note\nb\n").unwrap();
+    assert_eq!(paragraph_text(&graph), vec!["ab".to_string()], "a comment swallows its terminating newline");
+}
+
+#[test]
+fn paragraph_whitespace_follows_tex_collapsing() {
+    let graph = import_tex_bytes("spaces.tex", "hello   world\n\nsecond\n").unwrap();
+    assert_eq!(paragraph_text(&graph), vec!["hello world".to_string(), "second".to_string()]);
 }
 
 #[test]
@@ -664,4 +672,178 @@ fn math_commands_outside_math_source_leave_no_loss_or_opaque_blocks() {
         blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
         "no opaque blocks expected when math commands are recognized"
     );
+}
+
+#[test]
+fn title_and_author_fill_document_metadata() {
+    let text = "\\title{Energy Flow}\n\\author{A. Chen}\n\\author{B. Wu}\n\\date{October 2026}\n\\maketitle\nBody.\n";
+    let graph = import_tex_bytes("paper.tex", text).unwrap();
+    assert_eq!(graph.metadata.title.as_deref(), Some("Energy Flow"));
+    assert_eq!(graph.metadata.authors, vec!["A. Chen".to_string(), "B. Wu".to_string()]);
+    assert!(has_loss(&graph, "import.tex.metadata_date"));
+    assert!(has_loss(&graph, "import.tex.maketitle_dropped"));
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "metadata commands must not stay opaque"
+    );
+}
+
+#[test]
+fn section_numbers_reset_deeper_counters() {
+    let text = "\\section{A}\n\\subsection{B}\n\\section{C}\n";
+    let graph = import_tex_bytes("numbers.tex", text).unwrap();
+    let titles: Vec<String> = blocks(&graph)
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Section { title, .. } => Some(title.iter().map(Inline::plain_text).collect()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, vec!["1 A".to_string(), "1.1 B".to_string(), "2 C".to_string()]);
+}
+
+#[test]
+fn label_and_ref_resolve_to_section_numbers() {
+    let text = "\\section{Intro}\n\\label{sec:intro}\nAs shown in Section~\\ref{sec:intro}.\n";
+    let graph = import_tex_bytes("refs.tex", text).unwrap();
+    assert!(graph.validate().is_valid());
+    let section_node = blocks(&graph).iter().find(|node| matches!(&node.block, Block::Section { .. })).expect("section").id;
+    let relations = relation_pairs(&graph, RelationKind::References);
+    assert_eq!(relations, vec![("label:sec:intro".to_string(), format!("node:{}", section_node.0))]);
+    let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
+    assert_eq!(refs.len(), 1);
+    assert_eq!((refs[0].0, refs[0].1), ("ref", "sec:intro"));
+    assert_eq!(refs[0].2, format!("node:{}", section_node.0));
+    assert_eq!(refs[0].3, "1");
+    assert!(!has_loss(&graph, "import.tex.unresolved_reference"));
+    assert!(!has_loss(&graph, "import.tex.label_anchor"));
+}
+
+#[test]
+fn eqref_resolves_equation_number_from_label_inside_environment() {
+    let text = "\\begin{equation}\\label{eq:energy}E=mc^2\\end{equation}\nSee \\eqref{eq:energy}.\n";
+    let graph = import_tex_bytes("eqref.tex", text).unwrap();
+    assert!(graph.validate().is_valid());
+    let math_node = blocks(&graph).iter().find(|node| matches!(&node.block, Block::Math { .. })).expect("math").id;
+    let relations = relation_pairs(&graph, RelationKind::References);
+    assert_eq!(relations, vec![("label:eq:energy".to_string(), format!("node:{}", math_node.0))]);
+    let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].0, "eqref");
+    assert_eq!(refs[0].2, format!("node:{}", math_node.0));
+    assert_eq!(refs[0].3, "(1)");
+}
+
+#[test]
+fn forward_reference_resolves_in_the_post_pass() {
+    let text = "See \\ref{sec:later} first.\n\\section{Later}\n\\label{sec:later}\n";
+    let graph = import_tex_bytes("forward.tex", text).unwrap();
+    assert!(graph.validate().is_valid());
+    let section_node = blocks(&graph).iter().find(|node| matches!(&node.block, Block::Section { .. })).expect("section").id;
+    let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].2, format!("node:{}", section_node.0));
+    assert_eq!(refs[0].3, "1");
+    assert!(!has_loss(&graph, "import.tex.unresolved_reference"));
+}
+
+#[test]
+fn unknown_reference_records_loss_and_stays_unresolved() {
+    let graph = import_tex_bytes("unknown_ref.tex", "See \\ref{sec:missing}.\n").unwrap();
+    let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].2, "label:sec:missing");
+    assert_eq!(refs[0].3, "sec:missing");
+    assert_eq!(loss_count(&graph, "import.tex.unresolved_reference"), 1);
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn footnote_becomes_numbered_note_with_lowered_body() {
+    let graph = import_tex_bytes("footnote.tex", "Body\\footnote{A \\emph{note}.} tail.\n").unwrap();
+    let notes: Vec<(String, String)> = paragraph_inlines(&graph)
+        .into_iter()
+        .filter_map(|inline| match inline {
+            Inline::Note { label, display } => Some((
+                label.clone(),
+                display.as_ref().map(|display| display.iter().map(Inline::plain_text).collect()).unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notes, vec![("1".to_string(), "A note.".to_string())]);
+    assert!(has_loss(&graph, "import.tex.footnote_body"));
+    assert!(
+        blocks(&graph).iter().all(|node| !matches!(&node.block, Block::Opaque { .. })),
+        "footnote must not stay an opaque block"
+    );
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn cite_splits_keys_and_pushes_cites_relations_once_per_key() {
+    let text = "Work \\cite{chen2024,wu2025} and \\cite{chen2024}.\n";
+    let graph = import_tex_bytes("cite.tex", text).unwrap();
+    let keys: Vec<String> = paragraph_inlines(&graph)
+        .into_iter()
+        .filter_map(|inline| match inline {
+            Inline::Citation { key, .. } => Some(key.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(keys, vec!["chen2024".to_string(), "wu2025".to_string(), "chen2024".to_string()]);
+    let cites = relation_pairs(&graph, RelationKind::Cites);
+    assert_eq!(cites.len(), 2, "one relation per distinct key");
+    assert_eq!(cites[0].1, "label:chen2024");
+    assert_eq!(cites[1].1, "label:wu2025");
+    assert!(cites.iter().all(|(source, _)| source.starts_with("document:")));
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn notag_and_tag_shape_equation_numbering() {
+    let text =
+        "\\begin{align}a&=b\\notag\\\\c&=d\\label{eq:kept}\\end{align}\n\\begin{equation}\\tag{7}\\label{eq:tagged}x=1\\end{equation}\nSee \\eqref{eq:kept} and \\eqref{eq:tagged}.\n";
+    let graph = import_tex_bytes("notag.tex", text).unwrap();
+    assert!(graph.validate().is_valid());
+    let refs: Vec<(&str, &str, String, String)> = paragraph_inlines(&graph).into_iter().filter_map(reference_marker).collect();
+    assert_eq!(refs.len(), 2);
+    assert_eq!(refs[0].3, "(1)", "the notag row consumes no number");
+    assert_eq!(refs[1].3, "(7)", "the tag replaces the displayed number");
+}
+
+/// Reference kind, authored label, lowered link target, and display text of a
+/// `tex-ref` marker inline.
+fn reference_marker(inline: &Inline) -> Option<(&str, &str, String, String)> {
+    let Inline::Attributed { attributes, children } = inline else {
+        return None;
+    };
+    if !attributes.classes.iter().any(|class| class == "tex-ref") {
+        return None;
+    }
+    let kind = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-kind")?.value.as_str();
+    let label = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-label")?.value.as_str();
+    let Inline::Link { target, display, .. } = children.first()? else {
+        return None;
+    };
+    Some((kind, label, endpoint_name(target), display.iter().map(Inline::plain_text).collect()))
+}
+
+/// Relations of one kind with both endpoints rendered as stable strings.
+fn relation_pairs(graph: &DocumentGraph, kind: RelationKind) -> Vec<(String, String)> {
+    graph
+        .relations
+        .iter()
+        .filter(|relation| relation.kind == kind)
+        .map(|relation| (endpoint_name(&relation.source), endpoint_name(&relation.target)))
+        .collect()
+}
+
+fn endpoint_name(endpoint: &RelationEndpoint) -> String {
+    match endpoint {
+        RelationEndpoint::Unresolved { label } => format!("label:{label}"),
+        RelationEndpoint::Node(id) => format!("node:{}", id.0),
+        RelationEndpoint::Document(id) => format!("document:{}", id.0),
+        other => format!("{other:?}"),
+    }
 }

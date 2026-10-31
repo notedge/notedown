@@ -28,12 +28,23 @@
 //! breaks survive for the math layout stage. Equation numbering has no IR field,
 //! so a numbered environment records that gap as a loss marker instead of
 //! dropping it silently.
+//!
+//! Paper-level document semantics are lowered, not preserved as syntax:
+//! `\title` and `\author` fill `DocumentMetadata`, `\date` and `\maketitle`
+//! record a loss because the metadata has no field for them, sectioning
+//! commands carry a computed number (`1`, `1.2`) as a `tex-section-number`
+//! marker in the section title, `\label` registers a `References` relation on
+//! the preceding block, `\ref` and `\eqref` become links whose display text is
+//! the resolved number with forward references rewritten in a post-pass,
+//! `\footnote` becomes a numbered `Inline::Note` carrying its lowered body,
+//! and `\cite` becomes `Inline::Citation` plus one `Cites` relation per key.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use notedown_ir::{
-    AttributePair, Attributes, Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, NodeId, SemanticStatus, SourceKind, SourceRef, TableCell,
-    TableRow,
+    AttributePair, Attributes, Block, DocumentGraph, DocumentId, DocumentMetadata, Inline, LinkId, ListItem, LossMarker, NodeId, Relation,
+    RelationEndpoint, RelationKind, SemanticStatus, SourceKind, SourceRef, TableCell, TableRow,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_tex::{
@@ -55,17 +66,34 @@ pub fn import_tex(path: impl AsRef<Path>) -> Result<DocumentGraph, FormatError> 
 /// Import TeX source text into `notedown-ir`.
 pub fn import_tex_bytes(label: &str, text: &str) -> Result<DocumentGraph, FormatError> {
     let root = parse_tex(label, text)?;
-    let mut lowerer = TexLowerer { graph: DocumentGraph::new(document_id_for(label)), source: text };
+    let mut lowerer = TexLowerer { graph: DocumentGraph::new(document_id_for(label)), source: text, state: TexDocState::default() };
     let mut sink = Sink::document();
     lowerer.lower_root(&root.items, 0, text.len(), &mut sink);
     sink.flush(&mut lowerer.graph);
+
+    for label in resolve_pending_references(&mut lowerer.graph, &lowerer.state.labels) {
+        lowerer.loss(
+            "import.tex.unresolved_reference",
+            format!("reference target has no semantic node identity: {label}"),
+            SemanticStatus::Unresolved,
+        );
+    }
+    if lowerer.state.title.is_some() || !lowerer.state.authors.is_empty() {
+        let state = &mut lowerer.state;
+        lowerer.graph.set_metadata(DocumentMetadata {
+            title: state.title.take(),
+            language: None,
+            authors: std::mem::take(&mut state.authors),
+            tags: Vec::new(),
+        });
+    }
 
     if lowerer.graph.blocks.is_empty() {
         lowerer.loss("import.tex.empty_document", "TeX source produced no supported semantic blocks", SemanticStatus::Partial);
     }
     lowerer.loss(
         "import.tex.partial_coverage",
-        "TeX import preserves sections, paragraphs, inline styles, lists, simple tabular tables, math source, and verbatim code, but not macros, packages, floats, or arbitrary layout semantics",
+        "TeX import preserves metadata, numbered sections, paragraphs, inline styles, lists, simple tabular tables, math source, verbatim code, label anchors, references, footnotes, and citations, but not macros, packages, floats, or arbitrary layout semantics",
         SemanticStatus::Partial,
     );
     register_image_assets(&mut lowerer.graph);
@@ -130,6 +158,38 @@ impl Sink {
 struct TexLowerer<'a> {
     graph: DocumentGraph,
     source: &'a str,
+    state: TexDocState,
+}
+
+/// Document-level lowering state shared by the whole TeX import: metadata,
+/// section, equation, and footnote counters, label anchors, and cited keys.
+#[derive(Default)]
+struct TexDocState {
+    title: Option<String>,
+    authors: Vec<String>,
+    counters: [u32; 4],
+    equation: u32,
+    footnote: u32,
+    last_block: Option<NodeId>,
+    last_number: Option<String>,
+    labels: HashMap<String, LabelInfo>,
+    cited: HashSet<String>,
+    next_link: u64,
+}
+
+/// Anchor a `\label` registers: the bound block and the computed number when
+/// the target carries one.
+#[derive(Clone)]
+struct LabelInfo {
+    node: Option<NodeId>,
+    number: Option<String>,
+}
+
+impl TexDocState {
+    fn next_link_id(&mut self) -> LinkId {
+        self.next_link += 1;
+        LinkId(self.next_link)
+    }
 }
 
 impl<'a> TexLowerer<'a> {
@@ -144,6 +204,7 @@ impl<'a> TexLowerer<'a> {
     fn push_block(&mut self, sink: &mut Sink, block: Block) -> NodeId {
         sink.flush(&mut self.graph);
         let id = self.graph.push_block(block);
+        self.state.last_block = Some(id);
         if sink.item_mode {
             sink.children.push(id);
         }
@@ -168,6 +229,7 @@ impl<'a> TexLowerer<'a> {
     fn lower_root(&mut self, items: &[TexItem], region_start: usize, region_end: usize, sink: &mut Sink) {
         let mut cursor = region_start;
         let mut skip_until = 0usize;
+        let mut after_comment = false;
         for item in items {
             let Some((start, end)) = item_span(item) else {
                 continue;
@@ -175,7 +237,10 @@ impl<'a> TexLowerer<'a> {
             if start < skip_until {
                 continue;
             }
-            self.lower_dropped_regions(cursor, start, sink);
+            if !self.lower_gap(cursor, start, sink, after_comment) {
+                self.lower_dropped_regions(cursor, start, sink);
+            }
+            after_comment = matches!(item, TexItem::Comment { .. });
             if let TexItem::Command(command) = item {
                 if command_name(self.raw(command.span.start, command.span.end)) == "verb" {
                     skip_until = command.span.end + self.verb_consumed_len(command.span.end);
@@ -193,15 +258,15 @@ impl<'a> TexLowerer<'a> {
             // Comments carry no document semantics, so dropping them is intended.
             TexItem::Comment { .. } => {}
             TexItem::Group(group) => {
-                let inlines = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
+                let inlines = self.collect_inlines(&group.content.items, group.span.start, group.span.end, false);
                 sink.inlines.extend(inlines);
             }
             TexItem::Superscript(superscript) => {
-                let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end);
+                let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end, true);
                 sink.inlines.push(Inline::Styled { style: "superscript".into(), children });
             }
             TexItem::Subscript(subscript) => {
-                let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end);
+                let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end, true);
                 sink.inlines.push(Inline::Styled { style: "subscript".into(), children });
             }
             TexItem::Math(math) => {
@@ -239,7 +304,7 @@ impl<'a> TexLowerer<'a> {
                 SemanticStatus::Unsupported,
             );
         }
-        let children = self.collect_inlines(&pair.content.items, pair.span.start, pair.span.end);
+        let children = self.collect_inlines(&pair.content.items, pair.span.start, pair.span.end, true);
         Inline::Attributed {
             attributes: Attributes {
                 id: None,
@@ -297,22 +362,39 @@ impl<'a> TexLowerer<'a> {
         let raw = self.raw(command.span.start, command.span.end);
         let name = command_name(raw);
         if let Some(level) = section_level(&name) {
+            let mut title = self
+                .required_argument(command)
+                .map(|fragment| self.lower_inline_fragment(fragment))
+                .unwrap_or_default();
             if command.starred {
+                self.state.last_number = None;
                 self.loss(
                     "import.tex.starred_command",
                     format!("`\\{name}*` is unnumbered, but the IR section kind has no numbering state"),
                     SemanticStatus::Partial,
                 );
             }
-            let title = self
-                .required_argument(command)
-                .map(|fragment| self.lower_inline_fragment(fragment))
-                .unwrap_or_default();
             if title.is_empty() {
                 self.loss(
                     "import.tex.section_without_title",
                     format!("section command has no readable title: {}", raw.trim()),
                     SemanticStatus::Partial,
+                );
+            }
+            if !command.starred {
+                let number = self.next_section_number(level);
+                self.state.last_number = Some(number.clone());
+                title.insert(0, Inline::Text { text: " ".into() });
+                title.insert(
+                    0,
+                    Inline::Attributed {
+                        attributes: Attributes {
+                            id: None,
+                            classes: vec!["tex-section-number".into()],
+                            pairs: vec![AttributePair { key: "data-tex-number".into(), value: number.clone() }],
+                        },
+                        children: vec![Inline::Text { text: number }],
+                    },
                 );
             }
             self.push_block(sink, Block::Section { level, title, children: Vec::new() });
@@ -323,6 +405,7 @@ impl<'a> TexLowerer<'a> {
             "verb" => self.lower_verb(command, sink),
             _ => match self.inline_from_command(command) {
                 InlineOutcome::Inline(inline) => sink.inlines.push(inline),
+                InlineOutcome::Inlines(list) => sink.inlines.extend(list),
                 InlineOutcome::Dropped => {}
                 InlineOutcome::Unknown => {
                     let kind = if name.is_empty() { "tex.unknown".to_string() } else { format!("tex.{name}") };
@@ -390,16 +473,71 @@ impl<'a> TexLowerer<'a> {
             );
         }
         if environment.name == "math" {
-            let inlines = self.collect_inlines(&environment.content.items, environment.span.start, environment.span.end);
+            let inlines = self.collect_inlines(&environment.content.items, environment.span.start, environment.span.end, true);
             sink.inlines.extend(inlines);
             return;
         }
-        self.push_spanned_block(
+        let node = self.push_spanned_block(
             sink,
             Block::Math { content: raw.trim().to_string(), language: Some("latex".into()) },
             environment.span.start,
             environment.span.end,
         );
+        self.register_math_labels(raw, &environment.name, environment.starred, node);
+    }
+
+    /// Increment the section counter for `level`, reset deeper levels, and
+    /// format the dotted number (`1`, `1.2`, `1.2.3`).
+    fn next_section_number(&mut self, level: u8) -> String {
+        let level = (level as usize).min(self.state.counters.len() - 1);
+        self.state.counters[level] += 1;
+        for deeper in (level + 1)..self.state.counters.len() {
+            self.state.counters[deeper] = 0;
+        }
+        (1..=level).map(|current| self.state.counters[current].to_string()).collect::<Vec<_>>().join(".")
+    }
+
+    /// Register the `\label` anchors carried by a math environment.
+    ///
+    /// The environment body stays one verbatim payload, so its labels can only
+    /// be found by scanning the authored source at the environment's own
+    /// nesting depth. Each numbered row consumes one equation counter slot, a
+    /// row carrying `\notag` or `\nonumber` consumes none, and `\tag` replaces
+    /// the displayed number.
+    fn register_math_labels(&mut self, raw: &str, name: &str, starred: bool, node: NodeId) {
+        let numbered = math_environment_is_numbered(name, starred);
+        let (rows, tag) = scan_math_body(raw);
+        let mut first_number: Option<String> = None;
+        for row in rows {
+            if raw[row.start..row.end].trim().is_empty() && row.labels.is_empty() && !row.notag {
+                continue;
+            }
+            let number = if numbered && !row.notag {
+                self.state.equation += 1;
+                let display = tag.clone().unwrap_or_else(|| self.state.equation.to_string());
+                if first_number.is_none() {
+                    first_number = Some(display.clone());
+                }
+                Some(display)
+            }
+            else {
+                None
+            };
+            for label in row.labels {
+                if label.is_empty() {
+                    continue;
+                }
+                self.state.labels.insert(label.clone(), LabelInfo { node: Some(node), number: number.clone() });
+                let id = self.state.next_link_id();
+                self.graph.push_relation(Relation {
+                    id,
+                    kind: RelationKind::References,
+                    source: RelationEndpoint::Unresolved { label },
+                    target: RelationEndpoint::Node(node),
+                });
+            }
+        }
+        self.state.last_number = first_number;
     }
 
     /// Compare the authored `\begin{...}` and `\end{...}` names of an environment.
@@ -464,13 +602,77 @@ impl<'a> TexLowerer<'a> {
                 };
                 InlineOutcome::Inline(styled(style, children))
             }
+            "title" => {
+                let text = self.argument_text(command);
+                if text.is_empty() {
+                    self.loss("import.tex.empty_title", "title command has no readable text", SemanticStatus::Partial);
+                }
+                else {
+                    self.state.title = Some(text);
+                }
+                InlineOutcome::Dropped
+            }
+            "author" => {
+                let text = self.argument_text(command);
+                if text.is_empty() {
+                    self.loss("import.tex.empty_author", "author command has no readable name", SemanticStatus::Partial);
+                }
+                else {
+                    self.state.authors.push(text);
+                }
+                InlineOutcome::Dropped
+            }
+            "date" => {
+                self.loss(
+                    "import.tex.metadata_date",
+                    "`\\date` content is dropped because `DocumentMetadata` has no date field",
+                    SemanticStatus::Partial,
+                );
+                InlineOutcome::Dropped
+            }
+            "maketitle" => {
+                self.loss(
+                    "import.tex.maketitle_dropped",
+                    "`\\maketitle` is dropped because title and author are carried as document metadata",
+                    SemanticStatus::Partial,
+                );
+                InlineOutcome::Dropped
+            }
+            "footnote" => {
+                let body = self
+                    .required_argument(command)
+                    .map(|fragment| self.lower_inline_fragment(fragment))
+                    .unwrap_or_default();
+                self.state.footnote += 1;
+                let label = self.state.footnote.to_string();
+                self.loss(
+                    "import.tex.footnote_body",
+                    format!("footnote {label} body is carried on the reference inline because the IR has no footnote collection block"),
+                    SemanticStatus::Partial,
+                );
+                InlineOutcome::Inline(Inline::Note { label, display: Some(body) })
+            }
             "cite" => {
-                let key = self.required_argument(command).unwrap_or_default().trim().to_string();
-                if key.is_empty() {
+                let authored = self.required_argument(command).unwrap_or_default().trim().to_string();
+                let keys: Vec<String> = authored.split(',').map(|key| key.trim().to_string()).filter(|key| !key.is_empty()).collect();
+                if keys.is_empty() {
                     self.loss("import.tex.empty_citation", "citation command has no key", SemanticStatus::Partial);
                     return InlineOutcome::Dropped;
                 }
-                InlineOutcome::Inline(Inline::Citation { key, display: None })
+                let mut inlines = Vec::new();
+                for key in keys {
+                    if self.state.cited.insert(key.clone()) {
+                        let id = self.state.next_link_id();
+                        self.graph.push_relation(Relation {
+                            id,
+                            kind: RelationKind::Cites,
+                            source: RelationEndpoint::Document(self.graph.id),
+                            target: RelationEndpoint::Unresolved { label: key.clone() },
+                        });
+                    }
+                    inlines.push(Inline::Citation { key, display: None });
+                }
+                InlineOutcome::Inlines(inlines)
             }
             "includegraphics" => {
                 let source = self.required_argument(command).unwrap_or_default().trim().to_string();
@@ -480,22 +682,58 @@ impl<'a> TexLowerer<'a> {
                 }
                 InlineOutcome::Inline(Inline::Image { source, alt: Vec::new(), title: None, asset: None })
             }
-            "ref" => {
+            "ref" | "eqref" => {
                 let label = self.required_argument(command).unwrap_or_default().trim().to_string();
-                self.loss(
-                    "import.tex.unresolved_reference",
-                    format!("reference target has no semantic node identity: {label}"),
-                    SemanticStatus::Unresolved,
-                );
-                InlineOutcome::Dropped
+                let eqref = name == "eqref";
+                let resolved = self.state.labels.get(&label).cloned();
+                let target = match resolved.as_ref().and_then(|info| info.node) {
+                    Some(node) => RelationEndpoint::Node(node),
+                    None => RelationEndpoint::Unresolved { label: label.clone() },
+                };
+                let text = match resolved.as_ref().and_then(|info| info.number.clone()) {
+                    Some(number) if eqref => format!("({number})"),
+                    Some(number) => number,
+                    None if eqref => format!("({label})"),
+                    None => label.clone(),
+                };
+                InlineOutcome::Inline(Inline::Attributed {
+                    attributes: Attributes {
+                        id: None,
+                        classes: vec!["tex-ref".into()],
+                        pairs: vec![
+                            AttributePair { key: "data-tex-ref-kind".into(), value: if eqref { "eqref".into() } else { "ref".into() } },
+                            AttributePair { key: "data-tex-ref-label".into(), value: label },
+                        ],
+                    },
+                    children: vec![Inline::Link { target, display: vec![Inline::Text { text }], title: None }],
+                })
             }
             "label" => {
                 let label = self.required_argument(command).unwrap_or_default().trim().to_string();
-                self.loss(
-                    "import.tex.label_anchor",
-                    format!("label anchor is not representable as an inline semantic: {label}"),
-                    SemanticStatus::Partial,
-                );
+                if label.is_empty() {
+                    self.loss("import.tex.label_anchor", "label command has no readable name", SemanticStatus::Partial);
+                    return InlineOutcome::Dropped;
+                }
+                match self.state.last_block {
+                    Some(node) => {
+                        let number = self.state.last_number.clone();
+                        self.state.labels.insert(label.clone(), LabelInfo { node: Some(node), number });
+                        let id = self.state.next_link_id();
+                        self.graph.push_relation(Relation {
+                            id,
+                            kind: RelationKind::References,
+                            source: RelationEndpoint::Unresolved { label },
+                            target: RelationEndpoint::Node(node),
+                        });
+                    }
+                    None => {
+                        self.loss(
+                            "import.tex.label_anchor",
+                            format!("label anchor has no preceding block to bind: {label}"),
+                            SemanticStatus::Partial,
+                        );
+                    }
+                }
                 InlineOutcome::Dropped
             }
             // Text-mode spacing commands carry a visible typographic hint the IR
@@ -580,6 +818,18 @@ impl<'a> TexLowerer<'a> {
             TexArgument::Required(root) => Some(self.argument_fragment(root)),
             TexArgument::Optional(_) => None,
         })
+    }
+
+    /// Flattened plain text of the first required argument.
+    fn argument_text(&mut self, command: &TexCommand) -> String {
+        self.required_argument(command)
+            .map(|fragment| self.lower_inline_fragment(fragment))
+            .unwrap_or_default()
+            .iter()
+            .map(Inline::plain_text)
+            .collect::<String>()
+            .trim()
+            .to_string()
     }
 
     fn argument_fragment(&self, root: &TexRoot) -> &'a str {
@@ -688,6 +938,59 @@ impl<'a> TexLowerer<'a> {
         self.push_block(sink, Block::Table { caption: None, rows });
     }
 
+    /// Emit the authored whitespace that sits between two lowered items.
+    ///
+    /// `oak-tex` ends every text token at whitespace, so the space between two
+    /// words belongs to no item span. A blank line inside such a gap ends the
+    /// current paragraph; any other whitespace run collapses to a single
+    /// space, the collapsing TeX itself applies to its input. Whitespace the
+    /// terminating comment already consumed is gobbled first. Returns whether
+    /// the gap was pure whitespace, so the caller can fall back to recovering
+    /// dropped environments for content gaps.
+    fn lower_gap(&mut self, start: usize, end: usize, sink: &mut Sink, after_comment: bool) -> bool {
+        if start >= end {
+            return false;
+        }
+        let gap = &self.source[start..end];
+        if !gap.chars().all(char::is_whitespace) {
+            return false;
+        }
+        let gap = gobble_after_comment(gap, after_comment);
+        if gap.is_empty() {
+            return true;
+        }
+        if split_paragraphs(gap).len() > 1 {
+            sink.flush(&mut self.graph);
+        }
+        else {
+            push_text_inlines(&mut sink.inlines, " ");
+        }
+        true
+    }
+
+    /// Emit the single space a whitespace-only gap carries in inline content.
+    ///
+    /// Inline text has no paragraph blocks, so every whitespace run between
+    /// items collapses to one space regardless of newlines. Math mode ignores
+    /// authored whitespace entirely, matching TeX.
+    fn push_gap_space(&mut self, start: usize, end: usize, inlines: &mut Vec<Inline>, after_comment: bool, math: bool) -> bool {
+        if start >= end {
+            return false;
+        }
+        let gap = &self.source[start..end];
+        if !gap.chars().all(char::is_whitespace) {
+            return false;
+        }
+        if math {
+            return true;
+        }
+        let gap = gobble_after_comment(gap, after_comment);
+        if !gap.is_empty() {
+            push_text_inlines(inlines, " ");
+        }
+        true
+    }
+
     fn lower_dropped_regions(&mut self, start: usize, end: usize, sink: &mut Sink) {
         if start >= end {
             return;
@@ -727,9 +1030,14 @@ impl<'a> TexLowerer<'a> {
             self.loss("import.tex.fragment_parse_failed", "nested TeX fragment could not be parsed", SemanticStatus::Partial);
             return;
         };
-        let mut inner = TexLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: fragment };
+        let mut inner = TexLowerer {
+            graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))),
+            source: fragment,
+            state: std::mem::take(&mut self.state),
+        };
         inner.lower_root(&root.items, 0, fragment.len(), sink);
         self.graph = inner.graph;
+        self.state = inner.state;
     }
 
     fn lower_inline_fragment(&mut self, fragment: &str) -> Vec<Inline> {
@@ -737,17 +1045,23 @@ impl<'a> TexLowerer<'a> {
             self.loss("import.tex.fragment_parse_failed", "inline TeX fragment could not be parsed", SemanticStatus::Partial);
             return Vec::new();
         };
-        let mut inner = TexLowerer { graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))), source: fragment };
-        let mut inlines = inner.collect_inlines(&root.items, 0, fragment.len());
+        let mut inner = TexLowerer {
+            graph: std::mem::replace(&mut self.graph, DocumentGraph::new(DocumentId(0))),
+            source: fragment,
+            state: std::mem::take(&mut self.state),
+        };
+        let mut inlines = inner.collect_inlines(&root.items, 0, fragment.len(), false);
         trim_inlines(&mut inlines);
         self.graph = inner.graph;
+        self.state = inner.state;
         inlines
     }
 
-    fn collect_inlines(&mut self, items: &[TexItem], region_start: usize, region_end: usize) -> Vec<Inline> {
+    fn collect_inlines(&mut self, items: &[TexItem], region_start: usize, region_end: usize, math: bool) -> Vec<Inline> {
         let mut inlines = Vec::new();
         let mut cursor = region_start;
         let mut skip_until = 0usize;
+        let mut after_comment = false;
         for item in items {
             let Some((start, end)) = item_span(item) else {
                 continue;
@@ -755,21 +1069,24 @@ impl<'a> TexLowerer<'a> {
             if start < skip_until {
                 continue;
             }
-            self.record_dropped_regions_loss(cursor, start);
+            if !self.push_gap_space(cursor, start, &mut inlines, after_comment, math) {
+                self.record_dropped_regions_loss(cursor, start);
+            }
+            after_comment = matches!(item, TexItem::Comment { .. });
             match item {
                 TexItem::Text { content, .. } => push_text_inlines(&mut inlines, content),
                 // Comments carry no document semantics, so dropping them is intended.
                 TexItem::Comment { .. } => {}
                 TexItem::Group(group) => {
-                    let nested = self.collect_inlines(&group.content.items, group.span.start, group.span.end);
+                    let nested = self.collect_inlines(&group.content.items, group.span.start, group.span.end, math);
                     inlines.extend(nested);
                 }
                 TexItem::Superscript(superscript) => {
-                    let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end);
+                    let children = self.collect_inlines(&superscript.content.items, superscript.span.start, superscript.span.end, true);
                     inlines.push(Inline::Styled { style: "superscript".into(), children });
                 }
                 TexItem::Subscript(subscript) => {
-                    let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end);
+                    let children = self.collect_inlines(&subscript.content.items, subscript.span.start, subscript.span.end, true);
                     inlines.push(Inline::Styled { style: "subscript".into(), children });
                 }
                 TexItem::Math(math) => {
@@ -790,6 +1107,7 @@ impl<'a> TexLowerer<'a> {
                     }
                     match self.inline_from_command(command) {
                         InlineOutcome::Inline(inline) => inlines.push(inline),
+                        InlineOutcome::Inlines(list) => inlines.extend(list),
                         InlineOutcome::Dropped => {}
                         InlineOutcome::Unknown => self.loss(
                             "import.tex.unsupported_command",
@@ -949,6 +1267,8 @@ fn is_macro_definition(name: &str) -> bool {
 /// Result of mapping a TeX command to an inline semantic.
 enum InlineOutcome {
     Inline(Inline),
+    /// The command was understood and produces more than one inline node.
+    Inlines(Vec<Inline>),
     /// The command was understood and intentionally produces no inline node.
     Dropped,
     /// The command has no inline semantic mapping.
@@ -988,6 +1308,176 @@ fn math_source_strip<'a>(raw: &'a str, delimiter: MathDelimiter) -> Option<&'a s
 /// `cases`, matrix family, `math`, `displaymath`) never number their content.
 fn math_environment_is_numbered(name: &str, starred: bool) -> bool {
     !starred && matches!(name, "equation" | "align" | "gather" | "multline" | "eqnarray" | "flalign" | "alignat")
+}
+
+/// Row segment of a math environment body at the environment's own depth.
+struct MathRow {
+    start: usize,
+    end: usize,
+    labels: Vec<String>,
+    notag: bool,
+}
+
+/// Scan the authored environment source for row breaks, labels, and a `\tag`
+/// override, tracking `\begin`/`\end` depth so nested environment bodies do
+/// not contribute rows or labels to the outer environment.
+fn scan_math_body(raw: &str) -> (Vec<MathRow>, Option<String>) {
+    let bytes = raw.as_bytes();
+    let mut rows: Vec<MathRow> = Vec::new();
+    let mut tag: Option<String> = None;
+    let mut depth = 0usize;
+    let mut row_start = 0usize;
+    let mut row_labels: Vec<String> = Vec::new();
+    let mut row_notag = false;
+    let mut terminated = false;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        let rest = &raw[index..];
+        if let Some(after) = rest.strip_prefix("\\begin{") {
+            depth += 1;
+            index += "\\begin{".len() + after.find('}').map_or(after.len(), |closing| closing + 1);
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix("\\end{") {
+            if depth == 1 {
+                rows.push(MathRow { start: row_start, end: index, labels: std::mem::take(&mut row_labels), notag: row_notag });
+                row_notag = false;
+                terminated = true;
+            }
+            depth = depth.saturating_sub(1);
+            index += "\\end{".len() + after.find('}').map_or(after.len(), |closing| closing + 1);
+            continue;
+        }
+        if rest.starts_with("\\\\") {
+            if depth == 1 {
+                rows.push(MathRow { start: row_start, end: index, labels: std::mem::take(&mut row_labels), notag: row_notag });
+                row_notag = false;
+                row_start = index + 2;
+            }
+            index += 2;
+            continue;
+        }
+        if depth == 1 {
+            if let Some(after) = rest.strip_prefix("\\label{") {
+                if let Some(closing) = after.find('}') {
+                    row_labels.push(after[..closing].trim().to_string());
+                    index += "\\label{".len() + closing + 1;
+                    continue;
+                }
+            }
+            if let Some(after) = rest.strip_prefix("\\tag") {
+                let mut consumed = "\\tag".len();
+                let mut tail = after;
+                if let Some(starred) = tail.strip_prefix('*') {
+                    consumed += 1;
+                    tail = starred;
+                }
+                let spaces = tail.len() - tail.trim_start().len();
+                consumed += spaces;
+                tail = tail.trim_start();
+                if let Some(inner) = tail.strip_prefix('{') {
+                    if let Some(closing) = inner.find('}') {
+                        tag = Some(inner[..closing].trim().to_string());
+                        index += consumed + closing + 1;
+                        continue;
+                    }
+                }
+            }
+            if rest.starts_with("\\notag") || rest.starts_with("\\nonumber") {
+                row_notag = true;
+                index += if rest.starts_with("\\nonumber") { "\\nonumber".len() } else { "\\notag".len() };
+                continue;
+            }
+        }
+        index += 1;
+    }
+    if !terminated {
+        rows.push(MathRow { start: row_start, end: bytes.len(), labels: row_labels, notag: row_notag });
+    }
+    (rows, tag)
+}
+
+/// Rewrite forward references once every label anchor is known and return the
+/// labels that stayed unresolved.
+fn resolve_pending_references(graph: &mut DocumentGraph, labels: &HashMap<String, LabelInfo>) -> Vec<String> {
+    let mut unresolved = Vec::new();
+    for node in &mut graph.blocks {
+        match &mut node.block {
+            Block::Section { title, .. } => fix_pending_refs(title, labels, &mut unresolved),
+            Block::Paragraph { content } | Block::Quote { content } => fix_pending_refs(content, labels, &mut unresolved),
+            Block::List { items, .. } => {
+                for item in items {
+                    fix_pending_refs(&mut item.content, labels, &mut unresolved);
+                }
+            }
+            Block::Table { rows, .. } => {
+                for row in rows {
+                    for cell in &mut row.cells {
+                        fix_pending_refs(&mut cell.content, labels, &mut unresolved);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    unresolved.sort();
+    unresolved.dedup();
+    unresolved
+}
+
+/// Resolve the `tex-ref` markers of one inline tree in place.
+fn fix_pending_refs(inlines: &mut Vec<Inline>, labels: &HashMap<String, LabelInfo>, unresolved: &mut Vec<String>) {
+    for inline in inlines.iter_mut() {
+        match inline {
+            Inline::Attributed { attributes, children } if attributes.classes.iter().any(|class| class == "tex-ref") => {
+                let Some(label) = attributes.pairs.iter().find(|pair| pair.key == "data-tex-ref-label").map(|pair| pair.value.clone()) else {
+                    continue;
+                };
+                let Some(Inline::Link { target, display, .. }) = children.first_mut() else {
+                    continue;
+                };
+                if !matches!(target, RelationEndpoint::Unresolved { .. }) {
+                    continue;
+                }
+                match labels.get(&label) {
+                    Some(info) => {
+                        if let Some(node) = info.node {
+                            *target = RelationEndpoint::Node(node);
+                        }
+                        if let Some(number) = &info.number {
+                            let eqref = attributes.pairs.iter().any(|pair| pair.key == "data-tex-ref-kind" && pair.value == "eqref");
+                            *display = vec![Inline::Text { text: if eqref { format!("({number})") } else { number.clone() } }];
+                        }
+                    }
+                    None => unresolved.push(label),
+                }
+            }
+            Inline::Attributed { children, .. } | Inline::Styled { children, .. } => fix_pending_refs(children, labels, unresolved),
+            Inline::Link { display, .. } => fix_pending_refs(display, labels, unresolved),
+            Inline::Image { alt, .. } => fix_pending_refs(alt, labels, unresolved),
+            Inline::Note { display, .. } | Inline::Citation { display, .. } => {
+                if let Some(display) = display {
+                    fix_pending_refs(display, labels, unresolved);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Drop the whitespace a TeX comment consumes: the newline that terminates
+/// the comment and the spaces or tabs opening the following line.
+fn gobble_after_comment(gap: &str, after_comment: bool) -> &str {
+    if !after_comment {
+        return gap;
+    }
+    let rest = gap.trim_start_matches([' ', '\t', '\r']);
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    rest.trim_start_matches([' ', '\t', '\r'])
 }
 
 fn split_paragraphs(text: &str) -> Vec<&str> {

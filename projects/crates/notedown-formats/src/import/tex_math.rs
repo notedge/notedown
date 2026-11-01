@@ -42,7 +42,7 @@ fn math_body_source(math: &TexMath, source: &str) -> String {
 /// Lower a standalone TeX formula source into the document math semantics.
 ///
 /// This is the public entry for hosts that own a formula string without a
-/// surrounding document, such as WeTeX's `measure` and `render` APIs. Syntax
+/// surrounding document, such as WaTeX's `measure` and `render` APIs. Syntax
 /// stays in Oak: the import layer parses the body and lowers its AST, and the
 /// host consumes only [`MathFormula::expression`].
 pub fn lower_tex_formula_source(source: &str, display: MathDisplay) -> MathFormula {

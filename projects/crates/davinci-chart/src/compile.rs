@@ -368,9 +368,13 @@ fn train_channel(
                             format!("the `{}` channel has one distinct value; its linear domain was expanded", channel.as_str()),
                         ));
                     }
-                    let resolved = if zero || nice {
+                    // Vega semantics: a bar or area measures from the origin,
+                    // so its continuous position domain includes zero unless
+                    // the document opts out with `zero: false`.
+                    let effective_zero = zero.unwrap_or_else(|| mark_anchors_at_zero(mark, channel));
+                    let resolved = if effective_zero || nice {
                         let mut bounds = domain.or_else(|| inferred_domain(&values)).unwrap_or((0.0, 1.0));
-                        if zero {
+                        if effective_zero {
                             bounds = (bounds.0.min(0.0), bounds.1.max(0.0));
                         }
                         if nice {
@@ -491,6 +495,10 @@ fn categories(rows: &[Row], channel: Channel) -> Vec<String> {
         }
     }
     categories
+}
+
+fn mark_anchors_at_zero(mark: Mark, channel: Channel) -> bool {
+    matches!(mark, Mark::Bar | Mark::Area) && matches!(channel, Channel::X | Channel::Y)
 }
 
 fn collapsed(values: &[f64]) -> bool {

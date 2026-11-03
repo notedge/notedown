@@ -449,7 +449,7 @@ fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {
             if zero == Some(true) && domain.is_some() {
                 return Err(fail(codes::INVALID_SCALE, &format!("{path}.zero"), "`zero` cannot widen an explicit `domain`"));
             }
-            Ok(ScaleSpec::Linear { domain, zero: zero.unwrap_or(false), nice: nice.unwrap_or(false) })
+            Ok(ScaleSpec::Linear { domain, zero, nice: nice.unwrap_or(false) })
         }
         "log" => {
             refuse_non_linear_options(path, zero, nice)?;

@@ -72,7 +72,9 @@ fn count_collapses_rows_and_keeps_bar_geometry() {
     let linear = plan.scale(Channel::Y).and_then(Scale::linear).expect("y linear scale");
 
     assert_eq!(plan.marks.len(), 2, "three rows collapse into two groups");
-    assert_eq!(linear.domain, (1.0, 2.0));
+    // Before the zero anchor the inferred domain was (1.0, 2.0) and the
+    // group with count 1 rendered `height="0"`, which is invisible.
+    assert_eq!(linear.domain, (0.0, 2.0));
 
     let heights: Vec<f64> = plan
         .marks
@@ -83,7 +85,7 @@ fn count_collapses_rows_and_keeps_bar_geometry() {
         })
         .collect();
     assert!(approx(heights[0], plan.plot.height), "count 2 maps to the top of the domain");
-    assert!(approx(heights[1], 0.0), "count 1 maps to the baseline");
+    assert!(approx(heights[1], plan.plot.height / 2.0), "count 1 keeps half the plot height instead of collapsing to zero");
 }
 
 #[test]
@@ -441,34 +443,44 @@ fn opacity_channel_sets_the_mark_style_and_needs_a_numeric_field() {
 }
 
 #[test]
-fn the_zero_option_widens_an_inferred_domain_and_moves_the_baseline() {
+fn a_bar_anchors_its_inferred_domain_at_zero_and_can_opt_out() {
     let plain = compile(&bar_spec(), &bar_data(), &options()).expect("default bar chart");
-    let zeroed = compile(
-        &bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: true, nice: false }),
+    let clipped = compile(
+        &bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: Some(false), nice: false }),
         &bar_data(),
         &options(),
     )
-    .expect("zeroed bar chart");
+    .expect("clipped bar chart");
 
     let plain_y = plain.scale(Channel::Y).and_then(Scale::linear).expect("default y scale");
-    let zero_y = zeroed.scale(Channel::Y).and_then(Scale::linear).expect("zeroed y scale");
-    assert_eq!(plain_y.domain, (5.0, 20.0), "the default domain stays the observed extremes");
-    assert_eq!(zero_y.domain, (0.0, 20.0), "`zero` pulls only the lower bound to the origin");
-    assert_eq!(zero_y.range, plain_y.range, "only the domain changes");
-    assert_eq!(zeroed.marks.len(), plain.marks.len(), "`zero` adds no mark instances");
+    let clipped_y = clipped.scale(Channel::Y).and_then(Scale::linear).expect("clipped y scale");
+    assert_eq!(plain_y.domain, (0.0, 20.0), "a bar measures from the origin by default");
+    assert_eq!(clipped_y.domain, (5.0, 20.0), "`zero: false` restores the observed extremes");
+    assert_eq!(clipped_y.range, plain_y.range, "only the domain changes");
+    assert_eq!(clipped.marks.len(), plain.marks.len(), "the default adds no mark instances");
+
+    // Regression: data `[60, 120]` rendered the `60` bar with height 0 before
+    // the zero anchor, because the inferred domain started at the minimum.
+    for instance in &plain.marks {
+        let MarkGeometry::Rect(rect) = &instance.geometry
+        else {
+            panic!("a bar must compile to a rectangle");
+        };
+        assert!(rect.height > 0.0, "every bar keeps a visible height above the zero baseline: {rect:?}");
+    }
+
+    let MarkGeometry::Rect(clipped_smallest) = &clipped.marks[2].geometry
+    else {
+        panic!("a bar must compile to a rectangle");
+    };
+    assert!(approx(clipped_smallest.height, 0.0), "opting out of zero clips the minimum bar, which is the documented trade-off");
 
     let MarkGeometry::Rect(plain_smallest) = &plain.marks[2].geometry
     else {
         panic!("a bar must compile to a rectangle");
     };
-    assert!(approx(plain_smallest.height, 0.0), "the minimum value has no height above the observed baseline");
-
-    let MarkGeometry::Rect(zero_smallest) = &zeroed.marks[2].geometry
-    else {
-        panic!("a bar must compile to a rectangle");
-    };
-    assert!(approx(zero_smallest.y + zero_smallest.height, zero_y.map(0.0)), "the bar starts at the zero baseline");
-    assert!(approx(zero_smallest.height, (zero_y.map(5.0) - zero_y.map(0.0)).abs()));
+    assert!(plain_smallest.height > 0.0, "the zero anchor keeps the minimum bar visible");
+    assert!(approx(plain_smallest.y + plain_smallest.height, plain_y.map(0.0)), "the bar starts at the zero baseline");
 }
 
 #[test]
@@ -477,15 +489,15 @@ fn the_nice_option_rounds_the_domain_outward_to_the_tick_grid() {
         column("category", FieldKind::Nominal, texts(&["A", "B"])),
         column("value", FieldKind::Quantitative, numbers(&[3.0, 97.0])),
     ]);
-    let spec = bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: false, nice: true });
+    let spec = bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: None, nice: true });
 
     let plan = compile(&spec, &data, &options()).expect("nice bar chart");
     let y_scale = plan.scale(Channel::Y).and_then(Scale::linear).expect("y scale");
-    assert_eq!(y_scale.domain, (0.0, 100.0), "the domain rounds outward to the 50-step grid");
+    assert_eq!(y_scale.domain, (0.0, 100.0), "the zero-anchored domain rounds outward to the 50-step grid");
 
     let default_plan = compile(&bar_spec(), &data, &options()).expect("default bar chart");
     let default_y = default_plan.scale(Channel::Y).and_then(Scale::linear).expect("default y scale");
-    assert_eq!(default_y.domain, (3.0, 97.0), "`nice` is opt-in, the default keeps observed extremes");
+    assert_eq!(default_y.domain, (0.0, 97.0), "`nice` is opt-in, the default keeps the zero anchor without rounding");
 
     let y_axis = plan.axes.iter().find(|axis| axis.channel == Channel::Y).expect("y axis");
     assert_eq!(y_axis.ticks[0].label, "0", "the first tick lands on the nice lower bound");

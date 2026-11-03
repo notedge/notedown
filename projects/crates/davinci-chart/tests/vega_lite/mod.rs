@@ -197,20 +197,27 @@ fn element_ids(svg: &str) -> Vec<String> {
 
 #[test]
 fn zero_and_nice_are_opt_in_scale_options() {
-    let base = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
-    let explicit_defaults = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":false,"nice":false}}}}"#;
-    let zeroed = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":true}}}}"#;
+    let line = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"line","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
+    let line_explicit_defaults = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"line","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":false,"nice":false}}}}"#;
+    let bar = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
+    let clipped_bar = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":false}}}}"#;
     let niced = r#"{"data":{"values":[{"c":"A","v":3},{"c":"B","v":97}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","nice":true}}}}"#;
 
-    let base_svg = vega_lite::lower(base).expect("base chart").to_svg().expect("base svg");
-    let explicit_svg = vega_lite::lower(explicit_defaults).expect("explicit defaults").to_svg().expect("explicit svg");
-    assert_eq!(base_svg, explicit_svg, "explicit `zero: false` and `nice: false` must stay byte-identical to the default");
+    let line_svg = vega_lite::lower(line).expect("line chart").to_svg().expect("line svg");
+    let explicit_svg = vega_lite::lower(line_explicit_defaults).expect("explicit line chart").to_svg().expect("explicit svg");
+    assert_eq!(line_svg, explicit_svg, "on a line chart, explicit `zero: false` and `nice: false` stay byte-identical to the default");
 
-    let chart = vega_lite::lower(zeroed).expect("zeroed chart");
-    let y_scale = chart.plan.scale(Channel::Y).and_then(Scale::linear).expect("zeroed y scale");
-    assert_eq!(y_scale.domain, (0.0, 20.0), "`zero` anchors the inferred domain at the origin");
-    let svg = chart.to_svg().expect("zeroed svg");
+    let chart = vega_lite::lower(bar).expect("bar chart");
+    let y_scale = chart.plan.scale(Channel::Y).and_then(Scale::linear).expect("bar y scale");
+    assert_eq!(y_scale.domain, (0.0, 20.0), "a bar anchors its y domain at the origin by default");
+    let svg = chart.to_svg().expect("bar svg");
     assert!(svg.contains(">0</text>"), "the zero tick label must be drawn: {svg}");
+    assert!(svg.contains("height=\"144\""), "the 10 bar keeps half the plot height instead of collapsing: {svg}");
+
+    let clipped = vega_lite::lower(clipped_bar).expect("clipped bar chart");
+    let clipped_y = clipped.plan.scale(Channel::Y).and_then(Scale::linear).expect("clipped y scale");
+    assert_eq!(clipped_y.domain, (10.0, 20.0), "`zero: false` restores the observed extremes");
+    assert!(clipped.to_svg().expect("clipped svg").contains("height=\"0\""), "opting out of zero clips the minimum bar");
 
     let nice = vega_lite::lower(niced).expect("nice chart");
     let nice_y = nice.plan.scale(Channel::Y).and_then(Scale::linear).expect("nice y scale");

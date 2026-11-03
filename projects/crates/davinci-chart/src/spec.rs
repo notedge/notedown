@@ -214,9 +214,11 @@ pub enum ScaleSpec {
     Linear {
         /// Explicit `(min, max)` domain, or `None` to infer it from the data.
         domain: Option<(f64, f64)>,
-        /// Extend an inferred domain so it includes zero. Refused together
-        /// with an explicit `domain`.
-        zero: bool,
+        /// Force the inferred domain to include zero. `None` keeps the chart
+        /// default, which is `true` for `bar` and `area` position channels and
+        /// `false` for every other mark. Refused together with an explicit
+        /// `domain`.
+        zero: Option<bool>,
         /// Round the domain outward to the 1-2-5 tick grid.
         nice: bool,
     },
@@ -247,12 +249,12 @@ pub enum ScaleSpec {
 impl ScaleSpec {
     /// A linear scale with an inferred domain.
     pub fn linear() -> Self {
-        Self::Linear { domain: None, zero: false, nice: false }
+        Self::Linear { domain: None, zero: None, nice: false }
     }
 
     /// A linear scale with an explicit domain.
     pub fn linear_domain(min: f64, max: f64) -> Self {
-        Self::Linear { domain: Some((min, max)), zero: false, nice: false }
+        Self::Linear { domain: Some((min, max)), zero: None, nice: false }
     }
 
     /// A log scale with an inferred domain.
@@ -576,7 +578,7 @@ fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate
                         format!("linear scale on the `{}` channel needs a finite domain with min < max", channel.as_str()),
                     ));
                 }
-                if zero {
+                if zero == Some(true) {
                     return Some(chart_error(
                         codes::INVALID_SCALE,
                         format!("`zero` on the `{}` channel cannot widen an explicit linear domain", channel.as_str()),

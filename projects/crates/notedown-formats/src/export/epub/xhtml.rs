@@ -154,6 +154,16 @@ fn write_block(
             escape_text(out, source);
             out.push_str("</code></pre>\n");
         }
+        Block::Chart { language, source } => {
+            // Partial: no chart raster — emit the authored fence as marked-up pre.
+            out.push_str("<pre class=\"chart\" data-chart-language=\"");
+            escape_attribute(out, language);
+            out.push_str("\" data-chart-source=\"");
+            escape_attribute(out, source);
+            out.push_str("\"><code>");
+            escape_text(out, source);
+            out.push_str("</code></pre>\n");
+        }
         Block::Math { formula } => {
             out.push_str("<div class=\"math\"");
             if let Some(language) = &formula.language {

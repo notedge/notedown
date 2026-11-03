@@ -3,11 +3,17 @@
 //! without losing the authored source, and the DaVinci diagram subsystem
 //! lowers that source into a renderable SVG scene.
 
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
-use davinci_diagram::mermaid_to_scene;
-use notedown_formats::import::html::import_html_bytes;
-use notedown_ir::Block;
+use davinci_diagram::{dot_to_scene, mermaid_to_scene};
+use notedown_formats::{
+    export::{
+        html::{RenderedDiagram, export_html, export_html_with_diagrams},
+        markdown::export_markdown,
+    },
+    import::{html::import_html_bytes, markdown::import_markdown_bytes},
+};
+use notedown_ir::{Block, DocumentGraph, NodeId};
 
 /// A docs page fragment shaped the way real sites embed diagrams: the Mermaid
 /// runtime convention (`<div class="mermaid">`) and the static-site convention
@@ -57,10 +63,8 @@ fn html_mermaid_containers_lower_to_renderable_svg_scenes() {
     fs::create_dir_all(&out_dir).expect("create diagram artifact dir");
 
     let names = ["flowchart", "sequence"];
-    let expected_labels: [&[&str]; 2] = [
-        &["Fetch page", "Status OK?", "Extract blocks", "Record failure", "yes"],
-        &["Frontier", "Worker", "claim", "commit"],
-    ];
+    let expected_labels: [&[&str]; 2] =
+        [&["Fetch page", "Status OK?", "Extract blocks", "Record failure", "yes"], &["Frontier", "Worker", "claim", "commit"]];
     for ((name, source), labels) in names.iter().zip(sources.iter()).zip(expected_labels.iter()) {
         let lowered = mermaid_to_scene(source).unwrap_or_else(|error| panic!("{name}: mermaid lowering failed: {error}\n{source}"));
         let svg = lowered.scene.to_svg().unwrap_or_else(|error| panic!("{name}: scene must serialize to SVG: {error}"));
@@ -75,4 +79,74 @@ fn html_mermaid_containers_lower_to_renderable_svg_scenes() {
 
 fn svg_contains_label(svg: &str, label: &str) -> bool {
     svg.contains(&format!(">{label}</text>")) || svg.contains(&format!(">{label} ")) || svg.contains(label)
+}
+
+/// DOT rides the same fence → block → lowering → HTML surfaces as Mermaid. The
+/// rendered figure keeps the authored source in `data-diagram-source-hex`, so a
+/// reopened document must still hold a `dot` diagram block.
+#[test]
+fn dot_fences_lower_to_svg_and_round_trip_html_and_markdown() {
+    let source = "digraph pipeline {\n  rankdir=LR;\n  Fetch [shape=box]\n  Store [shape=box]\n  Fetch -> Store [label=\"persist\"]\n}";
+    let graph = import_markdown_bytes("pipeline.md", &format!("```dot\n{source}\n```\n")).expect("import dot markdown");
+    let block = single_diagram(&graph);
+    assert_eq!(block, ("dot".to_string(), source.to_string()));
+    assert!(export_markdown(&graph).expect("export dot markdown").contains("```dot"), "the fence must reopen as `dot`");
+
+    let lowered = dot_to_scene(source).expect("dot lowering should succeed");
+    assert!(lowered.diagnostics.is_empty(), "the subset fixture must not approximate: {:?}", lowered.diagnostics);
+    let svg = lowered.scene.to_svg().expect("dot scene must serialize");
+    for label in ["Fetch", "Store", "persist"] {
+        assert!(svg_contains_label(&svg, label), "the DOT SVG must draw `{label}`\n{svg}");
+    }
+
+    let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("diagram-artifacts");
+    fs::create_dir_all(&out_dir).expect("create diagram artifact dir");
+    let artifact = out_dir.join("dot-pipeline.svg");
+    fs::write(&artifact, &svg).expect("write dot svg artifact");
+    eprintln!("wrote {}", artifact.display());
+
+    let diagrams = HashMap::from([(diagram_id(&graph), RenderedDiagram { svg: svg.clone() })]);
+    let html = export_html_with_diagrams(&graph, &diagrams).expect("export rendered dot html");
+    assert!(html.contains(r#"<figure class="diagram" data-diagram-language="dot""#), "{html}");
+    assert!(html.contains("data-diagram-source-hex="), "{html}");
+    assert!(html.contains(&svg), "the rendered figure must inline the scene SVG: {html}");
+    let reopened = import_html_bytes("pipeline.rendered.html", html.as_bytes()).expect("reopen rendered dot html");
+    assert_eq!(single_diagram(&reopened), ("dot".to_string(), source.to_string()), "{html}");
+}
+
+/// A DOT construct outside the subset must fail with a byte span on the noting
+/// side, and the exporter must keep the authored fence visible instead of
+/// emitting half a figure.
+#[test]
+fn rejected_dot_keeps_the_source_fallback_visible() {
+    let source = "digraph {\n  A [label=<b>bold</b>]\n}";
+    let graph = import_markdown_bytes("rejected.md", &format!("```dot\n{source}\n```\n")).expect("import dot markdown");
+
+    let error = dot_to_scene(source).expect_err("HTML labels are outside the DOT subset");
+    let span = error.span().expect("the rejection must carry a span");
+    assert_eq!(&source[span], "<b>bold</b>");
+
+    let html = export_html(&graph).expect("export dot html without a rendered scene");
+    assert!(html.contains(r#"<pre class="diagram" data-diagram-language="dot""#), "{html}");
+    assert!(!html.contains("<figure"), "a rejected diagram must not render half a figure: {html}");
+}
+
+fn diagram_id(graph: &DocumentGraph) -> NodeId {
+    graph
+        .blocks
+        .iter()
+        .find(|node| matches!(node.block, Block::Diagram { .. }))
+        .map(|node| node.id)
+        .expect("the document must hold one diagram")
+}
+
+fn single_diagram(graph: &DocumentGraph) -> (String, String) {
+    graph
+        .blocks
+        .iter()
+        .find_map(|node| match &node.block {
+            Block::Diagram { language, source } => Some((language.clone(), source.clone())),
+            _ => None,
+        })
+        .expect("the document must hold one diagram")
 }

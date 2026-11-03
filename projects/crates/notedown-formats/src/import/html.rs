@@ -472,7 +472,7 @@ fn diagram_language_in_class_list(class: &str) -> Option<String> {
 /// Keep the diagram languages the Markdown importer promotes to
 /// `Block::Diagram`; unknown or absent markers stay on the default path.
 fn is_diagram_language(language: &str) -> bool {
-    language.eq_ignore_ascii_case("mermaid")
+    language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot")
 }
 
 /// HTML formatting commonly pads the authored diagram source with a leading

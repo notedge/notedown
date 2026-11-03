@@ -622,12 +622,12 @@ fn is_markdown_marker(text: &str) -> bool {
     matches!(text, "*" | "**" | "_" | "__" | "~~" | "`" | "[" | "]" | "(" | ")" | "![")
 }
 
-/// Only an explicit `mermaid` info string becomes a `Block::Diagram`.
+/// Only an explicit known diagram info string becomes a `Block::Diagram`.
 ///
 /// Unknown or absent language tags stay `Block::Code` instead of being guessed
-/// as diagrams.
+/// as diagrams, and every listed language must have a lowering frontend.
 fn is_diagram_language(language: &str) -> bool {
-    language.eq_ignore_ascii_case("mermaid")
+    language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot")
 }
 
 /// Fenced code keeps the raw source slice between the two fences.

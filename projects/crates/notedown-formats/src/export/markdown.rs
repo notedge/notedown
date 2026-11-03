@@ -100,7 +100,7 @@ fn write_block(
         }
         Block::Code { language, content } => write_fenced(out, language.as_deref(), content),
         Block::Diagram { language, source } => {
-            ensure_mermaid(language)?;
+            ensure_reopenable_language(language)?;
             write_fenced(out, Some(language), source);
         }
         Block::Quote { content } => {
@@ -423,8 +423,8 @@ fn write_fenced(out: &mut String, language: Option<&str>, content: &str) {
 /// A diagram only round-trips through Markdown when the importer promotes the
 /// same fence back to `Block::Diagram`. Any other language would silently
 /// reopen as a plain code block, so it is reported instead.
-fn ensure_mermaid(language: &str) -> Result<(), FormatError> {
-    if language.eq_ignore_ascii_case("mermaid") {
+fn ensure_reopenable_language(language: &str) -> Result<(), FormatError> {
+    if language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") {
         Ok(())
     }
     else {

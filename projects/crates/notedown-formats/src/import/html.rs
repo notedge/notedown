@@ -90,7 +90,7 @@ pub fn import_html_with_links(label: &str, text: &str) -> Result<HtmlImport, For
         .map(|href| href.trim().to_string())
         .filter(|href| !href.is_empty());
     let links = collect_links(&document);
-    for (block, span) in lower_children(body_children(&document), &mut graph) {
+    for (block, span) in lower_children(body_children(&document), &mut graph, text) {
         push_block_with_source(&mut graph, block, span);
     }
     register_image_assets(&mut graph);
@@ -177,7 +177,7 @@ fn body_children(document: &HtmlDocument) -> &[HtmlNode] {
 
 /// Lower sibling nodes in document order without dropping authored inline
 /// content that sits directly under a container element.
-fn lower_children(children: &[HtmlNode], graph: &mut DocumentGraph) -> Vec<(Block, std::ops::Range<usize>)> {
+fn lower_children(children: &[HtmlNode], graph: &mut DocumentGraph, source: &str) -> Vec<(Block, std::ops::Range<usize>)> {
     let mut result = Vec::new();
     let mut pending = Vec::new();
     let mut pending_span: Option<std::ops::Range<usize>> = None;
@@ -185,14 +185,14 @@ fn lower_children(children: &[HtmlNode], graph: &mut DocumentGraph) -> Vec<(Bloc
         match child {
             HtmlNode::Element(element) if is_block_element(element) => {
                 flush_inline_run(&mut result, &mut pending, &mut pending_span);
-                result.extend(lower_blocks(element, graph));
+                result.extend(lower_blocks(element, graph, source));
             }
             HtmlNode::Element(element) if is_unsupported_element(element) => {}
             HtmlNode::Element(element) => {
                 if pending_span.is_none() {
                     pending_span = Some(element.span.clone().into());
                 }
-                pending.extend(lower_inline_element(element, graph));
+                pending.extend(lower_inline_element(element, graph, source));
             }
             HtmlNode::Text(text) => {
                 if pending_span.is_none() {
@@ -289,35 +289,37 @@ fn decode_hex(text: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std::ops::Range<usize>)> {
+fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> Vec<(Block, std::ops::Range<usize>)> {
     let tag = element.tag_name.to_ascii_lowercase();
     let span: std::ops::Range<usize> = element.span.clone().into();
     match tag.as_str() {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            vec![(Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph), children: Vec::new() }, span)]
+            vec![(Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph, source), children: Vec::new() }, span)]
         }
-        "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph) }, span)],
-        "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph) }, span)],
-        "pre" => match attribute(element, "data-diagram-language").filter(|language| !language.trim().is_empty()) {
-            Some(language) => {
-                let source = attribute(element, "data-diagram-source-hex")
-                    .and_then(|hex| decode_hex(&hex))
-                    .unwrap_or_else(|| text_content(element));
-                vec![(Block::Diagram { language, source }, span)]
+        "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph, source) }, span)],
+        "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph, source) }, span)],
+        "pre" => {
+            if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
+                vec![(Block::Diagram { language, source: diagram }, span)]
             }
-            None => vec![(
-                Block::Code {
-                    language: element
-                        .children
-                        .iter()
-                        .filter_map(as_element)
-                        .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
-                        .and_then(|child| attribute(child, "class")),
-                    content: text_content(element),
-                },
-                span,
-            )],
-        },
+            else if let Some(language) = hosted_diagram_language(element) {
+                vec![(Block::Diagram { language, source: diagram_source(element, source) }, span)]
+            }
+            else {
+                vec![(
+                    Block::Code {
+                        language: element
+                            .children
+                            .iter()
+                            .filter_map(as_element)
+                            .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                            .and_then(|child| attribute(child, "class")),
+                        content: preformatted_source(element, source),
+                    },
+                    span,
+                )]
+            }
+        }
         "ul" | "ol" => {
             let ordered = tag == "ol";
             // Ordered items must carry their number: the markdown writer
@@ -336,7 +338,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
                 .map(|item| {
                     let item_number = ordered.then_some(number);
                     number += 1;
-                    lower_list_item(item, graph, item_number)
+                    lower_list_item(item, graph, item_number, source)
                 })
                 .collect();
             vec![(Block::List { ordered, items }, span)]
@@ -347,7 +349,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
                 .iter()
                 .filter_map(as_element)
                 .find(|child| child.tag_name.eq_ignore_ascii_case("caption"))
-                .map(|cap| lower_inlines(cap, graph).into_iter().filter_map(|inline| match inline {
+                .map(|cap| lower_inlines(cap, graph, source).into_iter().filter_map(|inline| match inline {
                     notedown_ir::Inline::Text { text } => Some(text),
                     _ => None,
                 }).collect::<String>())
@@ -365,7 +367,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
                             if cell.tag_name.eq_ignore_ascii_case("th") {
                                 is_header = true;
                             }
-                            notedown_ir::TableCell { content: lower_inlines(cell, graph), colspan: 1, rowspan: 1 }
+                            notedown_ir::TableCell { content: lower_inlines(cell, graph, source), colspan: 1, rowspan: 1 }
                         })
                         .collect();
                     notedown_ir::TableRow { is_header, cells }
@@ -374,21 +376,157 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
             vec![(Block::Table { caption, rows }, span)]
         }
         "hr" => vec![(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }, span)],
-        "section" | "article" | "main" | "div" | "figure" | "nav" => lower_children(&element.children, graph),
+        // Inline SVG is captured verbatim as raw markup: the importer never
+        // re-parses it into a shape model and never leaks its label text into
+        // prose.
+        "svg" => vec![(Block::RawHtml { html: raw_element_markup(element, source) }, span)],
+        "section" | "article" | "main" | "div" | "figure" | "nav" => match explicit_diagram_marker(element, source) {
+            Some((language, diagram)) => vec![(Block::Diagram { language, source: diagram }, span)],
+            None => match hosted_diagram_language(element) {
+                Some(language) => vec![(Block::Diagram { language, source: diagram_source(element, source) }, span)],
+                None => lower_children(&element.children, graph, source),
+            },
+        },
         _ => Vec::new(),
     }
 }
 
-fn lower_list_item(item: &Element, graph: &mut DocumentGraph, number: Option<u32>) -> notedown_ir::ListItem {
+/// Explicit diagram round-trip marker written by the HTML exporter. Both the
+/// source-only `<pre>` fallback and the rendered `<figure>` carry it, so the
+/// authored source survives regardless of which shape was emitted. The hex
+/// payload keeps the exact authored bytes; element text is only a fallback.
+fn explicit_diagram_marker(element: &Element, source: &str) -> Option<(String, String)> {
+    let language = attribute(element, "data-diagram-language").filter(|language| !language.trim().is_empty())?;
+    let diagram =
+        attribute(element, "data-diagram-source-hex").and_then(|hex| decode_hex(&hex)).unwrap_or_else(|| preformatted_source(element, source));
+    Some((language, diagram))
+}
+
+/// Diagram containers used by real pages: the Mermaid runtime selects
+/// `.mermaid` blocks (`<div class="mermaid">` or `<pre class="mermaid">`), and
+/// static site generators emit fenced diagrams as
+/// `<pre><code class="language-mermaid">`. Only an explicit mermaid marker
+/// becomes a diagram; every other class list keeps the default lowering.
+fn hosted_diagram_language(element: &Element) -> Option<String> {
+    if let Some(language) = attribute(element, "class").as_deref().and_then(diagram_language_in_class_list) {
+        return Some(language);
+    }
+    if element.tag_name.eq_ignore_ascii_case("pre") {
+        return element
+            .children
+            .iter()
+            .filter_map(as_element)
+            .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+            .and_then(|code| attribute(code, "class"))
+            .and_then(|class| diagram_language_in_class_list(&class));
+    }
+    None
+}
+
+fn diagram_language_in_class_list(class: &str) -> Option<String> {
+    class.split_whitespace().find_map(|token| {
+        let bare = match token.get(..9).filter(|prefix| prefix.eq_ignore_ascii_case("language-")) {
+            Some(_) => &token[9..],
+            None => token,
+        };
+        if is_diagram_language(bare) { Some(bare.to_ascii_lowercase()) } else { None }
+    })
+}
+
+/// Keep the diagram languages the Markdown importer promotes to
+/// `Block::Diagram`; unknown or absent markers stay on the default path.
+fn is_diagram_language(language: &str) -> bool {
+    language.eq_ignore_ascii_case("mermaid")
+}
+
+/// HTML formatting commonly pads the authored diagram source with a leading
+/// and trailing newline; strip those without touching the authored lines.
+fn diagram_source(element: &Element, source: &str) -> String {
+    preformatted_source(element, source).trim_matches(|character| character == '\r' || character == '\n').to_string()
+}
+
+/// `<pre>` content is preformatted, but the HTML front end collapses
+/// whitespace in text nodes. Recover the authored bytes by slicing the raw
+/// source at each child span — mirroring what a browser's `textContent`
+/// reader (the Mermaid runtime included) would see — and decode character
+/// references afterwards.
+fn preformatted_source(element: &Element, source: &str) -> String {
+    decode_character_references(&raw_subtree_text(element, source))
+}
+
+fn raw_subtree_text(element: &Element, source: &str) -> String {
+    let mut raw = String::new();
+    for child in &element.children {
+        match child {
+            HtmlNode::Text(text) => raw.push_str(source.get(text.span.clone()).unwrap_or(&text.content)),
+            HtmlNode::Element(child) => raw.push_str(&raw_subtree_text(child, source)),
+            HtmlNode::Comment(_) => {}
+        }
+    }
+    raw
+}
+
+/// The element's exact authored markup, recovered from its source span.
+fn raw_element_markup(element: &Element, source: &str) -> String {
+    source.get(element.span.clone()).map(str::to_string).unwrap_or_else(|| text_content(element))
+}
+
+/// Decode the character references real diagram and code sources carry.
+/// Unknown or malformed references stay verbatim instead of being dropped.
+fn decode_character_references(raw: &str) -> String {
+    if !raw.contains('&') {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let candidate = &rest[start..];
+        let Some(end) = candidate.find(';') else {
+            out.push_str(candidate);
+            return out;
+        };
+        let reference = &candidate[..end];
+        let decoded = match reference.strip_prefix("&#") {
+            Some(digits) => digits
+                .strip_prefix(['x', 'X'])
+                .map_or_else(|| digits.parse::<u32>().ok(), |hex| u32::from_str_radix(hex, 16).ok())
+                .and_then(char::from_u32),
+            None => match reference {
+                "&amp" => Some('&'),
+                "&lt" => Some('<'),
+                "&gt" => Some('>'),
+                "&quot" => Some('"'),
+                "&apos" => Some('\''),
+                "&nbsp" => Some('\u{00A0}'),
+                _ => None,
+            },
+        };
+        match decoded {
+            Some(character) => {
+                out.push(character);
+                rest = &candidate[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &candidate[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn lower_list_item(item: &Element, graph: &mut DocumentGraph, number: Option<u32>, source: &str) -> notedown_ir::ListItem {
     let mut children = Vec::new();
     for child in item.children.iter().filter_map(as_element) {
         if is_block_element(child) {
-            for (block, span) in lower_blocks(child, graph) {
+            for (block, span) in lower_blocks(child, graph, source) {
                 children.push(push_block_with_source(graph, block, span));
             }
         }
     }
-    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children, number, is_task: false, is_checked: None }
+    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph, source), children, number, is_task: false, is_checked: None }
 }
 
 fn is_block_element(element: &Element) -> bool {
@@ -406,6 +544,7 @@ fn is_block_element(element: &Element) -> bool {
             | "h5"
             | "h6"
             | "hr"
+            | "svg"
             | "section"
             | "article"
             | "main"
@@ -415,13 +554,13 @@ fn is_block_element(element: &Element) -> bool {
     )
 }
 
-fn lower_list_item_inlines(item: &Element, graph: &mut DocumentGraph) -> Vec<Inline> {
+fn lower_list_item_inlines(item: &Element, graph: &mut DocumentGraph, source: &str) -> Vec<Inline> {
     let mut result = Vec::new();
     for child in &item.children {
         match child {
             HtmlNode::Text(text) => push_text(&mut result, text.content.clone()),
             HtmlNode::Element(element) if !is_block_element(element) && !is_unsupported_element(element) => {
-                result.extend(lower_inline_element(element, graph));
+                result.extend(lower_inline_element(element, graph, source));
             }
             HtmlNode::Element(_) | HtmlNode::Comment(_) => {}
         }
@@ -452,14 +591,14 @@ fn text_content(element: &Element) -> String {
     text
 }
 
-fn lower_inlines(element: &Element, graph: &mut DocumentGraph) -> Vec<Inline> {
+fn lower_inlines(element: &Element, graph: &mut DocumentGraph, source: &str) -> Vec<Inline> {
     let mut result = Vec::new();
     for child in &element.children {
         match child {
             HtmlNode::Text(text) => push_text(&mut result, text.content.clone()),
             HtmlNode::Element(child) => {
                 if !is_unsupported_element(child) {
-                    result.extend(lower_inline_element(child, graph));
+                    result.extend(lower_inline_element(child, graph, source));
                 }
             }
             HtmlNode::Comment(_) => {}
@@ -475,9 +614,13 @@ fn is_unsupported_element(element: &Element) -> bool {
     )
 }
 
-fn lower_inline_element(element: &Element, graph: &mut DocumentGraph) -> Vec<Inline> {
+fn lower_inline_element(element: &Element, graph: &mut DocumentGraph, source: &str) -> Vec<Inline> {
     let tag = element.tag_name.to_ascii_lowercase();
-    let nested = lower_inlines(element, graph);
+    // Inline-position SVG keeps its exact markup instead of leaking label text.
+    if tag == "svg" {
+        return vec![Inline::RawHtml { html: raw_element_markup(element, source) }];
+    }
+    let nested = lower_inlines(element, graph, source);
     let inlines = match tag.as_str() {
         "strong" | "b" => vec![Inline::Styled { style: "bold".into(), children: nested }],
         "em" | "i" => vec![Inline::Styled { style: "italic".into(), children: nested }],

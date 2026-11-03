@@ -74,7 +74,7 @@ pub enum Block {
         /// Confidence of the retained payload.
         status: SemanticStatus,
     },
-    /// Raw HTML block from Markdown source — kept verbatim, not parsed.
+    /// Raw HTML block from source markup — kept verbatim, not parsed.
     RawHtml {
         /// Verbatim HTML block as authored.
         html: String,

@@ -151,6 +151,11 @@ path = "tests/html/import.rs"
 required-features = ["html", "markdown"]
 
 [[test]]
+name = "diagram_scene"
+path = "tests/integration/diagram_scene.rs"
+required-features = ["html", "markdown"]
+
+[[test]]
 name = "tex_import"
 path = "tests/tex/mod.rs"
 required-features = ["tex"]
@@ -185,3 +190,4 @@ cfb = { workspace = true }
 serde_json = { workspace = true }
 oak-core = { workspace = true }
 oak-html = { workspace = true }
+davinci-diagram = { workspace = true }

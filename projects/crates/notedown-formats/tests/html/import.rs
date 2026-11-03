@@ -16,6 +16,152 @@ fn html_diagram_round_trips_through_the_diagram_attribute() {
 }
 
 #[test]
+fn html_import_reads_rendered_diagram_figures_without_leaking_svg_text() {
+    let source = "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]";
+    let hex = source.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let html = format!(
+        "<body><article><figure class=\"notedown-diagram\" data-diagram-language=\"mermaid\" data-diagram-source-hex=\"{hex}\"><svg viewBox=\"0 0 10 10\"><text>rendered label</text></svg></figure></article></body>"
+    );
+
+    let reopened = import_html_text("rendered-diagram.html", &html).expect("import rendered figure");
+    assert_eq!(single_diagram(&reopened), ("mermaid".to_string(), source.to_string()));
+    assert!(
+        !reopened.blocks.iter().any(|node| match &node.block {
+            Block::Paragraph { content } => content.iter().map(Inline::plain_text).collect::<String>().contains("rendered label"),
+            _ => false,
+        }),
+        "svg payload text must not leak into paragraphs: {:?}",
+        reopened.blocks
+    );
+}
+
+fn single_diagram(graph: &DocumentGraph) -> (String, String) {
+    let diagrams = graph
+        .blocks
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Diagram { language, source } => Some((language.clone(), source.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(diagrams.len(), 1, "exactly one diagram expected: {:?}", graph.blocks);
+    diagrams.into_iter().next().unwrap()
+}
+
+#[test]
+fn html_import_promotes_mermaid_container_classes_to_diagram_blocks() {
+    let flowchart = "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]";
+
+    let div = import_html_text(
+        "mermaid-div.html",
+        &format!("<body><article><div class=\"mermaid\">\n{flowchart}\n</div></article></body>"),
+    )
+    .expect("import div container");
+    assert_eq!(single_diagram(&div), ("mermaid".to_string(), flowchart.to_string()));
+
+    let pre = import_html_text("mermaid-pre.html", &format!("<body><pre class=\"mermaid\">\n{flowchart}\n</pre></body>")).expect("import pre");
+    assert_eq!(single_diagram(&pre), ("mermaid".to_string(), flowchart.to_string()));
+
+    let fenced = import_html_text(
+        "mermaid-fenced.html",
+        &format!("<body><pre><code class=\"language-mermaid\">{flowchart}</code></pre></body>"),
+    )
+    .expect("import fenced code");
+    assert_eq!(single_diagram(&fenced), ("mermaid".to_string(), flowchart.to_string()));
+
+    let shouted = import_html_text(
+        "mermaid-shouted.html",
+        &format!("<body><pre><code class=\"LANGUAGE-MERMAID\">{flowchart}</code></pre></body>"),
+    )
+    .expect("import upper-case marker");
+    assert_eq!(single_diagram(&shouted), ("mermaid".to_string(), flowchart.to_string()));
+}
+
+#[test]
+fn html_import_keeps_inline_svg_as_raw_markup_without_leaking_label_text() {
+    let graph = import_html_text(
+        "inline-svg.html",
+        r#"<body><p>Status <svg viewBox="0 0 10 10" width="10" height="10"><circle cx="5" cy="5" r="4"/><text>icon</text></svg> online</p></body>"#,
+    )
+    .expect("import inline svg");
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected, got {:?}", graph.blocks)
+    };
+    let svg = content.iter().find_map(|inline| match inline {
+        Inline::RawHtml { html } => Some(html.clone()),
+        _ => None,
+    });
+    let Some(svg) = svg
+    else {
+        panic!("inline svg must stay raw markup, got {content:?}")
+    };
+    assert_eq!(svg, r#"<svg viewBox="0 0 10 10" width="10" height="10"><circle cx="5" cy="5" r="4"/><text>icon</text></svg>"#);
+    let prose = content.iter().map(Inline::plain_text).collect::<String>();
+    assert!(!prose.contains("icon"), "svg label text must not leak into prose: {prose:?}");
+    assert!(prose.contains("Status") && prose.contains("online"), "{prose:?}");
+}
+
+#[test]
+fn html_import_keeps_block_svg_verbatim_and_reopens_it() {
+    let markup = r#"<svg viewBox="0 0 100 40"><rect width="100" height="40"/><text x="4" y="20">gauge</text></svg>"#;
+    let graph = import_html_text("block-svg.html", &format!("<body><figure>{markup}</figure></body>")).expect("import block svg");
+    let Block::RawHtml { html } = &graph.blocks[0].block
+    else {
+        panic!("raw html block expected, got {:?}", graph.blocks)
+    };
+    assert_eq!(html, markup);
+
+    let output = export_html(&graph).expect("export html");
+    assert!(output.contains(markup), "{output}");
+}
+
+#[test]
+fn html_import_keeps_non_diagram_classes_on_the_default_path() {
+    let lookalike = import_html_text(
+        "mermaid-lookalike.html",
+        "<body><div class=\"mermaid-theme\"><p>not a diagram</p></div></body>",
+    )
+    .expect("import lookalike");
+    assert!(single_diagram_opt(&lookalike).is_none(), "substring classes must not match: {:?}", lookalike.blocks);
+
+    let rust = import_html_text("rust-code.html", "<body><pre><code class=\"language-rust\">fn main() {}</code></pre></body>")
+        .expect("import rust code");
+    let Block::Code { language, content } = &rust.blocks[0].block
+    else {
+        panic!("plain code block expected, got {:?}", rust.blocks)
+    };
+    assert_eq!(language.as_deref(), Some("language-rust"));
+    assert_eq!(content, "fn main() {}");
+}
+
+fn single_diagram_opt(graph: &DocumentGraph) -> Option<(String, String)> {
+    graph.blocks.iter().find_map(|node| match &node.block {
+        Block::Diagram { language, source } => Some((language.clone(), source.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn html_mermaid_containers_reopen_through_markdown_as_diagrams() {
+    use notedown_formats::export::markdown::export_markdown;
+    use notedown_formats::import::markdown::import_markdown_bytes;
+
+    let sequence = "sequenceDiagram\n  Alice->>Bob: Hi";
+    let graph = import_html_text(
+        "mermaid-roundtrip.html",
+        &format!("<body><div class=\"mermaid\">\n{sequence}\n</div></body>"),
+    )
+    .expect("import html");
+    assert_eq!(single_diagram(&graph).0, "mermaid");
+
+    let markdown = export_markdown(&graph).expect("export markdown");
+    assert!(markdown.contains("```mermaid"), "{markdown}");
+    let reopened = import_markdown_bytes("mermaid-roundtrip.md", &markdown).expect("reopen markdown");
+    assert_eq!(single_diagram(&reopened), ("mermaid".to_string(), sequence.to_string()));
+}
+
+#[test]
 fn html_import_records_block_source_spans() {
     let html = "<body><h1>Title</h1><p>Hello</p></body>";
     let graph = import_html_text("spans.html", html).expect("import html");

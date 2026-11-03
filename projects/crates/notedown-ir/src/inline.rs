@@ -100,7 +100,7 @@ pub enum Inline {
         /// Wrapped inline content.
         children: Vec<Inline>,
     },
-    /// Raw inline HTML from Markdown source — kept verbatim, not parsed.
+    /// Raw inline HTML from source markup — kept verbatim, not parsed.
     RawHtml {
         /// Verbatim HTML fragment as authored.
         html: String,

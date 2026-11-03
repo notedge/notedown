@@ -1,5 +1,7 @@
-use notedown_formats::export::html::export_html;
-use notedown_ir::{Block, DocumentGraph, DocumentId, DocumentMetadata, IdAllocator, Inline, RelationEndpoint};
+use std::collections::HashMap;
+
+use notedown_formats::export::html::{RenderedDiagram, export_html, export_html_with_diagrams};
+use notedown_ir::{Block, DocumentGraph, DocumentId, DocumentMetadata, IdAllocator, Inline, NodeId, RelationEndpoint};
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_html::{
     HtmlBuilder, HtmlLanguage,
@@ -169,4 +171,45 @@ fn html_export_rejects_list_containment_cycles() {
     });
     let error = export_html(&graph).expect_err("containment cycles must not recurse");
     assert!(error.to_string().contains("invalid document graph"));
+}
+
+fn diagram_graph(source: &str) -> (DocumentGraph, NodeId) {
+    let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
+    let id = graph.push_block(Block::Diagram { language: "mermaid".into(), source: source.into() });
+    (graph, id)
+}
+
+#[test]
+fn html_export_embeds_rendered_diagram_svg_in_a_figure() {
+    let (graph, id) = diagram_graph("flowchart TD\n  A[Start] --> B[Stop]");
+    let mut diagrams = HashMap::new();
+    diagrams.insert(id, RenderedDiagram { svg: r##"<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"##.to_string() });
+
+    let html = export_html_with_diagrams(&graph, &diagrams).expect("html export with rendered diagram");
+    assert!(html.contains(r#"<figure class="notedown-diagram" data-diagram-language="mermaid""#), "{html}");
+    assert!(html.contains(r##"<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"##), "{html}");
+    assert!(html.contains("data-diagram-source-hex="), "{html}");
+    assert!(!html.contains("<pre data-diagram-language"), "rendered diagrams must not keep the source fallback: {html}");
+}
+
+#[test]
+fn html_export_falls_back_to_source_pre_without_a_rendered_scene() {
+    let (graph, _) = diagram_graph("flowchart TD\n  A --> B");
+    let html = export_html(&graph).expect("html export without rendered diagrams");
+    assert!(html.contains(r#"<pre data-diagram-language="mermaid""#), "{html}");
+    assert!(!html.contains("<figure"), "{html}");
+
+    let (graph, _) = diagram_graph("flowchart TD\n  A --> B");
+    let html = export_html_with_diagrams(&graph, &HashMap::new()).expect("html export with an empty diagram map");
+    assert!(html.contains(r#"<pre data-diagram-language="mermaid""#), "{html}");
+}
+
+#[test]
+fn html_export_with_diagrams_is_byte_stable() {
+    let (graph, id) = diagram_graph("flowchart LR\n  A --> B");
+    let mut diagrams = HashMap::new();
+    diagrams.insert(id, RenderedDiagram { svg: "<svg><text>stable</text></svg>".to_string() });
+    let first = export_html_with_diagrams(&graph, &diagrams).expect("first export");
+    let second = export_html_with_diagrams(&graph, &diagrams).expect("second export");
+    assert_eq!(first, second);
 }

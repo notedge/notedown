@@ -1,11 +1,36 @@
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
-use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, RelationEndpoint, TableRow};
+use notedown_ir::{Attributes, Block, BreakKind, DocumentGraph, Inline, ListItem, NodeId, RelationEndpoint, TableRow};
 
 use crate::FormatError;
 
+/// A diagram scene rendered by the host, embedded into the HTML output in
+/// place of the source-only fallback.
+///
+/// The host owns scene lowering (for example the DaVinci diagram chain); this
+/// exporter only owns the markup shape. `svg` must be a serialized, valid SVG
+/// fragment and is emitted verbatim inside the figure.
+pub struct RenderedDiagram {
+    /// Inline SVG markup serialized from the resolved display scene.
+    pub svg: String,
+}
+
 /// Export a semantic document graph as a standalone HTML fragment.
+///
+/// Diagram blocks without a host-rendered scene keep the source-only `<pre>`
+/// fallback. Hosts that render diagrams use [`export_html_with_diagrams`].
 pub fn export_html(graph: &DocumentGraph) -> Result<String, FormatError> {
+    export_html_with_diagrams(graph, &HashMap::new())
+}
+
+/// Export a semantic document graph as a standalone HTML fragment, embedding
+/// host-rendered diagram scenes keyed by the block that authored them.
+///
+/// A rendered diagram becomes a `<figure>` carrying the inline SVG plus the
+/// `data-diagram-language` / `data-diagram-source-hex` round-trip markers, so
+/// the HTML importer still recovers the authored source. A diagram block whose
+/// scene failed to render keeps the visible source `<pre>` fallback.
+pub fn export_html_with_diagrams(graph: &DocumentGraph, diagrams: &HashMap<NodeId, RenderedDiagram>) -> Result<String, FormatError> {
     let validation = graph.validate();
     if !validation.is_valid() {
         return Err(FormatError::invalid_input(format!("invalid document graph: {:?}", validation.issues)));
@@ -23,15 +48,21 @@ pub fn export_html(graph: &DocumentGraph) -> Result<String, FormatError> {
         if nested.contains(&node.id) {
             continue;
         }
-        write_node(&mut out, graph, node.id, &node.block)?;
+        write_node(&mut out, graph, node.id, &node.block, diagrams)?;
     }
     out.push_str("</article>");
     Ok(out)
 }
 
-fn write_node(out: &mut String, graph: &DocumentGraph, id: notedown_ir::NodeId, block: &Block) -> Result<(), FormatError> {
+fn write_node(
+    out: &mut String,
+    graph: &DocumentGraph,
+    id: NodeId,
+    block: &Block,
+    diagrams: &HashMap<NodeId, RenderedDiagram>,
+) -> Result<(), FormatError> {
     write!(out, r#"<div id="node-{}" data-node-id="{}">"#, id.0, id.0).map_err(|error| FormatError::unsupported("html", error.to_string()))?;
-    write_block(out, graph, block)?;
+    write_block(out, graph, id, block, diagrams)?;
     out.push_str("</div>");
     Ok(())
 }
@@ -52,7 +83,13 @@ fn nested_block_ids(graph: &DocumentGraph) -> std::collections::HashSet<notedown
     ids
 }
 
-fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result<(), FormatError> {
+fn write_block(
+    out: &mut String,
+    graph: &DocumentGraph,
+    id: NodeId,
+    block: &Block,
+    diagrams: &HashMap<NodeId, RenderedDiagram>,
+) -> Result<(), FormatError> {
     match block {
         Block::Section { level, title, children } => {
             let level = (*level).clamp(1, 6);
@@ -62,7 +99,7 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             for child_id in children {
                 let child =
                     graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("section child `{child_id:?}` is missing")))?;
-                write_node(out, graph, child.id, &child.block)?;
+                write_node(out, graph, child.id, &child.block, diagrams)?;
             }
         }
         Block::Paragraph { content } => {
@@ -86,15 +123,26 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             escape_text(out, content);
             out.push_str("</code></pre>");
         }
-        Block::Diagram { language, source } => {
-            out.push_str(r#"<pre data-diagram-language=""#);
-            escape_attribute(out, language);
-            out.push_str(r#"" data-diagram-source-hex=""#);
-            out.push_str(&encode_hex(source));
-            out.push_str(r#""><code>"#);
-            escape_text(out, source);
-            out.push_str("</code></pre>");
-        }
+        Block::Diagram { language, source } => match diagrams.get(&id) {
+            Some(rendered) => {
+                out.push_str(r#"<figure class="notedown-diagram" data-diagram-language=""#);
+                escape_attribute(out, language);
+                out.push_str(r#"" data-diagram-source-hex=""#);
+                out.push_str(&encode_hex(source));
+                out.push_str(r#"">"#);
+                out.push_str(&rendered.svg);
+                out.push_str("</figure>");
+            }
+            None => {
+                out.push_str(r#"<pre data-diagram-language=""#);
+                escape_attribute(out, language);
+                out.push_str(r#"" data-diagram-source-hex=""#);
+                out.push_str(&encode_hex(source));
+                out.push_str(r#""><code>"#);
+                escape_text(out, source);
+                out.push_str("</code></pre>");
+            }
+        },
         Block::Math { formula } => {
             out.push_str(r#"<div class="math""#);
             if let Some(language) = &formula.language {
@@ -106,7 +154,7 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
             escape_text(out, &formula.source);
             out.push_str("</div>");
         }
-        Block::List { ordered, items } => write_list(out, graph, *ordered, items)?,
+        Block::List { ordered, items } => write_list(out, graph, *ordered, items, diagrams)?,
         Block::Table { rows, .. } => write_table(out, rows)?,
         Block::Opaque { kind, payload_hint, .. } if kind == "thematic_break" => {
             out.push_str("<hr>");
@@ -126,7 +174,13 @@ fn write_block(out: &mut String, graph: &DocumentGraph, block: &Block) -> Result
     Ok(())
 }
 
-fn write_list(out: &mut String, graph: &DocumentGraph, ordered: bool, items: &[ListItem]) -> Result<(), FormatError> {
+fn write_list(
+    out: &mut String,
+    graph: &DocumentGraph,
+    ordered: bool,
+    items: &[ListItem],
+    diagrams: &HashMap<NodeId, RenderedDiagram>,
+) -> Result<(), FormatError> {
     out.push_str(if ordered { "<ol>" } else { "<ul>" });
     for item in items {
         if item.is_task {
@@ -142,7 +196,7 @@ fn write_list(out: &mut String, graph: &DocumentGraph, ordered: bool, items: &[L
         write_inlines(out, &item.content)?;
         for child_id in &item.children {
             let child = graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("list child `{child_id:?}` is missing")))?;
-            write_node(out, graph, child.id, &child.block)?;
+            write_node(out, graph, child.id, &child.block, diagrams)?;
         }
         out.push_str("</li>");
     }

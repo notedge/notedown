@@ -133,6 +133,27 @@ fn html_import_does_not_drop_sibling_blocks_or_nested_list_content() {
 }
 
 #[test]
+fn html_import_numbers_ordered_list_items_and_keeps_unordered_items_bare() {
+    let graph = import_html_text(
+        "ordered.html",
+        r#"<body><ol><li>first</li><li>second</li></ol><ol start="5"><li>shifted</li></ol><ul><li>bare</li></ul></body>"#,
+    )
+    .expect("import html");
+    let lists: Vec<&Vec<notedown_ir::ListItem>> = graph
+        .blocks
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::List { items, .. } => Some(items),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lists.len(), 3, "two ordered lists and one unordered list");
+    assert_eq!(lists[0].iter().map(|item| item.number).collect::<Vec<_>>(), vec![Some(1), Some(2)]);
+    assert_eq!(lists[1].iter().map(|item| item.number).collect::<Vec<_>>(), vec![Some(5)], "`start` shifts the sequence");
+    assert_eq!(lists[2].iter().map(|item| item.number).collect::<Vec<_>>(), vec![None], "unordered items stay unnumbered");
+}
+
+#[test]
 fn html_import_lowers_breaks_to_a_first_class_inline() {
     let graph = import_html_text("break.html", "<body><p>first<br>second</p></body>").expect("import html");
     let Block::Paragraph { content } = &graph.blocks[0].block

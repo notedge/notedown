@@ -319,14 +319,27 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
             )],
         },
         "ul" | "ol" => {
+            let ordered = tag == "ol";
+            // Ordered items must carry their number: the markdown writer
+            // refuses lists whose items lack one. `<ol start="n">` shifts the
+            // sequence; unordered items stay unnumbered.
+            let start = attribute(element, "start")
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|value| ordered && *value > 0)
+                .unwrap_or(1);
+            let mut number = start;
             let items = element
                 .children
                 .iter()
                 .filter_map(as_element)
                 .filter(|child| child.tag_name.eq_ignore_ascii_case("li"))
-                .map(|item| lower_list_item(item, graph))
+                .map(|item| {
+                    let item_number = ordered.then_some(number);
+                    number += 1;
+                    lower_list_item(item, graph, item_number)
+                })
                 .collect();
-            vec![(Block::List { ordered: tag == "ol", items }, span)]
+            vec![(Block::List { ordered, items }, span)]
         }
         "table" => {
             let caption = element
@@ -366,7 +379,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph) -> Vec<(Block, std
     }
 }
 
-fn lower_list_item(item: &Element, graph: &mut DocumentGraph) -> notedown_ir::ListItem {
+fn lower_list_item(item: &Element, graph: &mut DocumentGraph, number: Option<u32>) -> notedown_ir::ListItem {
     let mut children = Vec::new();
     for child in item.children.iter().filter_map(as_element) {
         if is_block_element(child) {
@@ -375,7 +388,7 @@ fn lower_list_item(item: &Element, graph: &mut DocumentGraph) -> notedown_ir::Li
             }
         }
     }
-    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children, number: None, is_task: false, is_checked: None }
+    notedown_ir::ListItem { content: lower_list_item_inlines(item, graph), children, number, is_task: false, is_checked: None }
 }
 
 fn is_block_element(element: &Element) -> bool {

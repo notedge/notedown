@@ -40,6 +40,9 @@ pub mod dot;
 #[cfg(feature = "mermaid")]
 pub mod parse;
 
+#[cfg(feature = "plantuml")]
+pub mod plantuml;
+
 pub use error::DiagramError;
 
 #[cfg(feature = "dot")]
@@ -47,6 +50,9 @@ pub use dot::{dot_to_scene, dot_to_spec, parse_dot};
 
 #[cfg(feature = "mermaid")]
 pub use parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid};
+
+#[cfg(feature = "plantuml")]
+pub use plantuml::{parse_plantuml, plantuml_to_scene, plantuml_to_spec};
 
 use davinci_scene::DisplayScene;
 use davinci_types::Diagnostic;

@@ -20,6 +20,20 @@ pub enum MathDisplay {
     Display,
 }
 
+/// Byte range into [`MathFormula::source`] locating one expression.
+///
+/// Spans let consumers map rendered math back to the authored source
+/// (diagnostics, editor highlighting, provenance). Offsets are byte-based
+/// and relative to the formula source after the import layer trimmed it,
+/// not to the surrounding document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MathSpan {
+    /// Inclusive start byte offset.
+    pub start: u32,
+    /// Exclusive end byte offset.
+    pub end: u32,
+}
+
 /// A formula as it enters the document IR.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MathFormula {
@@ -40,7 +54,12 @@ impl MathFormula {
     /// treat the formula as unsupported instead of guessing a grammar.
     pub fn unsupported(source: impl Into<String>, language: Option<String>, display: MathDisplay, kind: impl Into<String>) -> Self {
         let source = source.into();
-        Self { expression: MathExpression::Unsupported { kind: kind.into(), source: source.clone() }, source, language, display }
+        Self {
+            expression: MathExpression::Unsupported { kind: kind.into(), source: source.clone(), span: None },
+            source,
+            language,
+            display,
+        }
     }
 }
 
@@ -60,6 +79,9 @@ pub enum MathExpression {
     Number {
         /// Digits of the number.
         text: String,
+        /// Where the number was authored, when the lowering profile kept it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        span: Option<MathSpan>,
     },
     /// A base with an optional superscript and subscript.
     Script {
@@ -85,6 +107,9 @@ pub enum MathExpression {
         index: Option<Box<MathExpression>>,
         /// Radicand.
         radicand: Box<MathExpression>,
+        /// Span of the radical command itself, when the lowering kept it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        span: Option<MathSpan>,
     },
     /// A delimited construct such as `\left( ... \right)`.
     Delimited {
@@ -112,6 +137,9 @@ pub enum MathExpression {
         wide: bool,
         /// Accented base.
         base: Box<MathExpression>,
+        /// Span of the accent command, when the lowering kept it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        span: Option<MathSpan>,
     },
     /// `\overset{over}{base}` — `over` stacked above `base`.
     StackAbove {
@@ -150,6 +178,9 @@ pub enum MathExpression {
     Text {
         /// The literal text.
         text: String,
+        /// Where the text was authored, when the lowering profile kept it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        span: Option<MathSpan>,
     },
     /// A fragment the lowering profile could not express.
     ///
@@ -160,6 +191,9 @@ pub enum MathExpression {
         kind: String,
         /// The authored source of the fragment.
         source: String,
+        /// Where the fragment was authored, when the lowering kept it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        span: Option<MathSpan>,
     },
 }
 
@@ -170,6 +204,9 @@ pub struct MathAtom {
     pub text: String,
     /// Mathematical class used for tagging and spacing semantics.
     pub class: MathClass,
+    /// Where the atom was authored, when the lowering profile kept it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<MathSpan>,
 }
 
 /// The mathematical class of an atom.
@@ -249,6 +286,9 @@ pub struct MathDelimiter {
     pub kind: MathDelimiterKind,
     /// Authored character when it has one.
     pub character: Option<char>,
+    /// Where the delimiter was authored, when the lowering kept it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<MathSpan>,
 }
 
 /// A semantic mathematical face.
@@ -311,6 +351,9 @@ pub struct MathEnvironment {
     pub column_alignment: Vec<MathColumnAlignment>,
     /// Declared column-pair count for `alignedat`, when the source carries one.
     pub column_pairs: Option<u32>,
+    /// Span of the whole environment, when the lowering kept it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<MathSpan>,
 }
 
 /// The family of a math environment.

@@ -7,7 +7,8 @@
 
 use notedown_ir::{
     MathAtom, MathClass, MathColumnAlignment, MathDelimiter, MathDelimiterKind, MathDisplay, MathEnvironment, MathEnvironmentKind,
-    MathExpression, MathFormula, MathFractionLine, MathRow, MathRowNumbering, MathRowPlacement, MathSpace, MathStyle, MathStyleKind,
+    MathExpression, MathFormula, MathFractionLine, MathRow, MathRowNumbering, MathRowPlacement, MathSpace, MathSpan, MathStyle,
+    MathStyleKind,
 };
 use oak_tex::ast::{
     MathDelimiter as TexMathDelimiter, TexArgument, TexCell, TexCommand, TexEnvironment, TexItem, TexLeftRightPair, TexMath, TexRoot, TexRow,
@@ -16,11 +17,12 @@ use oak_tex::ast::{
 /// Lower one Oak math node into the document math semantics.
 pub(crate) fn lower_tex_math(math: &TexMath, source: &str) -> MathFormula {
     let display = if math.is_display { MathDisplay::Display } else { MathDisplay::Inline };
+    let base = trimmed_base(math.content.span.start, math.content.span.end, source);
     MathFormula {
         source: math_body_source(math, source),
         language: Some("latex".into()),
         display,
-        expression: lower_root(&math.content.items, source),
+        expression: lower_root(&math.content.items, source, base),
     }
 }
 
@@ -74,17 +76,19 @@ pub(crate) fn lower_tex_formula(root: &TexRoot, source: &str, display: MathDispl
 }
 
 fn lower_root_with(root: &TexRoot, source: &str, display: MathDisplay, language: Option<&str>) -> MathFormula {
+    let base = trimmed_base(root.span.start, root.span.end, source);
     MathFormula {
         source: slice(source, root.span.start, root.span.end).trim().to_string(),
         language: language.map(str::to_string),
         display,
-        expression: lower_root(&root.items, source),
+        expression: lower_root(&root.items, source, base),
     }
 }
 
 /// Lower environment content, exposing the environment as a semantic node.
 pub(crate) fn lower_tex_environment(environment: &TexEnvironment, source: &str, display: MathDisplay) -> MathFormula {
-    let expression = lower_environment(environment, source);
+    let base = trimmed_base(environment.span.start, environment.span.end, source);
+    let expression = lower_environment(environment, source, base);
     MathFormula {
         source: slice(source, environment.span.start, environment.span.end).trim().to_string(),
         language: Some("latex".into()),
@@ -93,8 +97,29 @@ pub(crate) fn lower_tex_environment(environment: &TexEnvironment, source: &str, 
     }
 }
 
+/// Absolute offset the trimmed formula source starts at.
+///
+/// [`MathFormula::source`] is the CST slice trimmed of surrounding
+/// whitespace, while CST spans stay absolute, so every span the lowering
+/// records subtracts this base to index the formula source.
+fn trimmed_base(start: usize, end: usize, source: &str) -> usize {
+    let raw = slice(source, start, end);
+    start + (raw.len() - raw.trim_start().len())
+}
+
+/// Byte span into the formula source for an absolute CST range.
+fn span_from(base: usize, start: usize, end: usize) -> Option<MathSpan> {
+    if end <= start {
+        return None;
+    }
+    Some(MathSpan { start: start.saturating_sub(base) as u32, end: end.saturating_sub(base) as u32 })
+}
+
 /// Lower a list of TeX items into one expression.
-pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
+///
+/// `base` is the absolute source offset the formula source starts at after
+/// trimming, so every recorded [`MathSpan`] indexes [`MathFormula::source`].
+pub(crate) fn lower_root(items: &[TexItem], source: &str, base: usize) -> MathExpression {
     let mut expressions: Vec<MathExpression> = Vec::new();
     let mut index = 0usize;
     while index < items.len() {
@@ -105,10 +130,11 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                     expressions.push(MathExpression::Unsupported {
                         kind: "script-base".into(),
                         source: slice(source, script.span.start, script.span.end),
+                        span: span_from(base, script.span.start, script.span.end),
                     });
                 }
                 else {
-                    attach_script(&mut expressions, Some(lower_root(&script.content.items, source)), None);
+                    attach_script(&mut expressions, Some(lower_root(&script.content.items, source, base)), None);
                 }
                 index += 1;
             }
@@ -117,10 +143,11 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                     expressions.push(MathExpression::Unsupported {
                         kind: "script-base".into(),
                         source: slice(source, script.span.start, script.span.end),
+                        span: span_from(base, script.span.start, script.span.end),
                     });
                 }
                 else {
-                    attach_script(&mut expressions, None, Some(lower_root(&script.content.items, source)));
+                    attach_script(&mut expressions, None, Some(lower_root(&script.content.items, source, base)));
                 }
                 index += 1;
             }
@@ -128,9 +155,10 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                 // `\limits` describes the operator in front of it and the
                 // scripts that follow it, so fold both onto the base that
                 // precedes the policy.
-                let base = expressions.pop().unwrap_or_else(|| MathExpression::Unsupported {
+                let base_expression = expressions.pop().unwrap_or_else(|| MathExpression::Unsupported {
                     kind: "limits-base".into(),
                     source: slice(source, limits.span.start, limits.span.end),
+                    span: span_from(base, limits.span.start, limits.span.end),
                 });
                 // Consecutive `\limits`/`\nolimits` replace each other: the last
                 // policy before the scripts is the one that applies.
@@ -142,18 +170,18 @@ pub(crate) fn lower_root(items: &[TexItem], source: &str) -> MathExpression {
                 let mut next = index + 1;
                 while next < items.len() {
                     match &items[next] {
-                        TexItem::Superscript(script) => superscript = Some(lower_root(&script.content.items, source)),
-                        TexItem::Subscript(script) => subscript = Some(lower_root(&script.content.items, source)),
+                        TexItem::Superscript(script) => superscript = Some(lower_root(&script.content.items, source, base)),
+                        TexItem::Subscript(script) => subscript = Some(lower_root(&script.content.items, source, base)),
                         _ => break,
                     }
                     next += 1;
                 }
                 expressions.push(MathExpression::LimitsPolicy { limits: limits.is_limits });
-                expressions.push(script_expression(base, superscript, subscript));
+                expressions.push(script_expression(base_expression, superscript, subscript));
                 index = next;
             }
             _ => {
-                if let Some(expression) = lower_item(item, source) {
+                if let Some(expression) = lower_item(item, source, base) {
                     append_expression(&mut expressions, expression);
                 }
                 index += 1;
@@ -198,7 +226,7 @@ fn sequence(mut expressions: Vec<MathExpression>) -> MathExpression {
 fn attach_script(expressions: &mut Vec<MathExpression>, superscript: Option<MathExpression>, subscript: Option<MathExpression>) {
     let Some(last) = expressions.pop()
     else {
-        expressions.push(MathExpression::Unsupported { kind: "script-base".into(), source: String::new() });
+        expressions.push(MathExpression::Unsupported { kind: "script-base".into(), source: String::new(), span: None });
         return;
     };
     match last {
@@ -213,18 +241,20 @@ fn attach_script(expressions: &mut Vec<MathExpression>, superscript: Option<Math
     }
 }
 
-fn lower_item(item: &TexItem, source: &str) -> Option<MathExpression> {
+fn lower_item(item: &TexItem, source: &str, base: usize) -> Option<MathExpression> {
     match item {
-        TexItem::Text { content, .. } => Some(text_expression(content)),
-        TexItem::Command(command) => Some(lower_command(command, source)),
-        TexItem::Group(group) => Some(MathExpression::Group { body: Box::new(lower_root(&group.content.items, source)) }),
-        TexItem::Math(math) => Some(lower_root(&math.content.items, source)),
-        TexItem::Environment(environment) => Some(lower_environment(environment, source)),
-        TexItem::LeftRightPair(pair) => Some(lower_left_right(pair, source)),
+        TexItem::Text { content, span, .. } => Some(text_expression(content, span.start, base)),
+        TexItem::Command(command) => Some(lower_command(command, source, base)),
+        TexItem::Group(group) => Some(MathExpression::Group { body: Box::new(lower_root(&group.content.items, source, base)) }),
+        TexItem::Math(math) => Some(lower_root(&math.content.items, source, base)),
+        TexItem::Environment(environment) => Some(lower_environment(environment, source, base)),
+        TexItem::LeftRightPair(pair) => Some(lower_left_right(pair, source, base)),
         TexItem::Row(_) => None,
-        TexItem::Superscript(_) | TexItem::Subscript(_) | TexItem::Limits(_) => {
-            Some(MathExpression::Unsupported { kind: "math-item".into(), source: slice(source, item_span(item).0, item_span(item).1) })
-        }
+        TexItem::Superscript(_) | TexItem::Subscript(_) | TexItem::Limits(_) => Some(MathExpression::Unsupported {
+            kind: "math-item".into(),
+            source: slice(source, item_span(item).0, item_span(item).1),
+            span: span_from(base, item_span(item).0, item_span(item).1),
+        }),
         TexItem::Comment { .. } => None,
     }
 }
@@ -244,44 +274,50 @@ fn item_span(item: &TexItem) -> (usize, usize) {
     }
 }
 
-fn lower_command(command: &TexCommand, source: &str) -> MathExpression {
+fn lower_command(command: &TexCommand, source: &str, base: usize) -> MathExpression {
     let name = command.name.as_str();
+    let command_span = span_from(base, command.span.start, command.span.end);
     match name {
-        "frac" | "dfrac" | "tfrac" => fraction(command, source, MathFractionLine::Solid),
+        "frac" | "dfrac" | "tfrac" => fraction(command, source, MathFractionLine::Solid, base),
         "binom" => MathExpression::Delimited {
-            open: delimiter("("),
-            close: delimiter(")"),
-            body: Box::new(fraction(command, source, MathFractionLine::None)),
+            // The parentheses are synthesized by `\binom`; the author typed
+            // no delimiter, so neither carries a source span.
+            open: delimiter("(", None),
+            close: delimiter(")", None),
+            body: Box::new(fraction(command, source, MathFractionLine::None, base)),
             middles: Vec::new(),
         },
-        "sqrt" => lower_radical(command, source),
+        "sqrt" => lower_radical(command, source, base),
         "text" | "textrm" | "mbox" | "operatorname" => match command.arguments.iter().find_map(argument_text) {
-            Some(text) => MathExpression::Text { text },
-            None => unsupported(command.span.start, command.span.end, source, "text"),
+            Some(text) => MathExpression::Text { text, span: command_span },
+            None => unsupported(command.span.start, command.span.end, source, "text", base),
         },
         "textit" => MathExpression::Styled {
             style: MathStyle::Italic,
-            body: Box::new(MathExpression::Text { text: command.arguments.iter().find_map(argument_text).unwrap_or_default() }),
+            body: Box::new(MathExpression::Text {
+                text: command.arguments.iter().find_map(argument_text).unwrap_or_default(),
+                span: command_span,
+            }),
         },
-        "mathrm" => styled(MathStyle::Upright, command, source),
-        "mathit" => styled(MathStyle::Italic, command, source),
-        "mathbf" => styled(MathStyle::Bold, command, source),
-        "mathbb" => styled(MathStyle::DoubleStruck, command, source),
-        "mathcal" => styled(MathStyle::Script, command, source),
-        "mathfrak" => styled(MathStyle::Fraktur, command, source),
-        "mathsf" => styled(MathStyle::SansSerif, command, source),
-        "mathtt" => styled(MathStyle::Monospace, command, source),
-        "hat" | "widehat" => accent('ˆ', name == "widehat", command, source),
-        "bar" | "overline" => accent('¯', false, command, source),
-        "vec" | "overrightarrow" => accent('→', false, command, source),
-        "tilde" | "widetilde" => accent('˜', name == "widetilde", command, source),
-        "dot" => accent('˙', false, command, source),
-        "ddot" => accent('¨', false, command, source),
-        "breve" => accent('˘', false, command, source),
-        "check" => accent('ˇ', false, command, source),
-        "overset" => stack(command, source, true),
-        "underset" => stack(command, source, false),
-        "stackrel" => MathExpression::Relation(Box::new(stack(command, source, true))),
+        "mathrm" => styled(MathStyle::Upright, command, source, base),
+        "mathit" => styled(MathStyle::Italic, command, source, base),
+        "mathbf" => styled(MathStyle::Bold, command, source, base),
+        "mathbb" => styled(MathStyle::DoubleStruck, command, source, base),
+        "mathcal" => styled(MathStyle::Script, command, source, base),
+        "mathfrak" => styled(MathStyle::Fraktur, command, source, base),
+        "mathsf" => styled(MathStyle::SansSerif, command, source, base),
+        "mathtt" => styled(MathStyle::Monospace, command, source, base),
+        "hat" | "widehat" => accent('ˆ', name == "widehat", command, source, base),
+        "bar" | "overline" => accent('¯', false, command, source, base),
+        "vec" | "overrightarrow" => accent('→', false, command, source, base),
+        "tilde" | "widetilde" => accent('˜', name == "widetilde", command, source, base),
+        "dot" => accent('˙', false, command, source, base),
+        "ddot" => accent('¨', false, command, source, base),
+        "breve" => accent('˘', false, command, source, base),
+        "check" => accent('ˇ', false, command, source, base),
+        "overset" => stack(command, source, true, base),
+        "underset" => stack(command, source, false, base),
+        "stackrel" => MathExpression::Relation(Box::new(stack(command, source, true, base))),
         "quad" => MathExpression::Space { kind: MathSpace::Quad },
         "qquad" => MathExpression::Space { kind: MathSpace::DoubleQuad },
         "," | "thinspace" => MathExpression::Space { kind: MathSpace::Thin },
@@ -293,72 +329,80 @@ fn lower_command(command: &TexCommand, source: &str) -> MathExpression {
         "textstyle" => MathExpression::StyleSwitch { style: MathStyleKind::Text },
         "scriptstyle" => MathExpression::StyleSwitch { style: MathStyleKind::Script },
         "scriptscriptstyle" => MathExpression::StyleSwitch { style: MathStyleKind::ScriptScript },
-        "{" => char_atom('{', MathClass::Opening),
-        "}" => char_atom('}', MathClass::Closing),
-        "|" => char_atom('‖', MathClass::Ordinary),
+        "{" => char_atom('{', MathClass::Opening, command_span),
+        "}" => char_atom('}', MathClass::Closing, command_span),
+        "|" => char_atom('‖', MathClass::Ordinary, command_span),
         _ => {
             if let Some((text, class)) = symbol_for(name) {
-                return MathExpression::Atom(MathAtom { text: text.to_string(), class });
+                return MathExpression::Atom(MathAtom { text: text.to_string(), class, span: command_span });
             }
             if named_function(name) {
-                return MathExpression::Text { text: name.to_string() };
+                return MathExpression::Text { text: name.to_string(), span: command_span };
             }
-            unsupported(command.span.start, command.span.end, source, "command")
+            unsupported(command.span.start, command.span.end, source, "command", base)
         }
     }
 }
 
-fn fraction(command: &TexCommand, source: &str, line: MathFractionLine) -> MathExpression {
-    let arguments: Vec<MathExpression> = command.arguments.iter().map(|argument| lower_argument(argument, source)).collect();
+fn fraction(command: &TexCommand, source: &str, line: MathFractionLine, base: usize) -> MathExpression {
+    let arguments: Vec<MathExpression> = command.arguments.iter().map(|argument| lower_argument(argument, source, base)).collect();
     match arguments.as_slice() {
         [numerator, denominator] => {
             MathExpression::Fraction { numerator: Box::new(numerator.clone()), denominator: Box::new(denominator.clone()), line }
         }
-        _ => unsupported(command.span.start, command.span.end, source, "fraction"),
+        _ => unsupported(command.span.start, command.span.end, source, "fraction", base),
     }
 }
 
-fn styled(style: MathStyle, command: &TexCommand, source: &str) -> MathExpression {
-    let body = command.arguments.first().map(|argument| lower_argument(argument, source)).unwrap_or(MathExpression::Sequence(Vec::new()));
+fn styled(style: MathStyle, command: &TexCommand, source: &str, base: usize) -> MathExpression {
+    let body =
+        command.arguments.first().map(|argument| lower_argument(argument, source, base)).unwrap_or(MathExpression::Sequence(Vec::new()));
     MathExpression::Styled { style, body: Box::new(body) }
 }
 
-fn accent(mark: char, wide: bool, command: &TexCommand, source: &str) -> MathExpression {
-    let base = command.arguments.first().map(|argument| lower_argument(argument, source)).unwrap_or(MathExpression::Sequence(Vec::new()));
-    MathExpression::Accent { mark, wide, base: Box::new(base) }
+fn accent(mark: char, wide: bool, command: &TexCommand, source: &str, base: usize) -> MathExpression {
+    let body =
+        command.arguments.first().map(|argument| lower_argument(argument, source, base)).unwrap_or(MathExpression::Sequence(Vec::new()));
+    MathExpression::Accent { mark, wide, base: Box::new(body), span: span_from(base, command.span.start, command.span.end) }
 }
 
-fn stack(command: &TexCommand, source: &str, above: bool) -> MathExpression {
+fn stack(command: &TexCommand, source: &str, above: bool, base: usize) -> MathExpression {
     let mut arguments = command.arguments.iter();
-    let stacked = arguments.next().map(|argument| lower_argument(argument, source)).unwrap_or(MathExpression::Sequence(Vec::new()));
-    let base = arguments.next().map(|argument| lower_argument(argument, source)).unwrap_or(MathExpression::Sequence(Vec::new()));
+    let stacked =
+        arguments.next().map(|argument| lower_argument(argument, source, base)).unwrap_or(MathExpression::Sequence(Vec::new()));
+    let base_expression =
+        arguments.next().map(|argument| lower_argument(argument, source, base)).unwrap_or(MathExpression::Sequence(Vec::new()));
     if above {
-        MathExpression::StackAbove { over: Box::new(stacked), base: Box::new(base) }
+        MathExpression::StackAbove { over: Box::new(stacked), base: Box::new(base_expression) }
     }
     else {
-        MathExpression::StackBelow { under: Box::new(stacked), base: Box::new(base) }
+        MathExpression::StackBelow { under: Box::new(stacked), base: Box::new(base_expression) }
     }
 }
 
-fn lower_radical(command: &TexCommand, source: &str) -> MathExpression {
+fn lower_radical(command: &TexCommand, source: &str, base: usize) -> MathExpression {
     let mut index = None;
     let mut radicand = None;
     for argument in &command.arguments {
         match argument {
-            TexArgument::Optional(root) if index.is_none() => index = Some(lower_root(&root.items, source)),
-            TexArgument::Required(root) if radicand.is_none() => radicand = Some(lower_root(&root.items, source)),
+            TexArgument::Optional(root) if index.is_none() => index = Some(lower_root(&root.items, source, base)),
+            TexArgument::Required(root) if radicand.is_none() => radicand = Some(lower_root(&root.items, source, base)),
             _ => {}
         }
     }
     match radicand {
-        Some(radicand) => MathExpression::Radical { index: index.map(Box::new), radicand: Box::new(radicand) },
-        None => unsupported(command.span.start, command.span.end, source, "radical"),
+        Some(radicand) => MathExpression::Radical {
+            index: index.map(Box::new),
+            radicand: Box::new(radicand),
+            span: span_from(base, command.span.start, command.span.end),
+        },
+        None => unsupported(command.span.start, command.span.end, source, "radical", base),
     }
 }
 
-fn lower_argument(argument: &TexArgument, source: &str) -> MathExpression {
+fn lower_argument(argument: &TexArgument, source: &str, base: usize) -> MathExpression {
     match argument {
-        TexArgument::Optional(root) | TexArgument::Required(root) => lower_root(&root.items, source),
+        TexArgument::Optional(root) | TexArgument::Required(root) => lower_root(&root.items, source, base),
     }
 }
 
@@ -392,16 +436,19 @@ fn item_text(item: &TexItem) -> Option<String> {
     }
 }
 
-fn lower_left_right(pair: &TexLeftRightPair, source: &str) -> MathExpression {
+fn lower_left_right(pair: &TexLeftRightPair, source: &str, base: usize) -> MathExpression {
+    // The AST only keeps the whole-pair span, so both delimiters point at
+    // the pair they were authored in.
+    let pair_span = span_from(base, pair.span.start, pair.span.end);
     MathExpression::Delimited {
-        open: delimiter(&pair.left_delim),
-        close: delimiter(&pair.right_delim),
-        body: Box::new(lower_root(&pair.content.items, source)),
+        open: delimiter(&pair.left_delim, pair_span),
+        close: delimiter(&pair.right_delim, pair_span),
+        body: Box::new(lower_root(&pair.content.items, source, base)),
         middles: Vec::new(),
     }
 }
 
-fn delimiter(spelling: &str) -> Option<MathDelimiter> {
+fn delimiter(spelling: &str, span: Option<MathSpan>) -> Option<MathDelimiter> {
     let spelling = spelling.trim();
     let (kind, character) = match spelling {
         "." | "" => return None,
@@ -418,14 +465,14 @@ fn delimiter(spelling: &str) -> Option<MathDelimiter> {
         "/" => (MathDelimiterKind::Slash, Some('/')),
         other => (MathDelimiterKind::Other, other.chars().next()),
     };
-    Some(MathDelimiter { kind, character })
+    Some(MathDelimiter { kind, character, span })
 }
 
-fn lower_environment(environment: &TexEnvironment, source: &str) -> MathExpression {
+fn lower_environment(environment: &TexEnvironment, source: &str, base: usize) -> MathExpression {
     let name = environment.name.as_str();
     let kind = environment_kind(name);
     let numbered = !environment.starred && environment_is_numbered(name);
-    let rows = environment_rows(environment, source, &kind, numbered);
+    let rows = environment_rows(environment, source, &kind, numbered, base);
     let column_alignment = column_alignment(name, &rows);
     let column_pairs = match kind {
         MathEnvironmentKind::AlignedAt | MathEnvironmentKind::AlignAt => {
@@ -440,6 +487,7 @@ fn lower_environment(environment: &TexEnvironment, source: &str) -> MathExpressi
         rows,
         column_alignment,
         column_pairs,
+        span: span_from(base, environment.span.start, environment.span.end),
     })
 }
 
@@ -474,7 +522,7 @@ fn column_alignment(name: &str, rows: &[MathRow]) -> Vec<MathColumnAlignment> {
     }
 }
 
-fn environment_rows(environment: &TexEnvironment, source: &str, kind: &MathEnvironmentKind, numbered: bool) -> Vec<MathRow> {
+fn environment_rows(environment: &TexEnvironment, source: &str, kind: &MathEnvironmentKind, numbered: bool, base: usize) -> Vec<MathRow> {
     let authored: Vec<&TexRow> = environment
         .content
         .items
@@ -485,7 +533,8 @@ fn environment_rows(environment: &TexEnvironment, source: &str, kind: &MathEnvir
         })
         .collect();
     if authored.is_empty() {
-        let cells = if environment.content.items.is_empty() { Vec::new() } else { vec![lower_root(&environment.content.items, source)] };
+        let cells =
+            if environment.content.items.is_empty() { Vec::new() } else { vec![lower_root(&environment.content.items, source, base)] };
         return vec![MathRow { cells, placement: MathRowPlacement::Normal, numbering: MathRowNumbering::None }];
     }
     let total = authored.len();
@@ -493,7 +542,7 @@ fn environment_rows(environment: &TexEnvironment, source: &str, kind: &MathEnvir
         .iter()
         .enumerate()
         .map(|(index, row)| MathRow {
-            cells: row.cells.iter().map(|cell| lower_cell(cell, source)).collect(),
+            cells: row.cells.iter().map(|cell| lower_cell(cell, source, base)).collect(),
             placement: row_placement(kind, index, total),
             numbering: row_numbering(&row.cells, numbered, source),
         })
@@ -518,7 +567,7 @@ fn row_placement(kind: &MathEnvironmentKind, index: usize, total: usize) -> Math
     }
 }
 
-fn lower_cell(cell: &TexCell, source: &str) -> MathExpression {
+fn lower_cell(cell: &TexCell, source: &str, base: usize) -> MathExpression {
     // Row metadata describes the row; it is not an atom of the cell.
     let items: Vec<TexItem> = cell
         .content
@@ -527,7 +576,7 @@ fn lower_cell(cell: &TexCell, source: &str) -> MathExpression {
         .filter(|item| !matches!(item, TexItem::Command(command) if is_row_metadata(command)))
         .cloned()
         .collect();
-    lower_root(&items, source)
+    lower_root(&items, source, base)
 }
 
 /// Read the row's numbering intent from the command nodes inside its cells.
@@ -618,24 +667,28 @@ pub(crate) fn row_metadata(row: &TexRow, source: &str) -> RowMetadata {
     metadata
 }
 
-fn text_expression(text: &str) -> MathExpression {
+fn text_expression(text: &str, start: usize, base: usize) -> MathExpression {
     if text.chars().all(|c| c.is_ascii_digit()) && !text.is_empty() {
-        return MathExpression::Number { text: text.to_string() };
+        return MathExpression::Number { text: text.to_string(), span: span_from(base, start, start + text.len()) };
     }
-    let atoms: Vec<MathExpression> = text.chars().filter(|c| !c.is_whitespace()).map(char_expression).collect();
+    let atoms: Vec<MathExpression> = text
+        .char_indices()
+        .filter(|(_, c)| !c.is_whitespace())
+        .map(|(offset, c)| char_expression(c, span_from(base, start + offset, start + offset + c.len_utf8())))
+        .collect();
     sequence(atoms)
 }
 
-fn char_expression(c: char) -> MathExpression {
+fn char_expression(c: char, span: Option<MathSpan>) -> MathExpression {
     if c.is_ascii_digit() {
-        return MathExpression::Number { text: c.to_string() };
+        return MathExpression::Number { text: c.to_string(), span };
     }
     let class = class_for_char(c);
-    char_atom(c, class)
+    char_atom(c, class, span)
 }
 
-fn char_atom(c: char, class: MathClass) -> MathExpression {
-    MathExpression::Atom(MathAtom { text: c.to_string(), class })
+fn char_atom(c: char, class: MathClass, span: Option<MathSpan>) -> MathExpression {
+    MathExpression::Atom(MathAtom { text: c.to_string(), class, span })
 }
 
 fn class_for_char(c: char) -> MathClass {
@@ -766,8 +819,8 @@ fn named_function(name: &str) -> bool {
     NAMES.contains(&name)
 }
 
-fn unsupported(start: usize, end: usize, source: &str, kind: &str) -> MathExpression {
-    MathExpression::Unsupported { kind: kind.to_string(), source: slice(source, start, end) }
+fn unsupported(start: usize, end: usize, source: &str, kind: &str, base: usize) -> MathExpression {
+    MathExpression::Unsupported { kind: kind.to_string(), source: slice(source, start, end), span: span_from(base, start, end) }
 }
 
 fn slice(source: &str, start: usize, end: usize) -> String {
@@ -800,7 +853,7 @@ mod tests {
             panic!("expected a script, got {expression:?}")
         };
         assert!(matches!(&*base, MathExpression::Atom(atom) if atom.text == "x"));
-        assert!(matches!(superscript.as_deref(), Some(MathExpression::Number { text }) if text == "2"));
+        assert!(matches!(superscript.as_deref(), Some(MathExpression::Number { text, .. }) if text == "2"));
     }
 
     #[test]
@@ -841,6 +894,154 @@ mod tests {
         assert_eq!(environment.kind, MathEnvironmentKind::AlignedAt);
         assert_eq!(environment.column_pairs, Some(2));
         assert!(matches!(&environment.rows[0].cells[0], MathExpression::Atom(atom) if atom.text == "a"));
+    }
+
+    fn lower_formula(source: &str) -> MathFormula {
+        lower_tex_formula_source(source, MathDisplay::Inline)
+    }
+
+    fn slice_span(formula: &MathFormula, span: MathSpan) -> String {
+        formula.source.get(span.start as usize..span.end as usize).unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn atom_spans_index_the_trimmed_formula_source() {
+        // Leading whitespace is trimmed out of the formula source, so spans
+        // must still index the trimmed text.
+        let formula = lower_formula("  x + \\alpha");
+        let MathExpression::Sequence(items) = &formula.expression
+        else {
+            panic!("expected a sequence")
+        };
+        let [x, plus, alpha] = items.as_slice()
+        else {
+            panic!("expected three atoms")
+        };
+        let MathExpression::Atom(x) = x
+        else {
+            panic!("expected an atom")
+        };
+        let MathExpression::Atom(alpha) = alpha
+        else {
+            panic!("expected an atom")
+        };
+        assert_eq!(x.span, Some(MathSpan { start: 0, end: 1 }));
+        assert_eq!(slice_span(&formula, x.span.unwrap()), "x");
+        let MathExpression::Atom(plus) = plus
+        else {
+            panic!("expected an atom")
+        };
+        assert_eq!(plus.span, Some(MathSpan { start: 2, end: 3 }));
+        assert_eq!(slice_span(&formula, plus.span.unwrap()), "+");
+        // The multi-character command span covers the whole `\alpha`.
+        assert_eq!(alpha.span, Some(MathSpan { start: 4, end: 10 }));
+        assert_eq!(slice_span(&formula, alpha.span.unwrap()), "\\alpha");
+    }
+
+    #[test]
+    fn accent_span_covers_the_command_and_the_base_keeps_its_own() {
+        let formula = lower_formula("\\hat{x}");
+        let MathExpression::Accent { base, span, .. } = &formula.expression
+        else {
+            panic!("expected an accent")
+        };
+        assert_eq!(*span, Some(MathSpan { start: 0, end: 7 }));
+        assert_eq!(slice_span(&formula, span.unwrap()), "\\hat{x}");
+        let MathExpression::Atom(atom) = &**base
+        else {
+            panic!("expected an atom base")
+        };
+        assert_eq!(atom.span, Some(MathSpan { start: 5, end: 6 }));
+        assert_eq!(slice_span(&formula, atom.span.unwrap()), "x");
+    }
+
+    #[test]
+    fn script_spans_stay_on_their_own_terms() {
+        let formula = lower_formula("x^2");
+        let MathExpression::Script { base, superscript, .. } = &formula.expression
+        else {
+            panic!("expected a script")
+        };
+        let MathExpression::Atom(base) = &**base
+        else {
+            panic!("expected an atom base")
+        };
+        assert_eq!(base.span, Some(MathSpan { start: 0, end: 1 }));
+        let MathExpression::Number { span, .. } = &**superscript.as_ref().expect("a superscript")
+        else {
+            panic!("expected a number superscript")
+        };
+        assert_eq!(*span, Some(MathSpan { start: 2, end: 3 }));
+        assert_eq!(slice_span(&formula, span.unwrap()), "2");
+    }
+
+    #[test]
+    fn starred_alignedat_cells_carry_spans_into_the_environment() {
+        let formula = lower_formula("\\begin{alignedat*}{2} a &= b \\end{alignedat*}");
+        let MathExpression::Environment(environment) = &formula.expression
+        else {
+            panic!("expected an environment")
+        };
+        assert_eq!(environment.span, Some(MathSpan { start: 0, end: 45 }));
+        let MathExpression::Atom(first) = &environment.rows[0].cells[0]
+        else {
+            panic!("expected an atom cell")
+        };
+        assert_eq!(first.span, Some(MathSpan { start: 22, end: 23 }));
+        assert_eq!(slice_span(&formula, first.span.unwrap()), "a");
+        // The second cell keeps the relation and the atom as separate spans.
+        let MathExpression::Sequence(cell_items) = &environment.rows[0].cells[1]
+        else {
+            panic!("expected a sequence cell")
+        };
+        let MathExpression::Atom(relation) = &cell_items[0]
+        else {
+            panic!("expected a relation atom")
+        };
+        assert_eq!(relation.span, Some(MathSpan { start: 25, end: 26 }));
+        assert_eq!(slice_span(&formula, relation.span.unwrap()), "=");
+        let MathExpression::Atom(second) = &cell_items[1]
+        else {
+            panic!("expected an atom cell")
+        };
+        assert_eq!(second.span, Some(MathSpan { start: 27, end: 28 }));
+        assert_eq!(slice_span(&formula, second.span.unwrap()), "b");
+    }
+
+    #[test]
+    fn synthesized_binom_delimiters_carry_no_span() {
+        let formula = lower_formula("\\binom{a}{b}");
+        let MathExpression::Delimited { open, close, .. } = &formula.expression
+        else {
+            panic!("expected a delimited expression")
+        };
+        // The author typed no parentheses, so the synthesized delimiters
+        // must not pretend to point at the source.
+        assert!(open.is_some_and(|delimiter| delimiter.span.is_none()));
+        assert!(close.is_some_and(|delimiter| delimiter.span.is_none()));
+    }
+
+    #[test]
+    fn left_right_delimiters_point_at_their_pair() {
+        let formula = lower_formula("\\left( x \\right)");
+        let MathExpression::Delimited { open, close, .. } = &formula.expression
+        else {
+            panic!("expected a delimited expression")
+        };
+        let open = open.expect("an open delimiter");
+        let close = close.expect("a close delimiter");
+        assert_eq!(open.span, Some(MathSpan { start: 0, end: 16 }));
+        assert_eq!(open.span, close.span);
+    }
+
+    #[test]
+    fn unparsed_formula_keeps_no_span() {
+        let formula = MathFormula::unsupported("x +", Some("latex".into()), MathDisplay::Inline, "unparsed");
+        let MathExpression::Unsupported { span, .. } = &formula.expression
+        else {
+            panic!("expected an unsupported expression")
+        };
+        assert_eq!(*span, None);
     }
 
     #[test]

@@ -186,22 +186,22 @@ fn html_export_embeds_rendered_diagram_svg_in_a_figure() {
     diagrams.insert(id, RenderedDiagram { svg: r##"<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"##.to_string() });
 
     let html = export_html_with_diagrams(&graph, &diagrams).expect("html export with rendered diagram");
-    assert!(html.contains(r#"<figure class="notedown-diagram" data-diagram-language="mermaid""#), "{html}");
+    assert!(html.contains(r#"<figure class="diagram" data-diagram-language="mermaid""#), "{html}");
     assert!(html.contains(r##"<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"##), "{html}");
     assert!(html.contains("data-diagram-source-hex="), "{html}");
-    assert!(!html.contains("<pre data-diagram-language"), "rendered diagrams must not keep the source fallback: {html}");
+    assert!(!html.contains(r#"<pre class="diagram" data-diagram-language"#), "rendered diagrams must not keep the source fallback: {html}");
 }
 
 #[test]
 fn html_export_falls_back_to_source_pre_without_a_rendered_scene() {
     let (graph, _) = diagram_graph("flowchart TD\n  A --> B");
     let html = export_html(&graph).expect("html export without rendered diagrams");
-    assert!(html.contains(r#"<pre data-diagram-language="mermaid""#), "{html}");
+    assert!(html.contains(r#"<pre class="diagram" data-diagram-language="mermaid""#), "{html}");
     assert!(!html.contains("<figure"), "{html}");
 
     let (graph, _) = diagram_graph("flowchart TD\n  A --> B");
     let html = export_html_with_diagrams(&graph, &HashMap::new()).expect("html export with an empty diagram map");
-    assert!(html.contains(r#"<pre data-diagram-language="mermaid""#), "{html}");
+    assert!(html.contains(r#"<pre class="diagram" data-diagram-language="mermaid""#), "{html}");
 }
 
 #[test]

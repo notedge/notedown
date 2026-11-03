@@ -79,7 +79,7 @@ fn sequence_source_lowers_participants_messages_and_lifelines() {
     assert!(svg.contains(">Browser</text>"), "{svg}");
     assert!(svg.contains(">request</text>"), "{svg}");
     assert!(svg.contains(">response</text>"), "{svg}");
-    assert!(svg.contains("diagram-sequence-lifeline-Client"), "{svg}");
+    assert!(svg.contains("sequence-lifeline-Client"), "{svg}");
 }
 
 #[test]

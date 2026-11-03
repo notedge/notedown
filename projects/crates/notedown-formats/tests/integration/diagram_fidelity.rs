@@ -96,7 +96,7 @@ fn rendered_diagram_figures_round_trip_the_authored_source() {
         assert_eq!(diagrams.len(), 1, "{name}");
 
         let html = export_html_with_diagrams(&graph, &diagrams).expect("export rendered diagram html");
-        assert!(html.contains("<figure class=\"notedown-diagram\""), "{name}\n{html}");
+        assert!(html.contains("<figure class=\"diagram\""), "{name}\n{html}");
         let from_html = import_html_bytes(&format!("{name}.rendered.html"), html.as_bytes()).expect("reopen rendered diagram html");
         assert_eq!(diagram_block(&from_html, "mermaid"), *source, "{name}\n{html}");
     }

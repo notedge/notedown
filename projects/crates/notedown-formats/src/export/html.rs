@@ -125,7 +125,7 @@ fn write_block(
         }
         Block::Diagram { language, source } => match diagrams.get(&id) {
             Some(rendered) => {
-                out.push_str(r#"<figure class="notedown-diagram" data-diagram-language=""#);
+                out.push_str(r#"<figure class="diagram" data-diagram-language=""#);
                 escape_attribute(out, language);
                 out.push_str(r#"" data-diagram-source-hex=""#);
                 out.push_str(&encode_hex(source));
@@ -134,7 +134,7 @@ fn write_block(
                 out.push_str("</figure>");
             }
             None => {
-                out.push_str(r#"<pre data-diagram-language=""#);
+                out.push_str(r#"<pre class="diagram" data-diagram-language=""#);
                 escape_attribute(out, language);
                 out.push_str(r#"" data-diagram-source-hex=""#);
                 out.push_str(&encode_hex(source));

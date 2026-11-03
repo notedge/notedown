@@ -28,8 +28,8 @@ const CLUSTER_LABEL_X: f64 = 10.0;
 const CLUSTER_LABEL_Y: f64 = 14.0;
 const CLUSTER_FONT_SIZE: f64 = 12.0;
 const LIFELINE_COLOR: Color = Color::rgb(0x9a, 0xa6, 0xb8);
-const GRAPH_EDGE_PREFIX: &str = "diagram-edge";
-const SEQUENCE_MESSAGE_PREFIX: &str = "diagram-sequence-message";
+const GRAPH_EDGE_PREFIX: &str = "edge";
+const SEQUENCE_MESSAGE_PREFIX: &str = "sequence-message";
 
 /// Tuning for deterministic scene rendering.
 #[derive(Clone, Debug, PartialEq)]
@@ -105,7 +105,7 @@ pub fn render_sequence_with_options(plan: &DiagramLayoutPlan, options: &RenderOp
                 to: Point::new(center.x, plan.canvas.height),
                 style: ShapeStyle::stroked(LIFELINE_COLOR, 1.0),
             })
-            .with_id(format!("diagram-sequence-lifeline-{}", participant.id))
+            .with_id(format!("sequence-lifeline-{}", participant.id))
             .with_role(SemanticRole::Decoration)
             .with_source(SourceRef::element(participant.id.clone())),
         );
@@ -130,7 +130,7 @@ fn push_cluster(scene: &mut SemanticScene, cluster: &PlacedCluster, options: &Re
     let source = SourceRef::element(cluster.id.clone());
     scene.push(
         SemanticNode::new(SemanticKind::RoundedRect { rect: cluster.rect, radius: CLUSTER_RADIUS, style: cluster_style() })
-            .with_id(format!("diagram-cluster-{}", cluster.id))
+            .with_id(format!("cluster-{}", cluster.id))
             .with_role(SemanticRole::Cluster)
             .with_source(source.clone()),
     );
@@ -182,7 +182,7 @@ fn push_edge(scene: &mut SemanticScene, id_prefix: &str, index: usize, edge: &Ro
 
 fn push_node(scene: &mut SemanticScene, node: &PlacedNode) {
     let source = SourceRef::element(node.id.clone());
-    let id = format!("diagram-node-{}", node.id);
+    let id = format!("node-{}", node.id);
     scene.push(node_shape(node).with_id(id.clone()).with_role(SemanticRole::Node).with_source(source).with_hit_region(node.rect));
 }
 
@@ -190,7 +190,7 @@ fn push_node_label(scene: &mut SemanticScene, node: &PlacedNode, options: &Rende
     let source = SourceRef::element(node.id.clone());
     push_centered_text(
         scene,
-        &format!("diagram-node-{}-label", node.id),
+        &format!("node-{}-label", node.id),
         &node.label,
         node.rect.center(),
         options.font_size,
@@ -249,7 +249,7 @@ fn push_centered_text(
 }
 
 fn cluster_label_id(cluster: &str, index: usize, line_count: usize) -> String {
-    if line_count == 1 { format!("diagram-cluster-{cluster}-label") } else { format!("diagram-cluster-{cluster}-label-{index}") }
+    if line_count == 1 { format!("cluster-{cluster}-label") } else { format!("cluster-{cluster}-label-{index}") }
 }
 
 fn node_shape(node: &PlacedNode) -> SemanticNode {
@@ -273,15 +273,15 @@ fn cylinder_children(id: &str, rect: Rect, style: ShapeStyle) -> Vec<SemanticNod
     let center = rect.center();
     let body = Rect::new(rect.x, rect.y + cap, rect.width, (rect.height - cap * 2.0).max(0.0));
     vec![
-        SemanticNode::new(SemanticKind::Rect { rect: body, style: style.clone() }).with_id(format!("diagram-node-{id}-body")),
+        SemanticNode::new(SemanticKind::Rect { rect: body, style: style.clone() }).with_id(format!("node-{id}-body")),
         SemanticNode::new(SemanticKind::Ellipse {
             center: Point::new(center.x, rect.bottom() - cap),
             radii: Size::new(rect.width * 0.5, cap),
             style: style.clone(),
         })
-        .with_id(format!("diagram-node-{id}-bottom")),
+        .with_id(format!("node-{id}-bottom")),
         SemanticNode::new(SemanticKind::Ellipse { center: Point::new(center.x, rect.y + cap), radii: Size::new(rect.width * 0.5, cap), style })
-            .with_id(format!("diagram-node-{id}-top")),
+            .with_id(format!("node-{id}-top")),
     ]
 }
 

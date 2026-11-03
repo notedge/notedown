@@ -146,7 +146,7 @@ fn write_block(
         }
         Block::Diagram { language, source } => {
             // Partial: no raster conversion — emit as a marked-up pre.
-            out.push_str("<pre data-diagram-language=\"");
+            out.push_str("<pre class=\"diagram\" data-diagram-language=\"");
             escape_attribute(out, language);
             out.push_str("\" data-diagram-source=\"");
             escape_attribute(out, source);

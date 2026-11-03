@@ -48,21 +48,21 @@ fn nodes_edges_and_clusters_carry_semantics_and_stable_ids() {
     let plan = example_plan();
     let scene = render(&plan);
 
-    let start = scene_node(&scene, "diagram-node-A");
+    let start = scene_node(&scene, "node-A");
     assert_eq!(start.role, Some(SemanticRole::Node));
     assert_eq!(source_element(start), Some("A"));
     assert_eq!(start.hit_region, Some(plan.node("A").expect("A").rect));
 
-    let routed = scene_node(&scene, "diagram-edge-0");
+    let routed = scene_node(&scene, "edge-0");
     assert_eq!(routed.role, Some(SemanticRole::Edge));
     assert_eq!(source_element(routed), Some("A->B"));
     assert!(matches!(routed.kind, SemanticKind::Group { .. }));
 
-    let label = scene_node(&scene, "diagram-edge-0-label");
+    let label = scene_node(&scene, "edge-0-label");
     assert_eq!(label.role, Some(SemanticRole::EdgeLabel));
     assert_eq!(source_element(label), Some("A->B"));
 
-    let cluster = scene_node(&scene, "diagram-cluster-group");
+    let cluster = scene_node(&scene, "cluster-group");
     assert_eq!(cluster.role, Some(SemanticRole::Cluster));
     assert_eq!(source_element(cluster), Some("group"));
 }
@@ -97,13 +97,13 @@ fn node_shapes_map_to_scene_primitives() {
 
     let plan = compile(&spec, &LayoutOptions::default());
     let scene = render(&plan);
-    assert!(matches!(scene_node(&scene, "diagram-node-N0").kind, SemanticKind::Rect { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N1").kind, SemanticKind::RoundedRect { radius, .. } if radius == 8.0));
+    assert!(matches!(scene_node(&scene, "node-N0").kind, SemanticKind::Rect { .. }));
+    assert!(matches!(scene_node(&scene, "node-N1").kind, SemanticKind::RoundedRect { radius, .. } if radius == 8.0));
     assert!(
-        matches!(scene_node(&scene, "diagram-node-N2").kind, SemanticKind::RoundedRect { radius, .. } if (radius - plan.node("N2").expect("N2").rect.height * 0.5).abs() < f64::EPSILON)
+        matches!(scene_node(&scene, "node-N2").kind, SemanticKind::RoundedRect { radius, .. } if (radius - plan.node("N2").expect("N2").rect.height * 0.5).abs() < f64::EPSILON)
     );
-    assert!(matches!(scene_node(&scene, "diagram-node-N3").kind, SemanticKind::Rect { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N4").kind, SemanticKind::Group { .. }));
-    assert!(matches!(scene_node(&scene, "diagram-node-N5").kind, SemanticKind::Ellipse { radii, .. } if radii.width == radii.height));
-    assert!(matches!(scene_node(&scene, "diagram-node-N6").kind, SemanticKind::Path { .. }));
+    assert!(matches!(scene_node(&scene, "node-N3").kind, SemanticKind::Rect { .. }));
+    assert!(matches!(scene_node(&scene, "node-N4").kind, SemanticKind::Group { .. }));
+    assert!(matches!(scene_node(&scene, "node-N5").kind, SemanticKind::Ellipse { radii, .. } if radii.width == radii.height));
+    assert!(matches!(scene_node(&scene, "node-N6").kind, SemanticKind::Path { .. }));
 }

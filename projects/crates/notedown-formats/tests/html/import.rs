@@ -20,7 +20,7 @@ fn html_import_reads_rendered_diagram_figures_without_leaking_svg_text() {
     let source = "flowchart TD\n  A[Start] --> B{Done?}\n  B -->|yes| C[Stop]";
     let hex = source.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
     let html = format!(
-        "<body><article><figure class=\"notedown-diagram\" data-diagram-language=\"mermaid\" data-diagram-source-hex=\"{hex}\"><svg viewBox=\"0 0 10 10\"><text>rendered label</text></svg></figure></article></body>"
+        "<body><article><figure class=\"diagram\" data-diagram-language=\"mermaid\" data-diagram-source-hex=\"{hex}\"><svg viewBox=\"0 0 10 10\"><text>rendered label</text></svg></figure></article></body>"
     );
 
     let reopened = import_html_text("rendered-diagram.html", &html).expect("import rendered figure");

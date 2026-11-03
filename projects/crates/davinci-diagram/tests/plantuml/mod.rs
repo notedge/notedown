@@ -216,3 +216,19 @@ fn rejected_multiplicities_are_not_silently_dropped() {
     let spec: DiagramSpec = plantuml_to_spec(source).expect("the multiplicity source still lowers to a spec");
     assert_eq!(spec.edges[0].label.as_deref(), Some("1 n owns"));
 }
+
+#[test]
+fn mixed_class_and_sequence_sources_are_refused_at_the_contradicting_marker() {
+    let source = "@startuml\nclass Order\nparticipant X\n@enduml\n";
+    let error = plantuml_to_spec(source).expect_err("a mixed source cannot be lowered");
+    assert_eq!(error.code(), codes::UNSUPPORTED);
+    assert_eq!(span_of(source, &error), "participant X");
+}
+
+#[test]
+fn sequence_markers_select_the_sequence_family_even_when_a_class_style_arrow_leads() {
+    let source = "@startuml\nA --> B\nparticipant X\nX ->> B : hi\n@enduml\n";
+    let spec = plantuml_to_spec(source).expect("the sequence marker decides the family");
+    assert_eq!(spec.direction, Direction::TopDown);
+    assert!(matches!(spec.layout, LayoutModel::TimeOrdered(_)), "the sequence layout must be declared: {:?}", spec.layout);
+}

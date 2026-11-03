@@ -14,7 +14,7 @@ use davinci_scene::SceneResolver;
 use davinci_types::{
     ByteRange, Diagnostic, DiagnosticLabel, DiagnosticLocation, DiagnosticSeverity, LabelRole, Message, NAMESPACE, SourceRef, codes, diagnostic,
 };
-use oak_core::{Builder, SourceText, parser::session::ParseSession};
+use oak_core::{Builder, SourceText, errors::OakError, parser::session::ParseSession};
 use oak_plantuml::{
     PlantUmlBuilder, PlantUmlLanguage,
     ast::{
@@ -107,8 +107,22 @@ pub fn parse_plantuml(source: &str) -> Result<PlantUmlRoot, DiagramError> {
             source.len()
         ))),
         Ok(root) => Ok(root),
-        Err(error) => Err(DiagramError::parse_failed(format!("`oak-plantuml` failed to build an AST: {error}"))),
+        Err(error) => Err(spanned_parse_error(source, &error)),
     }
+}
+
+/// Turn an `oak-plantuml` parser error into a refusal that keeps its span.
+///
+/// Family conflicts and other rejections are recorded as syntax errors at the
+/// offset of the offending statement, so the refused line stays locatable
+/// instead of collapsing into an unpositioned "parse failed" message.
+fn spanned_parse_error(source: &str, error: &OakError) -> DiagramError {
+    if let oak_core::errors::OakErrorKind::SyntaxError { message, offset, .. } = error.kind() {
+        let offset = (*offset).min(source.len());
+        let end = source[offset..].find('\n').map(|delta| offset + delta).unwrap_or(source.len());
+        return DiagramError::unsupported(message.clone()).with_span(offset..end);
+    }
+    DiagramError::parse_failed(format!("`oak-plantuml` failed to build an AST: {error}"))
 }
 
 /// Lower PlantUML source into a source-independent diagram spec.

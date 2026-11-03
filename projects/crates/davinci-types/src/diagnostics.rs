@@ -1,7 +1,9 @@
 //! Stable diagnostic codes and constructors built on the workspace
 //! `boost-diagnostic` model.
 
-pub use boost_diagnostic::{Diagnostic, DiagnosticOrigin, DiagnosticSeverity, Message};
+pub use boost_diagnostic::{
+    ByteRange, Diagnostic, DiagnosticLabel, DiagnosticLocation, DiagnosticOrigin, DiagnosticSeverity, LabelRole, Message, SourceRef,
+};
 
 /// Product namespace for every DaVinci diagnostic.
 pub const NAMESPACE: &str = "davinci";

@@ -34,10 +34,16 @@ pub mod plan;
 pub mod render;
 pub mod spec;
 
+#[cfg(feature = "dot")]
+pub mod dot;
+
 #[cfg(feature = "mermaid")]
 pub mod parse;
 
 pub use error::DiagramError;
+
+#[cfg(feature = "dot")]
+pub use dot::{dot_to_scene, dot_to_spec, parse_dot};
 
 #[cfg(feature = "mermaid")]
 pub use parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid};

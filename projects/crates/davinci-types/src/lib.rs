@@ -14,7 +14,10 @@ mod theme;
 mod transform;
 
 pub use color::Color;
-pub use diagnostics::{Diagnostic, DiagnosticOrigin, DiagnosticSeverity, NAMESPACE, codes, diagnostic, origin};
+pub use diagnostics::{
+    ByteRange, Diagnostic, DiagnosticLabel, DiagnosticLocation, DiagnosticOrigin, DiagnosticSeverity, LabelRole, Message, NAMESPACE, SourceRef,
+    codes, diagnostic, origin,
+};
 pub use geometry::{Bounds, Point, Rect, Size};
 pub use text_metrics::{measure_line, wrap_label};
 pub use theme::{DIAGRAM_THEME, DiagramTheme, EDGE_LABEL_BG_OPACITY, ThemeTokens, contrast_ratio, relative_luminance};

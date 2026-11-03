@@ -20,8 +20,11 @@ use std::{
     process::Command,
 };
 
-use davinci_diagram::mermaid_to_scene;
+use davinci_diagram::{DiagramError, LoweredDiagram, mermaid_to_scene};
 use davinci_scene::{Point, Rect};
+
+/// One fixture and the frontend that lowers it.
+type Lower = fn(&str) -> Result<LoweredDiagram, DiagramError>;
 
 /// Rasterizer identity. A different host build must re-record on purpose.
 const CHROME_VERSION: &str = "156.0.8078.80";
@@ -32,14 +35,33 @@ const PADDING: f64 = 8.0;
 /// Smallest window the rasterizer actually paints into.
 const MIN_WINDOW: (u64, u64) = (400, 300);
 
-fn fixtures() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("flowchart-branch", "flowchart TD\n  A[Start] --> B{Ready?}\n  B -->|yes| C[Stop]\n  B -->|no| D[Retry]\n  D --> B\n"),
-        ("flowchart-bypass", "flowchart LR\n  A --> B\n  A --> C\n  A --> D\n  C --> E\n"),
-        ("class-members", "classDiagram\n  class A {\n    +run()\n    -state\n  }\n  A <|-- B\n  B *-- C\n"),
-        ("sequence-flow", "sequenceDiagram\n  participant A\n  participant B\n  A->>B: hello\n  B-->>A: world\n"),
-        ("subgraph-group", "flowchart LR\n  subgraph group[Group]\n    A --> B\n  end\n"),
-    ]
+fn fixtures() -> Vec<(&'static str, &'static str, Lower)> {
+    #[allow(unused_mut)]
+    let mut fixtures: Vec<(&'static str, &'static str, Lower)> = vec![
+        (
+            "flowchart-branch",
+            "flowchart TD\n  A[Start] --> B{Ready?}\n  B -->|yes| C[Stop]\n  B -->|no| D[Retry]\n  D --> B\n",
+            mermaid_to_scene,
+        ),
+        ("flowchart-bypass", "flowchart LR\n  A --> B\n  A --> C\n  A --> D\n  C --> E\n", mermaid_to_scene),
+        ("class-members", "classDiagram\n  class A {\n    +run()\n    -state\n  }\n  A <|-- B\n  B *-- C\n", mermaid_to_scene),
+        ("sequence-flow", "sequenceDiagram\n  participant A\n  participant B\n  A->>B: hello\n  B-->>A: world\n", mermaid_to_scene),
+        ("subgraph-group", "flowchart LR\n  subgraph group[Group]\n    A --> B\n  end\n", mermaid_to_scene),
+    ];
+    #[cfg(feature = "dot")]
+    fixtures.extend([
+        (
+            "dot-digraph",
+            "digraph rank {\n  rankdir=LR;\n  node [shape=box];\n  Start [shape=circle];\n  Check [label=\"Ready?\"];\n  Work [label=\"Retry\"];\n  Start -> Check [label=\"go\"];\n  Check -> Work [label=\"no\"];\n  Work -> Check;\n}\n",
+            davinci_diagram::dot_to_scene as Lower,
+        ),
+        (
+            "dot-cluster",
+            "digraph groups {\n  subgraph cluster_core {\n    label=\"Core\";\n    A -> B;\n  }\n  B -> C;\n}\n",
+            davinci_diagram::dot_to_scene,
+        ),
+    ]);
+    fixtures
 }
 
 fn fixture_dir() -> PathBuf {
@@ -129,8 +151,8 @@ fn segment_enters(a: Point, b: Point, rect: Rect) -> bool {
 
 #[test]
 fn no_construct_leaves_the_canvas_and_no_route_hides_behind_a_node() {
-    for (id, source) in fixtures() {
-        let lowered = mermaid_to_scene(source).unwrap_or_else(|error| panic!("{id} should lower: {error}"));
+    for (id, source, lower) in fixtures() {
+        let lowered = lower(source).unwrap_or_else(|error| panic!("{id} should lower: {error}"));
         let canvas = (lowered.plan.canvas.width, lowered.plan.canvas.height);
 
         for node in &lowered.plan.nodes {
@@ -190,8 +212,8 @@ fn pinned_chrome_pixels_match_the_recorded_manifest() {
     fs::create_dir_all(&work).expect("temp workspace");
 
     let mut current = Vec::new();
-    for (id, source) in fixtures() {
-        let lowered = mermaid_to_scene(source).unwrap_or_else(|error| panic!("{id} should lower: {error}"));
+    for (id, source, lower) in fixtures() {
+        let lowered = lower(source).unwrap_or_else(|error| panic!("{id} should lower: {error}"));
         let svg = lowered.scene.to_svg().expect("scene should serialize");
         let width = lowered.plan.canvas.width + 2.0 * PADDING;
         let height = lowered.plan.canvas.height + 2.0 * PADDING;

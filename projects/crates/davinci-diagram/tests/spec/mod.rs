@@ -52,6 +52,36 @@ fn a_spec_alone_reproduces_the_mermaid_scene_byte_for_byte() {
     }
 }
 
+/// The DOT frontend is held to the same acceptance gate as Mermaid: rebuilding
+/// the pipeline from its spec must reproduce the plan and the scene bytes.
+#[cfg(feature = "dot")]
+#[test]
+fn a_dot_spec_alone_reproduces_the_scene_byte_for_byte() {
+    use davinci_diagram::{
+        compile::{LayoutOptions, compile},
+        dot_to_scene, dot_to_spec,
+        render::render,
+    };
+    use davinci_scene::SceneResolver;
+
+    for source in [
+        "digraph rank {\n  rankdir=LR;\n  node [shape=box];\n  A [shape=circle];\n  B [label=\"Work\"];\n  A -> B [label=\"go\"];\n}\n",
+        "digraph groups {\n  subgraph cluster_core {\n    label=\"Core\";\n    A -> B;\n  }\n  B -> C;\n}\n",
+        "graph plain {\n  A -- B;\n}\n",
+    ] {
+        let frontend = dot_to_scene(source).expect("frontend pipeline should lower");
+        let spec = dot_to_spec(source).expect("spec should lower");
+        let plan = compile(&spec, &LayoutOptions::default());
+        assert_eq!(plan, frontend.plan, "the spec pipeline must reproduce the DOT plan for\n{source}");
+        let scene = render(&plan).resolve(&SceneResolver::default());
+        assert_eq!(
+            scene.to_svg().expect("rebuilt scene should serialize"),
+            frontend.scene.to_svg().expect("frontend scene should serialize"),
+            "the spec pipeline must reproduce the DOT scene bytes for\n{source}"
+        );
+    }
+}
+
 /// A declaration that does not change geometry would be cosmetic, so the axis,
 /// message order, and activation span must all reach the plan.
 #[test]

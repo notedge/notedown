@@ -12,9 +12,11 @@ edition.workspace = true
 davinci-types = { workspace = true }
 davinci-scene = { workspace = true }
 oak-core = { workspace = true, optional = true }
+oak-dot = { workspace = true, optional = true }
 oak-mermaid = { workspace = true, optional = true }
 oak-uml = { workspace = true, optional = true }
 
 [features]
-default = ["mermaid"]
+default = ["mermaid", "dot"]
+dot = ["dep:oak-core", "dep:oak-dot"]
 mermaid = ["dep:oak-core", "dep:oak-mermaid", "dep:oak-uml"]

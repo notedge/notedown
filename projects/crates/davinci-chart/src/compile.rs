@@ -698,11 +698,15 @@ fn build_rects(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance
         let y = y_band
             .position(&y_label)
             .ok_or_else(|| ChartError::new(codes::INVALID_SPEC, format!("category `{y_label}` is missing from the y band scale")))?;
+        // A y axis runs bottom-to-top, so its band width is negative and the
+        // recorded position is the band's lower edge. Normalize the rectangle.
+        let (x, width) = if x_band.band_width < 0.0 { (x + x_band.band_width, -x_band.band_width) } else { (x, x_band.band_width) };
+        let (y, height) = if y_band.band_width < 0.0 { (y + y_band.band_width, -y_band.band_width) } else { (y, y_band.band_width) };
         marks.push(MarkInstance {
             id: format!("chart-rect-{index}"),
             mark: Mark::Rect,
             source: format!("{x_label}|{y_label}"),
-            geometry: MarkGeometry::Rect(Rect::new(x, y, x_band.band_width, y_band.band_width)),
+            geometry: MarkGeometry::Rect(Rect::new(x, y, width, height)),
             style: filled_style(row, scales),
         });
     }

@@ -1,6 +1,9 @@
 //! Vega-Lite subset acceptance: strict lowering into the chart kernel and
 //! structured refusals with JSON paths.
 
+mod chrome_gate;
+mod matrix;
+
 use davinci_chart::{codes, vega_lite};
 
 const BAR_DOCUMENT: &str = r#"{

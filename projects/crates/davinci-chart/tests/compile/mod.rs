@@ -306,9 +306,12 @@ fn rect_marks_fill_band_cells_and_reject_non_band_axes() {
         assert_eq!(instance.mark, Mark::Rect);
         assert_eq!(instance.source, format!("{column}|{row}"));
         assert!(approx(rect.x, x_band.position(column).expect("column")));
-        assert!(approx(rect.width, x_band.band_width));
-        assert!(approx(rect.y, y_band.position(row).expect("row")));
-        assert!(approx(rect.height, y_band.band_width));
+        assert!(approx(rect.width, x_band.band_width.abs()));
+        let edge = y_band.position(row).expect("row");
+        let (top, height) = if y_band.band_width < 0.0 { (edge + y_band.band_width, -y_band.band_width) } else { (edge, y_band.band_width) };
+        assert!(approx(rect.y, top));
+        assert!(approx(rect.height, height));
+        assert!(rect.width > 0.0 && rect.height > 0.0, "a rect must have a positive extent");
     }
 
     let quantitative = ChartSpec::new(Mark::Rect)

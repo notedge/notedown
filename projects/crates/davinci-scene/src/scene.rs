@@ -20,6 +20,9 @@ pub enum SemanticRole {
     Edge,
     /// Text attached to an edge.
     EdgeLabel,
+    /// Backing plate painted under an edge label so the routed line never
+    /// crosses readable text.
+    EdgeLabelBackdrop,
     /// A diagram cluster or subgraph boundary.
     Cluster,
     /// A chart axis line or band.
@@ -45,6 +48,7 @@ impl SemanticRole {
             Self::Node => "node",
             Self::Edge => "edge",
             Self::EdgeLabel => "edge-label",
+            Self::EdgeLabelBackdrop => "edge-label-bg",
             Self::Cluster => "cluster",
             Self::Axis => "axis",
             Self::Tick => "tick",

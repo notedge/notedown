@@ -9,9 +9,11 @@
 mod color;
 mod diagnostics;
 mod geometry;
+mod text_metrics;
 mod transform;
 
 pub use color::Color;
 pub use diagnostics::{Diagnostic, DiagnosticOrigin, DiagnosticSeverity, NAMESPACE, codes, diagnostic, origin};
 pub use geometry::{Bounds, Point, Rect, Size};
+pub use text_metrics::{measure_line, wrap_label};
 pub use transform::Transform;

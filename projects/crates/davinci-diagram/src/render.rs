@@ -205,8 +205,20 @@ fn push_edge_label(scene: &mut SemanticScene, id_prefix: &str, index: usize, edg
         return;
     };
     let source = SourceRef::element(format!("{}->{}", edge.from.node, edge.to.node));
-    let font_size = (options.font_size * 12.0 / 13.0).max(1.0);
+    // The backing plate paints before the text so the routed line never
+    // crosses readable glyphs.
+    scene.push(
+        SemanticNode::new(SemanticKind::RoundedRect { rect: label_box, radius: 2.0, style: label_backdrop_style() })
+            .with_id(format!("{id_prefix}-{index}-label-bg"))
+            .with_role(SemanticRole::EdgeLabelBackdrop)
+            .with_source(source.clone()),
+    );
+    let font_size = crate::compile::edge_label_font_size(options.font_size);
     push_centered_text(scene, &format!("{id_prefix}-{index}-label"), label, label_box.center(), font_size, LabelKind::Edge, source);
+}
+
+fn label_backdrop_style() -> ShapeStyle {
+    ShapeStyle { fill: Some(Color::rgb(0xff, 0xff, 0xff)), stroke: None, stroke_width: 0.0, opacity: 0.85 }
 }
 
 #[derive(Clone, Copy)]

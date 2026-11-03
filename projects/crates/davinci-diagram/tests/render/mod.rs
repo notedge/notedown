@@ -107,3 +107,69 @@ fn node_shapes_map_to_scene_primitives() {
     assert!(matches!(scene_node(&scene, "node-N5").kind, SemanticKind::Ellipse { radii, .. } if radii.width == radii.height));
     assert!(matches!(scene_node(&scene, "node-N6").kind, SemanticKind::Path { .. }));
 }
+
+#[test]
+fn edge_labels_paint_a_backing_plate_under_the_text() {
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    spec.nodes = vec![node("A"), node("B")];
+    spec.edges = vec![edge("A", "B", Some("go"))];
+    let plan = compile(&spec, &LayoutOptions::default());
+    let scene = render(&plan);
+
+    let plate = scene_node(&scene, "edge-0-label-bg");
+    assert_eq!(plate.role, Some(SemanticRole::EdgeLabelBackdrop));
+    let SemanticKind::RoundedRect { rect, radius, .. } = plate.kind else {
+        panic!("the backing plate must be a rounded rect: {:?}", plate.kind)
+    };
+    assert_eq!(radius, 2.0, "the backing plate keeps rx = 2");
+
+    // The plate covers the routed line at the label position.
+    let routed = &plan.edges[0];
+    let label_box = routed.label_box.expect("label box");
+    assert_eq!(rect, label_box, "the plate is exactly the reserved label box");
+    let midpoint = {
+        let length: f64 = routed.points.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
+        let mut remaining = length * 0.5;
+        let mut center = routed.points[0];
+        for pair in routed.points.windows(2) {
+            let segment = pair[0].distance(pair[1]);
+            if remaining <= segment && segment > 0.0 {
+                let ratio = remaining / segment;
+                center = davinci_scene::Point::new(pair[0].x + (pair[1].x - pair[0].x) * ratio, pair[0].y + (pair[1].y - pair[0].y) * ratio);
+                break;
+            }
+            remaining -= segment;
+        }
+        center
+    };
+    assert!(rect.contains(midpoint), "the plate must cover the line under the label: {rect:?} vs {midpoint:?}");
+
+    // The plate paints before the label text.
+    let plate_index = scene.nodes.iter().position(|node| node.id.as_deref() == Some("edge-0-label-bg")).expect("plate index");
+    let text_index = scene.nodes.iter().position(|node| node.id.as_deref() == Some("edge-0-label")).expect("label text");
+    assert!(plate_index < text_index, "the plate must paint before the text");
+}
+
+#[test]
+fn long_edge_labels_wrap_within_budget_and_truncate_with_an_ellipsis() {
+    let long = (0..30).map(|index| format!("word{index}")).collect::<Vec<_>>().join(" ");
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    spec.nodes = vec![node("A"), node("B")];
+    spec.edges = vec![edge("A", "B", Some(&long))];
+    let plan = compile(&spec, &LayoutOptions::default());
+
+    let label = plan.edges[0].label.as_deref().expect("wrapped label");
+    let lines: Vec<&str> = label.split('\n').collect();
+    assert!(lines.len() <= 3, "at most three lines: {lines:?}");
+    assert!(lines.last().is_some_and(|line| line.ends_with('…')), "overflow truncates with an ellipsis: {lines:?}");
+    for line in &lines {
+        assert!(davinci_types::measure_line(line, 12.0) <= 200.0, "line exceeds the 200px budget: {line}");
+    }
+    let label_box = plan.edges[0].label_box.expect("label box");
+    assert!(label_box.width <= 200.0 + 12.0, "the label box respects the budget plus padding: {label_box:?}");
+    assert!(
+        plan.diagnostics.iter().any(|diagnostic| diagnostic.message().fallback().unwrap_or_default().contains("truncated")),
+        "truncation must be reported: {:?}",
+        plan.diagnostics
+    );
+}

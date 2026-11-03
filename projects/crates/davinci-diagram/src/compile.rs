@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use davinci_scene::{Point, Rect, Size};
-use davinci_types::{Diagnostic, DiagnosticSeverity, codes, diagnostic};
+use davinci_types::{Diagnostic, DiagnosticSeverity, codes, diagnostic, measure_line, wrap_label};
 
 use crate::{
     plan::{DiagramLayoutPlan, PlacedCluster, PlacedNode, RoutedEdge},
@@ -169,8 +169,11 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
                 ));
                 route(from, to, spec.direction)
             });
-        let label = edge.label.clone().filter(|label| !label.trim().is_empty());
-        let label_box = label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), options.font_size));
+        let label = edge
+            .label
+            .as_deref()
+            .and_then(|label| prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics));
+        let label_box = label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
@@ -201,7 +204,7 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         obstacles.extend(foreign_labels.iter().copied());
         if let Some(points) = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes) {
             let label_box =
-                routed[index].label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), options.font_size));
+                routed[index].label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
             routed[index].points = points;
             routed[index].label_box = label_box;
         }
@@ -331,10 +334,13 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
         let line_y = first_row + row_height * (messages.len() as f64 + 0.5);
         let from = Point::new(rects[from_index].center().x, line_y);
         let to = Point::new(rects[to_index].center().x, line_y);
-        let label = edge.label.clone().filter(|label| !label.trim().is_empty());
+        let label = edge
+            .label
+            .as_deref()
+            .and_then(|label| prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics));
         let label_box = label
             .as_ref()
-            .map(|label| estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), options.font_size));
+            .map(|label| estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), edge_label_font_size(options.font_size)));
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
@@ -695,8 +701,8 @@ fn node_size(node: &ResolvedNode, options: &LayoutOptions) -> Size {
 
 fn label_size(label: &str, shape: NodeShape, options: &LayoutOptions) -> Size {
     let lines: Vec<&str> = label.split('\n').collect();
-    let longest = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
-    let width = (longest as f64 * options.font_size * 0.6 + options.padding_x * 2.0).max(options.min_node_width);
+    let widest = lines.iter().map(|line| measure_line(line, options.font_size)).fold(0.0, f64::max);
+    let width = (widest + options.padding_x * 2.0).max(options.min_node_width);
     let height = (lines.len() as f64 * options.font_size * 1.4 + options.padding_y * 2.0).max(options.min_node_height);
     if matches!(shape, NodeShape::Circle) {
         let side = width.max(height);
@@ -1093,10 +1099,41 @@ fn polyline_midpoint(points: &[Point]) -> Point {
 
 fn estimate_label_box(label: &str, center: Point, font_size: f64) -> Rect {
     let lines: Vec<&str> = label.split('\n').collect();
-    let longest = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
-    let width = longest as f64 * font_size * 0.6 + 16.0;
-    let height = lines.len() as f64 * font_size * 1.4 + 8.0;
+    let widest = lines.iter().map(|line| measure_line(line, font_size)).fold(0.0, f64::max);
+    let width = widest + LABEL_PAD_X * 2.0;
+    let height = lines.len() as f64 * font_size * 1.4 + LABEL_PAD_Y * 2.0;
     Rect::new(center.x - width * 0.5, center.y - height * 0.5, width, height)
+}
+
+/// Horizontal padding inside an edge label backing plate.
+const LABEL_PAD_X: f64 = 6.0;
+/// Vertical padding inside an edge label backing plate.
+const LABEL_PAD_Y: f64 = 2.0;
+/// Maximum line width of an edge label before greedy wrapping.
+const LABEL_MAX_WIDTH: f64 = 200.0;
+/// Maximum number of lines of an edge label before ellipsis truncation.
+const LABEL_MAX_LINES: usize = 3;
+
+/// The font size edge labels render at, derived from the node label size.
+pub(crate) fn edge_label_font_size(font_size: f64) -> f64 {
+    (font_size * 12.0 / 13.0).max(1.0)
+}
+
+/// Wrap and truncate an authored edge label against the font metrics table,
+/// reporting a diagnostic when content was truncated.
+fn prepare_edge_label(label: &str, from: &str, to: &str, font_size: f64, diagnostics: &mut Vec<Diagnostic>) -> Option<String> {
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lines = wrap_label(trimmed, font_size, LABEL_MAX_WIDTH, LABEL_MAX_LINES);
+    if lines.last().is_some_and(|last| last.ends_with('…')) {
+        diagnostics.push(warning(
+            codes::APPROXIMATED,
+            format!("edge label `{trimmed}` on `{from}->{to}` exceeds {LABEL_MAX_LINES} lines or {LABEL_MAX_WIDTH}px and is truncated"),
+        ));
+    }
+    Some(lines.join("\n"))
 }
 
 fn node_memberships(clusters: &[ResolvedCluster], node_count: usize) -> Vec<Vec<usize>> {

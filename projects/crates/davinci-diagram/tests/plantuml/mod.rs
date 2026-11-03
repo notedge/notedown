@@ -34,6 +34,7 @@ const CLASS_SOURCE: &str = r#"@startuml
 class Order {
   +id : String
   -total : Int
+  ~cache : Map
 }
 interface Payable {
   +pay()
@@ -62,7 +63,7 @@ fn class_declarations_members_and_relations_lower_to_one_spec() {
     assert_eq!(
         spec.nodes,
         vec![
-            node("Order", Some("Order\n+id : String\n-total : Int"), NodeShape::Box),
+            node("Order", Some("Order\n+id : String\n-total : Int\n~cache : Map"), NodeShape::Box),
             node("Payable", Some("Payable\n+pay()"), NodeShape::Box),
             node("OnlineOrder", None, NodeShape::Box),
         ]
@@ -121,7 +122,7 @@ fn class_and_sequence_specs_render_to_svg_with_all_labels() {
 fn plantuml_and_mermaid_class_sources_lower_to_the_same_spec() {
     let plantuml = plantuml_to_spec(CLASS_SOURCE).expect("plantuml class source should lower");
     let mermaid = davinci_diagram::mermaid_to_spec(
-        "classDiagram\n  class Order {\n    +id : String\n    -total : Int\n  }\n  class Payable {\n    +pay()\n  }\n  Order o-- Payable\n  Order <|-- OnlineOrder : extends\n",
+        "classDiagram\n  class Order {\n    +id : String\n    -total : Int\n    ~cache : Map\n  }\n  class Payable {\n    +pay()\n  }\n  Order o-- Payable\n  Order <|-- OnlineOrder : extends\n",
     )
     .expect("mermaid class source should lower");
 

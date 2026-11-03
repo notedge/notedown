@@ -305,6 +305,7 @@ fn member_text(member: &ClassMember) -> String {
         MemberVisibility::Public => '+',
         MemberVisibility::Private => '-',
         MemberVisibility::Protected => '#',
+        MemberVisibility::Package => '~',
     };
     let text = member.text.trim();
     if text.is_empty() { String::new() } else { format!("{marker}{text}") }

@@ -239,6 +239,12 @@ fn flowchart_spec(flowchart: &Flowchart, source: &str) -> Result<DiagramSpec, Di
         ))
         .with_span(range));
     }
+    if let Some((range, shape)) = locate_unsupported_shape(source) {
+        return Err(DiagramError::unsupported(format!(
+            "flowchart node shape `{shape}` is not lowered, the diagram falls back to its source"
+        ))
+        .with_span(range));
+    }
     let direction = direction(&flowchart.orientation).ok_or_else(|| {
         DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation))
             .with_optional_span(locate_header(source, "flowchart").or_else(|| locate_header(source, "graph")))
@@ -619,6 +625,57 @@ fn locate_unsupported_orientation(source: &str) -> Option<(std::ops::Range<usize
             return Some((range, line));
         }
         return None;
+    }
+    None
+}
+
+/// The first authored node shape that `davinci-diagram` cannot draw.
+///
+/// `oak-mermaid` accepts parallelogram, trapezoid, hexagon, and double-circle
+/// delimiters but either keeps the delimiters in the label or drops the node
+/// entirely. [`crate::spec::NodeShape`] has no such variant, so refusing at the
+/// authored line is the only outcome that neither rewrites labels nor loses
+/// nodes. Quoted labels are skipped so a label may still contain these
+/// characters as text.
+fn locate_unsupported_shape(source: &str) -> Option<(std::ops::Range<usize>, &'static str)> {
+    for (range, line) in trimmed_lines(source) {
+        let bytes = line.as_bytes();
+        let mut quoted = false;
+        for index in 0..bytes.len() {
+            match bytes[index] {
+                b'"' => quoted = !quoted,
+                b'[' if !quoted && index + 1 < bytes.len() => match bytes[index + 1] {
+                    b'/' | b'\\' => return Some((range.clone(), "parallelogram or trapezoid")),
+                    b'(' if index + 2 < bytes.len() && bytes[index + 2] == b'(' => {
+                        return Some((range.clone(), "double circle"));
+                    }
+                    _ => {}
+                },
+                b'(' if !quoted
+                    && index + 2 < bytes.len()
+                    && bytes[index + 1] == b'('
+                    && bytes[index + 2] == b'(' =>
+                {
+                    return Some((range.clone(), "double circle"));
+                }
+                b'{' if !quoted && index + 1 < bytes.len() && bytes[index + 1] == b'{' => {
+                    return Some((range.clone(), "hexagon"));
+                }
+                _ => {}
+            }
+        }
+
+        // Asymmetric node `A>label]`. Only a leading node id is considered so
+        // arrow ends (`-->`), edge labels, and HTML line breaks in labels are
+        // never mistaken for the shape.
+        let head = line.split(|character: char| !character.is_alphanumeric() && character != '_').next().unwrap_or_default();
+        if !head.is_empty() {
+            if let Some(after) = line[head.len()..].strip_prefix('>') {
+                if after.contains(']') && !after.starts_with('-') {
+                    return Some((range.clone(), "asymmetric"));
+                }
+            }
+        }
     }
     None
 }

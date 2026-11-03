@@ -327,3 +327,45 @@ fn a_node_label_that_mentions_a_dropped_statement_still_lowers() {
     let lowered = mermaid_to_scene(source).expect("the label is data, not a statement");
     assert_eq!(lowered.plan.node("A").expect("A").label, "style A");
 }
+
+/// Shapes without a [`NodeShape`] variant are refused rather than drawn as
+/// boxes. `oak-mermaid` otherwise keeps the delimiters in the label or drops
+/// the node, and both outcomes rewrite authored content.
+#[test]
+fn unsupported_flowchart_shapes_are_refused_at_their_line() {
+    let cases = [
+        ("A[/slanted/] --> B", "parallelogram or trapezoid"),
+        ("A[\\back\\] --> B", "parallelogram or trapezoid"),
+        ("A{{hexagon}} --> B", "hexagon"),
+        ("A>asym] --> B", "asymmetric"),
+        ("A(((double))) --> B", "double circle"),
+    ];
+    for (statement, shape) in cases {
+        let source = format!("flowchart TD\n  {statement}\n");
+        let error = mermaid_to_scene(&source).expect_err(statement);
+
+        assert_eq!(error.code(), codes::UNSUPPORTED, "{statement}: {}", error.message());
+        assert!(error.message().contains(shape), "{statement}: {}", error.message());
+        let span = error.span().expect("the statement is located");
+        assert_eq!(&source[span], statement, "the span covers the authored node statement");
+    }
+}
+
+/// Shapes that do have a `NodeShape` variant keep lowering without diagnostics.
+#[test]
+fn supported_flowchart_shapes_lower_with_their_labels() {
+    let source = "flowchart TD\n  A[[subroutine]] --> B[(database)]\n  B --> C((circle))\n  C --> D([stadium])\n  D --> E{rhombus}\n";
+    let lowered = mermaid_to_scene(source).expect("supported shapes must lower");
+
+    assert_eq!(lowered.plan.node("A").expect("A").label, "subroutine");
+    assert_eq!(lowered.plan.node("A").expect("A").shape, NodeShape::Subroutine);
+    assert_eq!(lowered.plan.node("B").expect("B").shape, NodeShape::Cylinder);
+    assert_eq!(lowered.plan.node("C").expect("C").shape, NodeShape::Circle);
+    assert_eq!(lowered.plan.node("D").expect("D").shape, NodeShape::Stadium);
+    assert_eq!(lowered.plan.node("E").expect("E").shape, NodeShape::Rhombus);
+    assert!(
+        lowered.diagnostics.iter().all(|diagnostic| diagnostic.code().as_str() == codes::APPROXIMATED),
+        "supported shapes may approximate but must never silently drop: {:?}",
+        lowered.diagnostics
+    );
+}

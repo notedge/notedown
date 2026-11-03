@@ -6,6 +6,7 @@
 //! drawing commands, or source syntax. [`crate::compile`] turns it into a
 //! compile plan.
 
+use davinci_scene::Color;
 use davinci_types::Diagnostic;
 
 use crate::{
@@ -347,6 +348,12 @@ pub struct ChartSpec {
     pub coordinate: Coordinate,
     /// Guides in declaration order. An empty list suppresses axes.
     pub guides: Vec<Guide>,
+    /// Constant paint applied when no `color` channel is bound, or `None`
+    /// for the crate default.
+    pub mark_color: Option<Color>,
+    /// Constant opacity applied when no `opacity` channel is bound, or
+    /// `None` for fully opaque.
+    pub mark_opacity: Option<f64>,
 }
 
 impl ChartSpec {
@@ -360,7 +367,21 @@ impl ChartSpec {
             scales: Scales::default(),
             coordinate: Coordinate::Cartesian,
             guides: vec![Guide::axis(Channel::X), Guide::axis(Channel::Y)],
+            mark_color: None,
+            mark_opacity: None,
         }
+    }
+
+    /// Set the constant mark paint used when no `color` channel is bound.
+    pub fn with_mark_color(mut self, color: Color) -> Self {
+        self.mark_color = Some(color);
+        self
+    }
+
+    /// Set the constant mark opacity used when no `opacity` channel is bound.
+    pub fn with_mark_opacity(mut self, opacity: f64) -> Self {
+        self.mark_opacity = Some(opacity);
+        self
     }
 
     /// Find a declared field by name.
@@ -480,6 +501,13 @@ impl ChartSpec {
                 if let Some(record) = scale_conflict(channel, field.kind, encoding.aggregate, *spec) {
                     diagnostics.push(record);
                 }
+            }
+        }
+
+        if let Some(opacity) = self.mark_opacity {
+            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+                diagnostics
+                    .push(chart_error(codes::INVALID_SPEC, "chart mark opacity must be a finite number within 0.0..=1.0"));
             }
         }
 

@@ -60,11 +60,19 @@ fn artifact_dir() -> PathBuf {
 const BASE_DOCUMENT: &str = r#"{"data":{"values":[{"c":"A","v":3},{"c":"B","v":7}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
 
 #[test]
-fn constant_mark_styling_is_refused_by_code() {
-    let document = r#"{"data":{"values":[{"c":"A","v":1}]},"mark":{"type":"point","opacity":0.5},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
-    let error = vega_lite::lower(document).expect_err("constant mark styling is not compiled");
-    assert_eq!(error.code(), codes::UNSUPPORTED_ENCODING);
-    assert!(error.message().contains("$.mark.opacity"), "{}", error.message());
+fn constant_mark_styling_changes_paint_without_touching_geometry() {
+    let plain = vega_lite::lower(BASE_DOCUMENT).expect("the plain bar must lower");
+    let styled = vega_lite::lower(
+        r##"{"data":{"values":[{"c":"A","v":3},{"c":"B","v":7}]},"mark":{"type":"bar","color":"#3366cc","opacity":0.5},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##,
+    )
+    .expect("constant mark styling must lower");
+
+    assert_eq!(styled.plan.marks.len(), plain.plan.marks.len(), "styling adds no mark instances");
+    for (before, after) in plain.plan.marks.iter().zip(&styled.plan.marks) {
+        assert_eq!(before.geometry, after.geometry, "styling must not move geometry");
+        assert_eq!(after.style.fill, Some(davinci_scene::Color::rgb(0x33, 0x66, 0xcc)));
+        assert_eq!(after.style.opacity, 0.5);
+    }
 }
 
 /// The kernel binds every channel on every mark except `size`, which only

@@ -68,6 +68,49 @@ fn inline_values_and_aggregates_survive_lowering() {
     assert_eq!(chart.data.row_count(), 3);
 }
 
+#[test]
+fn constant_mark_color_and_opacity_reach_the_existing_style_channel() {
+    let document = r##"{
+      "data": {"values": [{"c": "A", "v": 10}, {"c": "B", "v": 20}]},
+      "mark": {"type": "bar", "color": "#36c", "opacity": 0.6},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }"##;
+    let chart = vega_lite::lower(document).expect("constant mark styling must lower");
+
+    assert_eq!(chart.spec.mark_color, Some(davinci_scene::Color::rgb(0x33, 0x66, 0xcc)));
+    assert_eq!(chart.spec.mark_opacity, Some(0.6));
+    for instance in &chart.plan.marks {
+        assert_eq!(instance.style.fill, Some(davinci_scene::Color::rgb(0x33, 0x66, 0xcc)), "the constant color fills every bar");
+        assert_eq!(instance.style.opacity, 0.6, "the constant opacity reaches `MarkStyle`");
+    }
+
+    let svg = chart.to_svg().expect("the styled scene must serialize");
+    assert!(svg.contains("fill=\"#3366cc\""), "the authored color must be in the SVG: {svg}");
+    assert!(svg.contains("opacity=\"0.6\""), "the authored opacity must be in the SVG: {svg}");
+}
+
+#[test]
+fn an_encoding_color_channel_overrides_the_constant_mark_color() {
+    let document = r##"{
+      "data": {"values": [{"c": "A", "v": 10, "k": "red"}, {"c": "B", "v": 20, "k": "blue"}]},
+      "mark": {"type": "bar", "color": "#3366cc"},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "k", "type": "nominal"}
+      }
+    }"##;
+    let chart = vega_lite::lower(document).expect("the color channel must win");
+    let fills: Vec<_> = chart.plan.marks.iter().filter_map(|instance| instance.style.fill).collect();
+
+    assert_eq!(fills.len(), 2);
+    assert_ne!(fills[0], davinci_scene::Color::rgb(0x33, 0x66, 0xcc), "the channel color replaces the constant color");
+    assert_ne!(fills[0], fills[1], "each category keeps its own color");
+}
+
 const REJECTIONS: &[(&str, &str, &str)] = &[
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}},"transform":[{"filter":"datum.v > 0"}]}"#,
@@ -125,9 +168,19 @@ const REJECTIONS: &[(&str, &str, &str)] = &[
         "$.encoding.x.axis",
     ),
     (
-        r##"{"data":{"values":[{"c":"A","v":1}]},"mark":{"type":"bar","color":"#3366cc"},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##,
+        r##"{"data":{"values":[{"c":"A","v":1}]},"mark":{"type":"bar","tooltip":true},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##,
+        codes::UNKNOWN_KEY,
+        "$.mark.tooltip",
+    ),
+    (
+        r##"{"data":{"values":[{"c":"A","v":1}]},"mark":{"type":"bar","color":"steelblue"},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##,
         codes::UNSUPPORTED_ENCODING,
         "$.mark.color",
+    ),
+    (
+        r##"{"data":{"values":[{"c":"A","v":1}]},"mark":{"type":"bar","opacity":1.4},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##,
+        codes::INVALID_SPEC,
+        "$.mark.opacity",
     ),
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","aggregate":"median"}}}"#,

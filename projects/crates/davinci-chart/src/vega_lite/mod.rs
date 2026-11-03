@@ -11,7 +11,7 @@
 //! of `transform`, and no second chart kernel: the result is a [`ChartSpec`]
 //! plus a [`DataSnapshot`] for [`crate::compile`].
 
-use davinci_scene::SemanticScene;
+use davinci_scene::{Color, SemanticScene};
 use davinci_types::{Diagnostic, DiagnosticSeverity};
 use serde_json::{Map, Value as Json};
 
@@ -103,7 +103,7 @@ pub fn lower(source: &str) -> Result<VegaChart, ChartError> {
         }
     }
 
-    let mark = lower_mark(mark.ok_or_else(|| fail(codes::INVALID_SPEC, "$.mark", "a chart mark is required"))?)?;
+    let lowered_mark = lower_mark(mark.ok_or_else(|| fail(codes::INVALID_SPEC, "$.mark", "a chart mark is required"))?)?;
     let rows = lower_data(data.ok_or_else(|| fail(codes::INVALID_SPEC, "$.data", "inline `data.values` is required"))?)?;
     let bindings = lower_encoding(encoding.ok_or_else(|| fail(codes::INVALID_SPEC, "$.encoding", "an encoding is required"))?)?;
 
@@ -134,7 +134,13 @@ pub fn lower(source: &str) -> Result<VegaChart, ChartError> {
         })
         .collect::<Result<Vec<_>, ChartError>>()?;
 
-    let mut spec = ChartSpec::new(mark);
+    let mut spec = ChartSpec::new(lowered_mark.mark);
+    if let Some(color) = lowered_mark.color {
+        spec.mark_color = Some(color);
+    }
+    if let Some(opacity) = lowered_mark.opacity {
+        spec.mark_opacity = Some(opacity);
+    }
     spec.fields = fields;
     for binding in &bindings {
         spec.encoding.set(
@@ -198,48 +204,84 @@ struct Binding {
     path: String,
 }
 
-fn lower_mark(value: &Json) -> Result<Mark, ChartError> {
-    let (keyword, path) = match value {
-        Json::String(text) => (text.as_str(), "$.mark".to_string()),
+struct LoweredMark {
+    mark: Mark,
+    color: Option<Color>,
+    opacity: Option<f64>,
+}
+
+fn lower_mark(value: &Json) -> Result<LoweredMark, ChartError> {
+    let (keyword, path, color, opacity) = match value {
+        Json::String(text) => (text.as_str(), "$.mark".to_string(), None, None),
         Json::Object(object) => {
+            let mut color = None;
+            let mut opacity = None;
             for (key, item) in object {
                 match key.as_str() {
-                    "type" => {}
-                    "color" | "opacity" => {
-                        return Err(fail(
-                            codes::UNSUPPORTED_ENCODING,
-                            &format!("$.mark.{key}"),
-                            "constant mark styling is not compiled yet",
-                        ))
+                    "type" => {
+                        if !item.is_string() {
+                            return Err(fail(codes::INVALID_SPEC, "$.mark.type", "`mark.type` must be a string"));
+                        }
                     }
+                    "color" => color = Some(parse_color(item, "$.mark.color")?),
+                    "opacity" => opacity = Some(parse_opacity(item, "$.mark.opacity")?),
                     other => return Err(fail(codes::UNKNOWN_KEY, &format!("$.mark.{other}"), "unknown mark key")),
-                }
-                if key == "type" && !item.is_string() {
-                    return Err(fail(codes::INVALID_SPEC, "$.mark.type", "`mark.type` must be a string"));
                 }
             }
             let Some(Json::String(text)) = object.get("type")
             else {
                 return Err(fail(codes::INVALID_SPEC, "$.mark.type", "`mark.type` is required"));
             };
-            (text.as_str(), "$.mark.type".to_string())
+            (text.as_str(), "$.mark.type".to_string(), color, opacity)
         }
         _ => return Err(fail(codes::INVALID_SPEC, "$.mark", "`mark` must be a string or an object")),
     };
 
-    match keyword {
-        "bar" => Ok(Mark::Bar),
-        "line" => Ok(Mark::Line),
-        "area" => Ok(Mark::Area),
-        "point" => Ok(Mark::Point),
-        "rect" => Ok(Mark::Rect),
-        "tick" => Ok(Mark::Tick),
-        other => Err(fail(
-            codes::UNSUPPORTED_MARK,
-            &path,
-            format!("mark `{other}` is outside the first subset (`bar`, `line`, `area`, `point`, `rect`, `tick`)"),
-        )),
+    let mark = match keyword {
+        "bar" => Mark::Bar,
+        "line" => Mark::Line,
+        "area" => Mark::Area,
+        "point" => Mark::Point,
+        "rect" => Mark::Rect,
+        "tick" => Mark::Tick,
+        other => {
+            return Err(fail(
+                codes::UNSUPPORTED_MARK,
+                &path,
+                format!("mark `{other}` is outside the first subset (`bar`, `line`, `area`, `point`, `rect`, `tick`)"),
+            ))
+        }
+    };
+    Ok(LoweredMark { mark, color, opacity })
+}
+
+fn parse_color(value: &Json, path: &str) -> Result<Color, ChartError> {
+    let Some(text) = value.as_str()
+    else {
+        return Err(fail(codes::INVALID_SPEC, path, "`mark.color` must be a string"));
+    };
+    let Some(digits) = text.strip_prefix('#')
+    else {
+        return Err(fail(codes::UNSUPPORTED_ENCODING, path, "only `#rgb` and `#rrggbb` colors are supported"));
+    };
+    let expanded = match digits.len() {
+        3 => digits.chars().flat_map(|digit| [digit, digit]).collect::<String>(),
+        6 => digits.to_string(),
+        _ => return Err(fail(codes::UNSUPPORTED_ENCODING, path, "only `#rgb` and `#rrggbb` colors are supported")),
+    };
+    let parse = |slice: &str| u8::from_str_radix(slice, 16).map_err(|_| fail(codes::UNSUPPORTED_ENCODING, path, "color digits must be hexadecimal"));
+    Ok(Color::rgb(parse(&expanded[0..2])?, parse(&expanded[2..4])?, parse(&expanded[4..6])?))
+}
+
+fn parse_opacity(value: &Json, path: &str) -> Result<f64, ChartError> {
+    let Some(number) = value.as_f64()
+    else {
+        return Err(fail(codes::INVALID_SPEC, path, "`mark.opacity` must be a number"));
+    };
+    if !number.is_finite() || !(0.0..=1.0).contains(&number) {
+        return Err(fail(codes::INVALID_SPEC, path, "`mark.opacity` must be within 0.0..=1.0"));
     }
+    Ok(number)
 }
 
 fn lower_data(value: &Json) -> Result<Vec<Map<String, Json>>, ChartError> {

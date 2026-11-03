@@ -27,6 +27,24 @@ const OPACITY_MIN: f64 = 0.05;
 const AXIS_LABEL_GAP: f64 = 4.0;
 const AXIS_LABEL_INSET: f64 = 6.0;
 
+/// Constant paint defaults resolved once from the spec.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PaintDefaults {
+    color: Color,
+    text_color: Color,
+    opacity: f64,
+}
+
+impl PaintDefaults {
+    fn new(spec: &ChartSpec) -> Self {
+        Self {
+            color: spec.mark_color.unwrap_or(DEFAULT_MARK_COLOR),
+            text_color: spec.mark_color.unwrap_or(DEFAULT_TEXT_COLOR),
+            opacity: spec.mark_opacity.unwrap_or(1.0),
+        }
+    }
+}
+
 /// Tuning for deterministic chart compilation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChartOptions {
@@ -104,15 +122,16 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
         scales.push(ChartScale { channel, scale });
     }
 
+    let paints = PaintDefaults::new(spec);
     let mut marks = Vec::new();
     match spec.mark {
-        Mark::Bar => build_bars(&rows, &scales, &mut marks)?,
-        Mark::Point => build_points(&rows, &scales, options, &mut marks),
-        Mark::Line | Mark::Area => build_series(spec.mark, &rows, &scales, options, &mut marks)?,
-        Mark::Rule => build_rules(&rows, &scales, &plot, &mut marks)?,
-        Mark::Rect => build_rects(&rows, &scales, &mut marks)?,
-        Mark::Tick => build_ticks(&rows, &scales, &mut marks)?,
-        Mark::Text => build_texts(&rows, &scales, &mut marks),
+        Mark::Bar => build_bars(&rows, &scales, paints, &mut marks)?,
+        Mark::Point => build_points(&rows, &scales, options, paints, &mut marks),
+        Mark::Line | Mark::Area => build_series(spec.mark, &rows, &scales, options, paints, &mut marks)?,
+        Mark::Rule => build_rules(&rows, &scales, &plot, paints, &mut marks)?,
+        Mark::Rect => build_rects(&rows, &scales, paints, &mut marks)?,
+        Mark::Tick => build_ticks(&rows, &scales, paints, &mut marks)?,
+        Mark::Text => build_texts(&rows, &scales, paints, &mut marks),
     }
 
     let mut axes: Vec<AxisPlan> = Vec::new();
@@ -443,11 +462,11 @@ fn numeric(row: &Row, channel: Channel) -> Result<f64, ChartError> {
         .ok_or_else(|| ChartError::new(codes::TYPE_MISMATCH, format!("the `{}` channel needs a finite numeric value", channel.as_str())))
 }
 
-fn color_for(row: &Row, scales: &[ChartScale]) -> Color {
+fn color_for(row: &Row, scales: &[ChartScale], paints: PaintDefaults) -> Color {
     find_scale(scales, Channel::Color)
         .and_then(Scale::nominal)
         .and_then(|nominal| row.get(Channel::Color).and_then(|value| nominal.color(&value.label())))
-        .unwrap_or(DEFAULT_MARK_COLOR)
+        .unwrap_or(paints.color)
 }
 
 fn shape_for(row: &Row, scales: &[ChartScale]) -> MarkerShape {
@@ -464,20 +483,22 @@ fn size_for(row: &Row, scales: &[ChartScale], options: &ChartOptions) -> f64 {
         .unwrap_or(options.point_size)
 }
 
-fn opacity_for(row: &Row, scales: &[ChartScale]) -> f64 {
-    find_scale(scales, Channel::Opacity)
+fn opacity_for(row: &Row, scales: &[ChartScale], paints: PaintDefaults) -> f64 {
+    match find_scale(scales, Channel::Opacity)
         .and_then(Scale::linear)
         .and_then(|linear| row.get(Channel::Opacity).and_then(Value::as_number).map(|value| linear.map(value)))
-        .unwrap_or(1.0)
-        .clamp(OPACITY_MIN, 1.0)
+    {
+        Some(value) => value.clamp(OPACITY_MIN, 1.0),
+        None => paints.opacity,
+    }
 }
 
-fn filled_style(row: &Row, scales: &[ChartScale]) -> MarkStyle {
-    MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::filled(color_for(row, scales)) }
+fn filled_style(row: &Row, scales: &[ChartScale], paints: PaintDefaults) -> MarkStyle {
+    MarkStyle { opacity: opacity_for(row, scales, paints), ..MarkStyle::filled(color_for(row, scales, paints)) }
 }
 
-fn stroked_style(row: &Row, scales: &[ChartScale], width: f64) -> MarkStyle {
-    MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::stroked(color_for(row, scales), width) }
+fn stroked_style(row: &Row, scales: &[ChartScale], paints: PaintDefaults, width: f64) -> MarkStyle {
+    MarkStyle { opacity: opacity_for(row, scales, paints), ..MarkStyle::stroked(color_for(row, scales, paints), width) }
 }
 
 fn source_for(row: &Row) -> String {
@@ -494,7 +515,7 @@ fn baseline_position(scale: &LinearScale) -> f64 {
     scale.map(value)
 }
 
-fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+fn build_bars(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
     let x = find_scale(scales, Channel::X);
     let y = find_scale(scales, Channel::Y);
     match (x, y) {
@@ -512,7 +533,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>
                     mark: Mark::Bar,
                     source: category,
                     geometry: MarkGeometry::Rect(rect),
-                    style: filled_style(row, scales),
+                    style: filled_style(row, scales, paints),
                 });
             }
         }
@@ -530,7 +551,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>
                     mark: Mark::Bar,
                     source: category,
                     geometry: MarkGeometry::Rect(rect),
-                    style: filled_style(row, scales),
+                    style: filled_style(row, scales, paints),
                 });
             }
         }
@@ -541,7 +562,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>
     Ok(())
 }
 
-fn build_points(rows: &[Row], scales: &[ChartScale], options: &ChartOptions, marks: &mut Vec<MarkInstance>) {
+fn build_points(rows: &[Row], scales: &[ChartScale], options: &ChartOptions, paints: PaintDefaults, marks: &mut Vec<MarkInstance>) {
     for (index, row) in rows.iter().enumerate() {
         let Some(center) = position_of(row, scales)
         else {
@@ -552,7 +573,7 @@ fn build_points(rows: &[Row], scales: &[ChartScale], options: &ChartOptions, mar
             mark: Mark::Point,
             source: source_for(row),
             geometry: MarkGeometry::Point { center, size: size_for(row, scales, options), shape: shape_for(row, scales) },
-            style: filled_style(row, scales),
+            style: filled_style(row, scales, paints),
         });
     }
 }
@@ -583,6 +604,7 @@ fn build_series(
     rows: &[Row],
     scales: &[ChartScale],
     options: &ChartOptions,
+    paints: PaintDefaults,
     marks: &mut Vec<MarkInstance>,
 ) -> Result<(), ChartError> {
     let Some(x_scale) = find_scale(scales, Channel::X)
@@ -603,7 +625,7 @@ fn build_series(
         let index = match series.iter().position(|(existing, _, _, _)| *existing == label) {
             Some(index) => index,
             None => {
-                series.push((label, color_for(row, scales), Vec::new(), opacity_for(row, scales)));
+                series.push((label, color_for(row, scales, paints), Vec::new(), opacity_for(row, scales, paints)));
                 series.len() - 1
             }
         };
@@ -647,7 +669,13 @@ fn build_series(
     Ok(())
 }
 
-fn build_rules(rows: &[Row], scales: &[ChartScale], plot: &Rect, marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+fn build_rules(
+    rows: &[Row],
+    scales: &[ChartScale],
+    plot: &Rect,
+    paints: PaintDefaults,
+    marks: &mut Vec<MarkInstance>,
+) -> Result<(), ChartError> {
     let horizontal = find_scale(scales, Channel::Y).and_then(Scale::linear);
     let vertical = find_scale(scales, Channel::X).and_then(Scale::linear);
     if horizontal.is_none() && vertical.is_none() {
@@ -676,13 +704,13 @@ fn build_rules(rows: &[Row], scales: &[ChartScale], plot: &Rect, marks: &mut Vec
             mark: Mark::Rule,
             source,
             geometry,
-            style: stroked_style(row, scales, RULE_WIDTH),
+            style: stroked_style(row, scales, paints, RULE_WIDTH),
         });
     }
     Ok(())
 }
 
-fn build_rects(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+fn build_rects(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
     let x_band = find_scale(scales, Channel::X).and_then(Scale::band);
     let y_band = find_scale(scales, Channel::Y).and_then(Scale::band);
     let (Some(x_band), Some(y_band)) = (x_band, y_band)
@@ -707,13 +735,13 @@ fn build_rects(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance
             mark: Mark::Rect,
             source: format!("{x_label}|{y_label}"),
             geometry: MarkGeometry::Rect(Rect::new(x, y, width, height)),
-            style: filled_style(row, scales),
+            style: filled_style(row, scales, paints),
         });
     }
     Ok(())
 }
 
-fn build_ticks(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+fn build_ticks(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
     let x = find_scale(scales, Channel::X);
     let y = find_scale(scales, Channel::Y);
     let half = TICK_MARK_LENGTH * 0.5;
@@ -741,13 +769,13 @@ fn build_ticks(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance
             mark: Mark::Tick,
             source: source_for(row),
             geometry,
-            style: stroked_style(row, scales, RULE_WIDTH),
+            style: stroked_style(row, scales, paints, RULE_WIDTH),
         });
     }
     Ok(())
 }
 
-fn build_texts(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) {
+fn build_texts(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks: &mut Vec<MarkInstance>) {
     for (index, row) in rows.iter().enumerate() {
         let Some(anchor) = position_of(row, scales)
         else {
@@ -759,7 +787,7 @@ fn build_texts(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance
             mark: Mark::Text,
             source: source_for(row),
             geometry: MarkGeometry::Label { anchor, text },
-            style: MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::filled(DEFAULT_TEXT_COLOR) },
+            style: MarkStyle { opacity: opacity_for(row, scales, paints), ..MarkStyle::filled(paints.text_color) },
         });
     }
 }

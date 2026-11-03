@@ -78,6 +78,100 @@ fn html_import_promotes_mermaid_container_classes_to_diagram_blocks() {
 }
 
 #[test]
+fn html_import_keeps_image_only_mermaid_container_as_bitmap_with_loss() {
+    let graph = import_html_text(
+        "mermaid-bitmap.html",
+        r#"<body><div class="mermaid"><img src="assets/flow.png" alt="flowchart" width="640" height="480"></div></body>"#,
+    )
+    .expect("import image-only mermaid container");
+
+    assert!(
+        !graph.blocks.iter().any(|node| matches!(node.block, Block::Diagram { .. })),
+        "an image-only container must not be promoted to an empty diagram: {:?}",
+        graph.blocks
+    );
+
+    let image = graph
+        .blocks
+        .iter()
+        .flat_map(|node| block_images(&node.block))
+        .next()
+        .unwrap_or_else(|| panic!("the bitmap must survive as an image: {:?}", graph.blocks));
+    assert_eq!(image.0, "assets/flow.png");
+    assert_eq!(image.1, vec![("width".to_string(), "640".to_string()), ("height".to_string(), "480".to_string())]);
+
+    assert_eq!(graph.assets.len(), 1, "the bitmap must be registered as an asset: {:?}", graph.assets);
+    assert_eq!(graph.assets[0].source.as_deref(), Some("assets/flow.png"));
+    assert!(
+        graph.coverage.loss.iter().any(|loss| loss.code == "import.html.empty_diagram_container" && loss.status == SemanticStatus::Partial),
+        "the empty container must surface a structured loss: {:?}",
+        graph.coverage.loss
+    );
+}
+
+#[test]
+fn html_import_keeps_image_only_mermaid_pre_on_the_default_path() {
+    let graph = import_html_text("mermaid-pre-bitmap.html", r#"<body><pre class="mermaid"><img src="chart.png" alt="chart"></pre></body>"#)
+        .expect("import image-only mermaid pre");
+
+    assert!(
+        !graph.blocks.iter().any(|node| matches!(node.block, Block::Diagram { .. } | Block::Code { .. })),
+        "an image-only pre must be neither an empty diagram nor an empty code block: {:?}",
+        graph.blocks
+    );
+    assert_eq!(graph.assets.len(), 1, "the bitmap must be registered as an asset: {:?}", graph.assets);
+    assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.html.empty_diagram_container"));
+}
+
+#[test]
+fn html_import_keeps_plain_images_and_textual_mermaid_containers_unchanged() {
+    // Plain images keep their exact behavior: no diagram promotion, no empty
+    // container loss, and no attribute wrapper when no size was authored.
+    let plain = import_html_text("plain-image.html", r#"<body><p><img src="a.png" alt="A"></p></body>"#).expect("import plain image");
+    let Block::Paragraph { content } = &plain.blocks[0].block else {
+        panic!("expected a paragraph: {:?}", plain.blocks)
+    };
+    assert!(
+        matches!(&content[0], Inline::Image { source, .. } if source == "a.png"),
+        "a size-less image stays unwrapped: {:?}",
+        content
+    );
+    assert!(!plain.coverage.loss.iter().any(|loss| loss.code == "import.html.empty_diagram_container"));
+
+    // Textual mermaid containers still promote with their authored source.
+    let flowchart = "flowchart TD\n  A --> B";
+    let textual = import_html_text("mermaid-textual.html", &format!("<body><div class=\"mermaid\">\n{flowchart}\n</div></body>")).expect("import textual");
+    assert_eq!(single_diagram(&textual), ("mermaid".to_string(), flowchart.to_string()));
+    assert!(!textual.coverage.loss.iter().any(|loss| loss.code == "import.html.empty_diagram_container"));
+}
+
+/// Collect every image in a block together with its attribute pairs,
+/// descending through `Attributed` wrappers.
+fn block_images(block: &Block) -> Vec<(String, Vec<(String, String)>)> {
+    let mut images = Vec::new();
+    let content: &[Inline] = match block {
+        Block::Paragraph { content } => content,
+        _ => &[],
+    };
+    collect_inline_images(content, &[], &mut images);
+    images
+}
+
+fn collect_inline_images(inlines: &[Inline], inherited: &[(String, String)], images: &mut Vec<(String, Vec<(String, String)>)>) {
+    for inline in inlines {
+        match inline {
+            Inline::Image { source, .. } => images.push((source.clone(), inherited.to_vec())),
+            Inline::Attributed { attributes, children } => {
+                let pairs = attributes.pairs.iter().map(|pair| (pair.key.clone(), pair.value.clone())).collect::<Vec<_>>();
+                collect_inline_images(children, &pairs, images);
+            }
+            Inline::Styled { children, .. } => collect_inline_images(children, inherited, images),
+            _ => {}
+        }
+    }
+}
+
+#[test]
 fn html_import_keeps_inline_svg_as_raw_markup_without_leaking_label_text() {
     let graph = import_html_text(
         "inline-svg.html",

@@ -1,6 +1,6 @@
 use notedown_ir::{
-    Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, NodeId, RelationEndpoint, SemanticStatus, SourceKind,
-    SourceRef,
+    AttributePair, Attributes, Block, BreakKind, DocumentGraph, DocumentId, Inline, LossMarker, NodeId, RelationEndpoint, SemanticStatus,
+    SourceKind, SourceRef,
 };
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_html::{
@@ -301,23 +301,27 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
         "pre" => {
             if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
                 vec![(Block::Diagram { language, source: diagram }, span)]
-            }
-            else if let Some(language) = hosted_diagram_language(element) {
-                vec![(Block::Diagram { language, source: diagram_source(element, source) }, span)]
-            }
-            else {
-                vec![(
-                    Block::Code {
-                        language: element
-                            .children
-                            .iter()
-                            .filter_map(as_element)
-                            .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
-                            .and_then(|child| attribute(child, "class")),
-                        content: preformatted_source(element, source),
-                    },
-                    span,
-                )]
+            } else {
+                match hosted_diagram_source(element, graph, source) {
+                    HostedDiagram::Source(language, diagram) => vec![(Block::Diagram { language, source: diagram }, span)],
+                    HostedDiagram::Empty => lower_children(&element.children, graph, source),
+                    HostedDiagram::Absent => {
+                        vec![
+                            (
+                                Block::Code {
+                                    language: element
+                                        .children
+                                        .iter()
+                                        .filter_map(as_element)
+                                        .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                                        .and_then(|child| attribute(child, "class")),
+                                    content: preformatted_source(element, source),
+                                },
+                                span,
+                            ),
+                        ]
+                    }
+                }
             }
         }
         "ul" | "ol" => {
@@ -382,9 +386,9 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
         "svg" => vec![(Block::RawHtml { html: raw_element_markup(element, source) }, span)],
         "section" | "article" | "main" | "div" | "figure" | "nav" => match explicit_diagram_marker(element, source) {
             Some((language, diagram)) => vec![(Block::Diagram { language, source: diagram }, span)],
-            None => match hosted_diagram_language(element) {
-                Some(language) => vec![(Block::Diagram { language, source: diagram_source(element, source) }, span)],
-                None => lower_children(&element.children, graph, source),
+            None => match hosted_diagram_source(element, graph, source) {
+                HostedDiagram::Source(language, diagram) => vec![(Block::Diagram { language, source: diagram }, span)],
+                HostedDiagram::Empty | HostedDiagram::Absent => lower_children(&element.children, graph, source),
             },
         },
         _ => Vec::new(),
@@ -400,6 +404,38 @@ fn explicit_diagram_marker(element: &Element, source: &str) -> Option<(String, S
     let diagram =
         attribute(element, "data-diagram-source-hex").and_then(|hex| decode_hex(&hex)).unwrap_or_else(|| preformatted_source(element, source));
     Some((language, diagram))
+}
+
+/// Outcome of probing a hosted diagram container (`.mermaid` and friends).
+enum HostedDiagram {
+    /// No hosted diagram marker on the container.
+    Absent,
+    /// The marker is present but the container carries no text source: a
+    /// runtime-rendered fallback such as `<div class="mermaid"><img/></div>`.
+    /// The bitmap must stay reachable on the default path, so the caller
+    /// lowers the children instead of promoting an empty diagram.
+    Empty,
+    /// The marker is present and the container carries authored text source.
+    Source(String, String),
+}
+
+/// Resolve the hosted diagram marker of a container. An image-only or
+/// otherwise textless container records an explicit loss instead of being
+/// swallowed as an empty `Block::Diagram`.
+fn hosted_diagram_source(element: &Element, graph: &mut DocumentGraph, source: &str) -> HostedDiagram {
+    let Some(language) = hosted_diagram_language(element) else {
+        return HostedDiagram::Absent;
+    };
+    let diagram = diagram_source(element, source);
+    if diagram.trim().is_empty() {
+        graph.push_loss(LossMarker {
+            code: "import.html.empty_diagram_container".into(),
+            message: format!("a `{language}` diagram container carried no text source, so its contents were kept on the default path"),
+            status: SemanticStatus::Partial,
+        });
+        return HostedDiagram::Empty;
+    }
+    HostedDiagram::Source(language, diagram)
 }
 
 /// Diagram containers used by real pages: the Mermaid runtime selects
@@ -660,7 +696,9 @@ fn lower_inline_element(element: &Element, graph: &mut DocumentGraph, source: &s
 }
 
 /// Collect the identity and class attributes of an inline element so authored
-/// anchors and style hooks survive into the semantic layer.
+/// anchors and style hooks survive into the semantic layer. `<img>` elements
+/// additionally keep their authored `width`/`height` in the ordered pairs so
+/// bitmap consumers can recover the display size.
 fn inline_attributes(element: &Element) -> Attributes {
     let mut attributes = Attributes::default();
     for attribute in &element.attributes {
@@ -671,6 +709,13 @@ fn inline_attributes(element: &Element) -> Attributes {
         }
         else if attribute.name.eq_ignore_ascii_case("class") {
             attributes.classes = attribute.value.as_deref().unwrap_or_default().split_whitespace().map(str::to_string).collect();
+        }
+        else if element.tag_name.eq_ignore_ascii_case("img")
+            && (attribute.name.eq_ignore_ascii_case("width") || attribute.name.eq_ignore_ascii_case("height"))
+        {
+            if let Some(value) = attribute.value.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+                attributes.pairs.push(AttributePair { key: attribute.name.to_ascii_lowercase(), value: value.to_string() });
+            }
         }
     }
     attributes

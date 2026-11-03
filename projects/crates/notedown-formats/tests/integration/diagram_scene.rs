@@ -5,7 +5,7 @@
 
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use davinci_diagram::{dot_to_scene, mermaid_to_scene};
+use davinci_diagram::{dot_to_scene, mermaid_to_scene, plantuml_to_scene};
 use notedown_formats::{
     export::{
         html::{RenderedDiagram, export_html, export_html_with_diagrams},
@@ -128,6 +128,55 @@ fn rejected_dot_keeps_the_source_fallback_visible() {
 
     let html = export_html(&graph).expect("export dot html without a rendered scene");
     assert!(html.contains(r#"<pre class="diagram" data-diagram-language="dot""#), "{html}");
+    assert!(!html.contains("<figure"), "a rejected diagram must not render half a figure: {html}");
+}
+
+/// PlantUML class sources ride the same fence, block, and HTML surfaces. The
+/// rendered figure keeps the authored source in `data-diagram-source-hex`, so a
+/// reopened document still holds a `plantuml` diagram block.
+#[test]
+fn plantuml_fences_lower_to_svg_and_round_trip_html_and_markdown() {
+    let source = "@startuml\nclass Order {\n  +id : String\n}\nclass Payable {\n  +pay()\n}\nOrder o-- Payable\n@enduml";
+    let graph = import_markdown_bytes("orders.md", &format!("```plantuml\n{source}\n```\n")).expect("import plantuml markdown");
+    let block = single_diagram(&graph);
+    assert_eq!(block, ("plantuml".to_string(), source.to_string()));
+    assert!(export_markdown(&graph).expect("export plantuml markdown").contains("```plantuml"), "the fence must reopen as `plantuml`");
+
+    let lowered = plantuml_to_scene(source).expect("plantuml lowering should succeed");
+    assert!(lowered.diagnostics.is_empty(), "the subset fixture must not approximate: {:?}", lowered.diagnostics);
+    let svg = lowered.scene.to_svg().expect("plantuml scene must serialize");
+    for label in ["Order", "+id : String", "Payable", "+pay()"] {
+        assert!(svg_contains_label(&svg, label), "the PlantUML SVG must draw `{label}`\n{svg}");
+    }
+
+    let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("diagram-artifacts");
+    fs::create_dir_all(&out_dir).expect("create diagram artifact dir");
+    let artifact = out_dir.join("plantuml-class.svg");
+    fs::write(&artifact, &svg).expect("write plantuml svg artifact");
+    eprintln!("wrote {} ({} bytes)", artifact.display(), svg.len());
+
+    let diagrams = HashMap::from([(diagram_id(&graph), RenderedDiagram { svg: svg.clone() })]);
+    let html = export_html_with_diagrams(&graph, &diagrams).expect("export rendered plantuml html");
+    assert!(html.contains(r#"<figure class="diagram" data-diagram-language="plantuml""#), "{html}");
+    assert!(html.contains("data-diagram-source-hex="), "{html}");
+    assert!(html.contains(&svg), "the rendered figure must inline the scene SVG: {html}");
+    let reopened = import_html_bytes("orders.rendered.html", html.as_bytes()).expect("reopen rendered plantuml html");
+    assert_eq!(single_diagram(&reopened), ("plantuml".to_string(), source.to_string()), "{html}");
+}
+
+/// A PlantUML construct outside the subset must fail with the authored line span
+/// and the exporter must keep the fence visible instead of emitting half a figure.
+#[test]
+fn rejected_plantuml_keeps_the_source_fallback_visible() {
+    let source = "@startuml\nclass A\nnote right of A : detail\n@enduml";
+    let graph = import_markdown_bytes("rejected.md", &format!("```plantuml\n{source}\n```\n")).expect("import plantuml markdown");
+
+    let error = plantuml_to_scene(source).expect_err("notes are outside the PlantUML subset");
+    let span = error.span().expect("the rejection must carry a span");
+    assert_eq!(&source[span], "note right of A : detail");
+
+    let html = export_html(&graph).expect("export plantuml html without a rendered scene");
+    assert!(html.contains(r#"<pre class="diagram" data-diagram-language="plantuml""#), "{html}");
     assert!(!html.contains("<figure"), "a rejected diagram must not render half a figure: {html}");
 }
 

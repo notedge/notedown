@@ -22,6 +22,8 @@ use crate::{
 const DEFAULT_MARK_COLOR: Color = Color::rgb(0x4a, 0x7f, 0xbf);
 const DEFAULT_TEXT_COLOR: Color = Color::rgb(0x2d, 0x37, 0x48);
 const RULE_WIDTH: f64 = 1.0;
+const TICK_MARK_LENGTH: f64 = 6.0;
+const OPACITY_MIN: f64 = 0.05;
 const AXIS_LABEL_GAP: f64 = 4.0;
 const AXIS_LABEL_INSET: f64 = 6.0;
 
@@ -108,6 +110,8 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
         Mark::Point => build_points(&rows, &scales, options, &mut marks),
         Mark::Line | Mark::Area => build_series(spec.mark, &rows, &scales, options, &mut marks)?,
         Mark::Rule => build_rules(&rows, &scales, &plot, &mut marks)?,
+        Mark::Rect => build_rects(&rows, &scales, &mut marks)?,
+        Mark::Tick => build_ticks(&rows, &scales, &mut marks)?,
         Mark::Text => build_texts(&rows, &scales, &mut marks),
     }
 
@@ -206,7 +210,7 @@ fn project_rows(
     measure: Option<Channel>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Vec<Row>, ChartError> {
-    let mut missing = [0usize; 5];
+    let mut missing = [0usize; 6];
     let mut rows = Vec::new();
     for index in 0..data.row_count() {
         let mut row = Row::default();
@@ -314,6 +318,19 @@ fn train_channel(
             let range = (options.point_size * 0.5, options.point_size * 2.0);
             Ok(Scale::Linear(train_linear(&values, None, range)))
         }
+        Channel::Opacity => {
+            let values = numbers(rows, channel);
+            if values.is_empty() {
+                return Err(empty_domain(channel));
+            }
+            if collapsed(&values) {
+                diagnostics.push(chart_warning(
+                    codes::DEGENERATE_DOMAIN,
+                    format!("the `{}` channel has one distinct value; its linear domain was expanded", channel.as_str()),
+                ));
+            }
+            Ok(Scale::Linear(train_linear(&values, None, (OPACITY_MIN, 1.0))))
+        }
         Channel::X | Channel::Y => {
             let range = if channel == Channel::X { (plot.x, plot.right()) } else { (plot.bottom(), plot.y) };
             let requested = match declared {
@@ -360,7 +377,7 @@ fn default_spec(kind: FieldKind, mark: Mark) -> ScaleSpec {
     if kind.is_quantitative() {
         ScaleSpec::linear()
     }
-    else if mark == Mark::Bar {
+    else if matches!(mark, Mark::Bar | Mark::Rect) {
         ScaleSpec::band(0.1)
     }
     else {
@@ -447,6 +464,22 @@ fn size_for(row: &Row, scales: &[ChartScale], options: &ChartOptions) -> f64 {
         .unwrap_or(options.point_size)
 }
 
+fn opacity_for(row: &Row, scales: &[ChartScale]) -> f64 {
+    find_scale(scales, Channel::Opacity)
+        .and_then(Scale::linear)
+        .and_then(|linear| row.get(Channel::Opacity).and_then(Value::as_number).map(|value| linear.map(value)))
+        .unwrap_or(1.0)
+        .clamp(OPACITY_MIN, 1.0)
+}
+
+fn filled_style(row: &Row, scales: &[ChartScale]) -> MarkStyle {
+    MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::filled(color_for(row, scales)) }
+}
+
+fn stroked_style(row: &Row, scales: &[ChartScale], width: f64) -> MarkStyle {
+    MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::stroked(color_for(row, scales), width) }
+}
+
 fn source_for(row: &Row) -> String {
     row.get(Channel::X).map(Value::label).or_else(|| row.get(Channel::Y).map(Value::label)).unwrap_or_else(|| "row".to_string())
 }
@@ -479,7 +512,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>
                     mark: Mark::Bar,
                     source: category,
                     geometry: MarkGeometry::Rect(rect),
-                    style: MarkStyle::filled(color_for(row, scales)),
+                    style: filled_style(row, scales),
                 });
             }
         }
@@ -497,7 +530,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>
                     mark: Mark::Bar,
                     source: category,
                     geometry: MarkGeometry::Rect(rect),
-                    style: MarkStyle::filled(color_for(row, scales)),
+                    style: filled_style(row, scales),
                 });
             }
         }
@@ -519,7 +552,7 @@ fn build_points(rows: &[Row], scales: &[ChartScale], options: &ChartOptions, mar
             mark: Mark::Point,
             source: source_for(row),
             geometry: MarkGeometry::Point { center, size: size_for(row, scales, options), shape: shape_for(row, scales) },
-            style: MarkStyle::filled(color_for(row, scales)),
+            style: filled_style(row, scales),
         });
     }
 }
@@ -560,24 +593,24 @@ fn build_series(
     else {
         return Err(ChartError::new(codes::INVALID_SPEC, "the line and area marks need a linear `y` scale"));
     };
-    let mut series: Vec<(String, Color, Vec<(f64, Point)>)> = Vec::new();
+    let mut series: Vec<(String, Color, Vec<(f64, Point)>, f64)> = Vec::new();
     for row in rows {
         let Some(point) = position_of(row, scales)
         else {
             continue;
         };
         let label = series_label(row);
-        let index = match series.iter().position(|(existing, _, _)| *existing == label) {
+        let index = match series.iter().position(|(existing, _, _, _)| *existing == label) {
             Some(index) => index,
             None => {
-                series.push((label, color_for(row, scales), Vec::new()));
+                series.push((label, color_for(row, scales), Vec::new(), opacity_for(row, scales)));
                 series.len() - 1
             }
         };
         series[index].2.push((order_key(row, x_scale), point));
     }
 
-    for (index, (label, color, mut points)) in series.into_iter().enumerate() {
+    for (index, (label, color, mut points, opacity)) in series.into_iter().enumerate() {
         points.sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal));
         let points: Vec<Point> = points.into_iter().map(|(_, point)| point).collect();
         if points.is_empty() {
@@ -591,7 +624,7 @@ fn build_series(
                 let mut polygon = points;
                 polygon.push(Point::new(last.x, baseline));
                 polygon.push(Point::new(first.x, baseline));
-                let style = MarkStyle { fill: Some(color), stroke: Some(color), stroke_width: RULE_WIDTH, opacity: 1.0 };
+                let style = MarkStyle { fill: Some(color), stroke: Some(color), stroke_width: RULE_WIDTH, opacity };
                 marks.push(MarkInstance {
                     id: format!("chart-area-{index}"),
                     mark: Mark::Area,
@@ -606,7 +639,7 @@ fn build_series(
                     mark: Mark::Line,
                     source: label,
                     geometry: MarkGeometry::Polyline(points),
-                    style: MarkStyle::stroked(color, options.stroke_width),
+                    style: MarkStyle { opacity, ..MarkStyle::stroked(color, options.stroke_width) },
                 });
             }
         }
@@ -643,7 +676,68 @@ fn build_rules(rows: &[Row], scales: &[ChartScale], plot: &Rect, marks: &mut Vec
             mark: Mark::Rule,
             source,
             geometry,
-            style: MarkStyle::stroked(color_for(row, scales), RULE_WIDTH),
+            style: stroked_style(row, scales, RULE_WIDTH),
+        });
+    }
+    Ok(())
+}
+
+fn build_rects(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+    let x_band = find_scale(scales, Channel::X).and_then(Scale::band);
+    let y_band = find_scale(scales, Channel::Y).and_then(Scale::band);
+    let (Some(x_band), Some(y_band)) = (x_band, y_band)
+    else {
+        return Err(ChartError::new(codes::INVALID_SPEC, "the rect mark needs band scales on both axes"));
+    };
+    for (index, row) in rows.iter().enumerate() {
+        let x_label = row.get(Channel::X).map(Value::label).unwrap_or_default();
+        let y_label = row.get(Channel::Y).map(Value::label).unwrap_or_default();
+        let x = x_band
+            .position(&x_label)
+            .ok_or_else(|| ChartError::new(codes::INVALID_SPEC, format!("category `{x_label}` is missing from the x band scale")))?;
+        let y = y_band
+            .position(&y_label)
+            .ok_or_else(|| ChartError::new(codes::INVALID_SPEC, format!("category `{y_label}` is missing from the y band scale")))?;
+        marks.push(MarkInstance {
+            id: format!("chart-rect-{index}"),
+            mark: Mark::Rect,
+            source: format!("{x_label}|{y_label}"),
+            geometry: MarkGeometry::Rect(Rect::new(x, y, x_band.band_width, y_band.band_width)),
+            style: filled_style(row, scales),
+        });
+    }
+    Ok(())
+}
+
+fn build_ticks(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
+    let x = find_scale(scales, Channel::X);
+    let y = find_scale(scales, Channel::Y);
+    let half = TICK_MARK_LENGTH * 0.5;
+    for (index, row) in rows.iter().enumerate() {
+        let Some(center) = position_of(row, scales)
+        else {
+            continue;
+        };
+        let geometry = match (x, y) {
+            (Some(Scale::Band(_) | Scale::Point(_)), Some(Scale::Linear(_))) => {
+                MarkGeometry::Segment { from: Point::new(center.x, center.y - half), to: Point::new(center.x, center.y + half) }
+            }
+            (Some(Scale::Linear(_)), Some(Scale::Band(_) | Scale::Point(_))) => {
+                MarkGeometry::Segment { from: Point::new(center.x - half, center.y), to: Point::new(center.x + half, center.y) }
+            }
+            _ => {
+                return Err(ChartError::new(
+                    codes::INVALID_SPEC,
+                    "the tick mark needs a categorical scale on one axis and a linear scale on the other",
+                ));
+            }
+        };
+        marks.push(MarkInstance {
+            id: format!("chart-tick-{index}"),
+            mark: Mark::Tick,
+            source: source_for(row),
+            geometry,
+            style: stroked_style(row, scales, RULE_WIDTH),
         });
     }
     Ok(())
@@ -661,7 +755,7 @@ fn build_texts(rows: &[Row], scales: &[ChartScale], marks: &mut Vec<MarkInstance
             mark: Mark::Text,
             source: source_for(row),
             geometry: MarkGeometry::Label { anchor, text },
-            style: MarkStyle::filled(DEFAULT_TEXT_COLOR),
+            style: MarkStyle { opacity: opacity_for(row, scales), ..MarkStyle::filled(DEFAULT_TEXT_COLOR) },
         });
     }
 }
@@ -718,6 +812,7 @@ struct Row {
     color: Option<Value>,
     size: Option<Value>,
     shape: Option<Value>,
+    opacity: Option<Value>,
 }
 
 impl Row {
@@ -728,6 +823,7 @@ impl Row {
             Channel::Color => self.color.as_ref(),
             Channel::Size => self.size.as_ref(),
             Channel::Shape => self.shape.as_ref(),
+            Channel::Opacity => self.opacity.as_ref(),
         }
     }
 
@@ -738,6 +834,7 @@ impl Row {
             Channel::Color => self.color = Some(value),
             Channel::Size => self.size = Some(value),
             Channel::Shape => self.shape = Some(value),
+            Channel::Opacity => self.opacity = Some(value),
         }
     }
 
@@ -753,5 +850,6 @@ fn channel_index(channel: Channel) -> usize {
         Channel::Color => 2,
         Channel::Size => 3,
         Channel::Shape => 4,
+        Channel::Opacity => 5,
     }
 }

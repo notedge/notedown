@@ -26,6 +26,10 @@ pub enum Mark {
     Area,
     /// One reference line across the plot.
     Rule,
+    /// One axis-aligned rectangle filling a categorical cell.
+    Rect,
+    /// One short tick centered on the observation.
+    Tick,
     /// One text label per observation.
     Text,
 }
@@ -39,6 +43,8 @@ impl Mark {
             Self::Line => "line",
             Self::Area => "area",
             Self::Rule => "rule",
+            Self::Rect => "rect",
+            Self::Tick => "tick",
             Self::Text => "text",
         }
     }
@@ -57,11 +63,13 @@ pub enum Channel {
     Size,
     /// Marker shape.
     Shape,
+    /// Paint opacity.
+    Opacity,
 }
 
 impl Channel {
     /// Every channel in declaration order.
-    pub const ALL: [Self; 5] = [Self::X, Self::Y, Self::Color, Self::Size, Self::Shape];
+    pub const ALL: [Self; 6] = [Self::X, Self::Y, Self::Color, Self::Size, Self::Shape, Self::Opacity];
 
     /// A stable lowercase keyword for diagnostics and scene ids.
     pub fn as_str(self) -> &'static str {
@@ -71,6 +79,7 @@ impl Channel {
             Self::Color => "color",
             Self::Size => "size",
             Self::Shape => "shape",
+            Self::Opacity => "opacity",
         }
     }
 }
@@ -159,6 +168,8 @@ pub struct Encoding {
     pub size: Option<ChannelEncoding>,
     /// Marker shape binding.
     pub shape: Option<ChannelEncoding>,
+    /// Paint opacity binding.
+    pub opacity: Option<ChannelEncoding>,
 }
 
 impl Encoding {
@@ -170,6 +181,7 @@ impl Encoding {
             Channel::Color => self.color.as_ref(),
             Channel::Size => self.size.as_ref(),
             Channel::Shape => self.shape.as_ref(),
+            Channel::Opacity => self.opacity.as_ref(),
         }
     }
 
@@ -181,6 +193,7 @@ impl Encoding {
             Channel::Color => self.color = Some(encoding),
             Channel::Size => self.size = Some(encoding),
             Channel::Shape => self.shape = Some(encoding),
+            Channel::Opacity => self.opacity = Some(encoding),
         }
     }
 
@@ -251,6 +264,8 @@ pub struct Scales {
     pub size: Option<ScaleSpec>,
     /// Shape scale declaration.
     pub shape: Option<ScaleSpec>,
+    /// Opacity scale declaration.
+    pub opacity: Option<ScaleSpec>,
 }
 
 impl Scales {
@@ -262,6 +277,7 @@ impl Scales {
             Channel::Color => self.color.as_ref(),
             Channel::Size => self.size.as_ref(),
             Channel::Shape => self.shape.as_ref(),
+            Channel::Opacity => self.opacity.as_ref(),
         }
     }
 
@@ -273,6 +289,7 @@ impl Scales {
             Channel::Color => self.color = Some(spec),
             Channel::Size => self.size = Some(spec),
             Channel::Shape => self.shape = Some(spec),
+            Channel::Opacity => self.opacity = Some(spec),
         }
     }
 }
@@ -446,6 +463,19 @@ impl ChartSpec {
                     ));
                 }
             }
+            if channel == Channel::Opacity {
+                let effective = if encoding.aggregate.is_some() { FieldKind::Quantitative } else { field.kind };
+                if !effective.is_quantitative() {
+                    diagnostics.push(chart_error(
+                        codes::INVALID_SPEC,
+                        format!(
+                            "the `opacity` channel needs a quantitative field, but `{}` is {}",
+                            field.name,
+                            field.kind.as_str()
+                        ),
+                    ));
+                }
+            }
             if let Some(spec) = self.scales.channel(channel) {
                 if let Some(record) = scale_conflict(channel, field.kind, encoding.aggregate, *spec) {
                     diagnostics.push(record);
@@ -465,7 +495,7 @@ impl ChartSpec {
 
 fn supports(mark: Mark, channel: Channel) -> bool {
     match channel {
-        Channel::X | Channel::Y | Channel::Color => true,
+        Channel::X | Channel::Y | Channel::Color | Channel::Opacity => true,
         Channel::Size => matches!(mark, Mark::Point),
         Channel::Shape => matches!(mark, Mark::Point | Mark::Line | Mark::Area),
     }
@@ -488,7 +518,7 @@ fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate
                 Channel::Color | Channel::Shape => {
                     Some(chart_error(codes::INVALID_SCALE, format!("the `{}` channel uses a nominal scale in this slice", channel.as_str())))
                 }
-                Channel::Size | Channel::X | Channel::Y => {
+                Channel::Size | Channel::X | Channel::Y | Channel::Opacity => {
                     if effective.is_quantitative() {
                         None
                     }
@@ -509,7 +539,7 @@ fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate
                 ));
             }
             match channel {
-                Channel::Color | Channel::Shape | Channel::Size => {
+                Channel::Color | Channel::Shape | Channel::Size | Channel::Opacity => {
                     Some(chart_error(codes::INVALID_SCALE, format!("only `x` and `y` use band or point scales, not `{}`", channel.as_str())))
                 }
                 Channel::X | Channel::Y => {

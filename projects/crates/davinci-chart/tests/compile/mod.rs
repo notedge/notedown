@@ -277,3 +277,101 @@ fn point_positions_reconcile_with_both_scales() {
     assert!(approx(center.y, y_scale.map(2.0)));
     assert!(center.x.is_finite() && center.y.is_finite(), "point geometry must never be NaN");
 }
+
+#[test]
+fn rect_marks_fill_band_cells_and_reject_non_band_axes() {
+    let data = snapshot(vec![
+        column("column", FieldKind::Nominal, texts(&["a", "a", "b"])),
+        column("row", FieldKind::Nominal, texts(&["high", "low", "high"])),
+        column("weight", FieldKind::Quantitative, numbers(&[1.0, 2.0, 3.0])),
+    ]);
+    let spec = ChartSpec::new(Mark::Rect)
+        .with_field(FieldRef::new("column", FieldKind::Nominal))
+        .with_field(FieldRef::new("row", FieldKind::Nominal))
+        .with_field(FieldRef::new("weight", FieldKind::Quantitative))
+        .with_encoding(Channel::X, ChannelEncoding::field("column", FieldKind::Nominal))
+        .with_encoding(Channel::Y, ChannelEncoding::field("row", FieldKind::Nominal))
+        .with_encoding(Channel::Color, ChannelEncoding::field("weight", FieldKind::Quantitative));
+
+    let plan = compile(&spec, &data, &options()).expect("rect chart should compile");
+    let x_band = plan.scale(Channel::X).and_then(Scale::band).expect("x band scale");
+    let y_band = plan.scale(Channel::Y).and_then(Scale::band).expect("y band scale");
+
+    assert_eq!(plan.marks.len(), 3, "one cell per row");
+    for (instance, (column, row)) in plan.marks.iter().zip([("a", "high"), ("a", "low"), ("b", "high")]) {
+        let MarkGeometry::Rect(rect) = &instance.geometry
+        else {
+            panic!("a rect must compile to a rectangle");
+        };
+        assert_eq!(instance.mark, Mark::Rect);
+        assert_eq!(instance.source, format!("{column}|{row}"));
+        assert!(approx(rect.x, x_band.position(column).expect("column")));
+        assert!(approx(rect.width, x_band.band_width));
+        assert!(approx(rect.y, y_band.position(row).expect("row")));
+        assert!(approx(rect.height, y_band.band_width));
+    }
+
+    let quantitative = ChartSpec::new(Mark::Rect)
+        .with_field(FieldRef::new("x", FieldKind::Quantitative))
+        .with_field(FieldRef::new("y", FieldKind::Quantitative))
+        .with_encoding(Channel::X, ChannelEncoding::field("x", FieldKind::Quantitative))
+        .with_encoding(Channel::Y, ChannelEncoding::field("y", FieldKind::Quantitative));
+    let data = snapshot(vec![column("x", FieldKind::Quantitative, numbers(&[1.0])), column("y", FieldKind::Quantitative, numbers(&[2.0]))]);
+    let error = compile(&quantitative, &data, &options()).expect_err("a rect needs two band axes");
+    assert_eq!(error.code(), codes::INVALID_SPEC);
+}
+
+#[test]
+fn tick_marks_center_a_short_segment_on_each_observation() {
+    let data = snapshot(vec![
+        column("group", FieldKind::Nominal, texts(&["a", "b"])),
+        column("value", FieldKind::Quantitative, numbers(&[1.0, 4.0])),
+    ]);
+    let spec = ChartSpec::new(Mark::Tick)
+        .with_field(FieldRef::new("group", FieldKind::Nominal))
+        .with_field(FieldRef::new("value", FieldKind::Quantitative))
+        .with_encoding(Channel::X, ChannelEncoding::field("group", FieldKind::Nominal))
+        .with_encoding(Channel::Y, ChannelEncoding::field("value", FieldKind::Quantitative));
+
+    let plan = compile(&spec, &data, &options()).expect("tick chart should compile");
+    let x_scale = plan.scale(Channel::X).and_then(Scale::point).expect("x point scale");
+    let y_scale = plan.scale(Channel::Y).and_then(Scale::linear).expect("y linear scale");
+
+    assert_eq!(plan.marks.len(), 2);
+    for (instance, (group, value)) in plan.marks.iter().zip([("a", 1.0), ("b", 4.0)]) {
+        let MarkGeometry::Segment { from, to } = &instance.geometry
+        else {
+            panic!("a tick must compile to a segment");
+        };
+        assert_eq!(instance.mark, Mark::Tick);
+        assert!(approx(from.x, x_scale.position(group).expect("group")), "a vertical tick stays on its category");
+        assert!(approx(to.x, from.x));
+        assert!(approx((from.y + to.y) * 0.5, y_scale.map(value)), "the tick is centered on the value");
+        assert!(approx(to.y - from.y, 6.0), "the tick length is fixed");
+    }
+}
+
+#[test]
+fn opacity_channel_sets_the_mark_style_and_needs_a_numeric_field() {
+    let data = snapshot(vec![
+        column("category", FieldKind::Nominal, texts(&["A", "B"])),
+        column("value", FieldKind::Quantitative, numbers(&[10.0, 20.0])),
+        column("alpha", FieldKind::Quantitative, numbers(&[0.0, 1.0])),
+    ]);
+    let spec = bar_spec()
+        .with_field(FieldRef::new("alpha", FieldKind::Quantitative))
+        .with_encoding(Channel::Opacity, ChannelEncoding::field("alpha", FieldKind::Quantitative));
+
+    let plan = compile(&spec, &data, &options()).expect("opacity chart should compile");
+    assert!(approx(plan.marks[0].style.opacity, 0.05), "the low end maps to the opacity floor");
+    assert!(approx(plan.marks[1].style.opacity, 1.0), "the high end maps to opaque");
+
+    let invalid = ChartSpec::new(Mark::Bar)
+        .with_field(FieldRef::new("category", FieldKind::Nominal))
+        .with_field(FieldRef::new("value", FieldKind::Quantitative))
+        .with_encoding(Channel::X, ChannelEncoding::field("category", FieldKind::Nominal))
+        .with_encoding(Channel::Y, ChannelEncoding::field("value", FieldKind::Quantitative))
+        .with_encoding(Channel::Opacity, ChannelEncoding::field("category", FieldKind::Nominal));
+    let error = compile(&invalid, &bar_data(), &options()).expect_err("nominal opacity is invalid");
+    assert_eq!(error.code(), codes::INVALID_SPEC);
+}

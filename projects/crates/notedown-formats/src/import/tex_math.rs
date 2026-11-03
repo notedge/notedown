@@ -832,6 +832,18 @@ mod tests {
     }
 
     #[test]
+    fn starred_alignedat_keeps_its_declared_column_pairs() {
+        let source = r"\begin{alignedat*}{2} a &= b \end{alignedat*}";
+        let MathExpression::Environment(environment) = lower(source)
+        else {
+            panic!("expected an environment")
+        };
+        assert_eq!(environment.kind, MathEnvironmentKind::AlignedAt);
+        assert_eq!(environment.column_pairs, Some(2));
+        assert!(matches!(&environment.rows[0].cells[0], MathExpression::Atom(atom) if atom.text == "a"));
+    }
+
+    #[test]
     fn environment_rows_and_cells_come_from_the_ast() {
         let source = r"\begin{cases}1 & x > 0 \\ 0 & x \le 0\end{cases}";
         let expression = lower(source);

@@ -33,6 +33,26 @@ pub mod codes {
     pub const DEGENERATE_DOMAIN: &str = "davinci.chart.degenerate-domain";
     /// A mark or guide is drawn approximately, or not at all.
     pub const APPROXIMATED: &str = "davinci.chart.approximated";
+    /// The document is not valid JSON.
+    pub const INVALID_JSON: &str = "davinci.chart.invalid-json";
+    /// The document carries a key outside the accepted subset.
+    pub const UNKNOWN_KEY: &str = "davinci.chart.unknown-key";
+    /// The document declares a mark outside the accepted subset.
+    pub const UNSUPPORTED_MARK: &str = "davinci.chart.unsupported-mark";
+    /// The document binds a channel outside the accepted subset.
+    pub const UNSUPPORTED_CHANNEL: &str = "davinci.chart.unsupported-channel";
+    /// A channel key or statistic is outside the accepted subset.
+    pub const UNSUPPORTED_ENCODING: &str = "davinci.chart.unsupported-encoding";
+    /// The document declares a scale outside the accepted subset.
+    pub const UNSUPPORTED_SCALE: &str = "davinci.chart.unsupported-scale";
+    /// The document declares a data transform.
+    pub const UNSUPPORTED_TRANSFORM: &str = "davinci.chart.unsupported-transform";
+    /// The document declares a composed view.
+    pub const UNSUPPORTED_VIEW: &str = "davinci.chart.unsupported-view";
+    /// The document declares interaction or selection state.
+    pub const UNSUPPORTED_INTERACTION: &str = "davinci.chart.unsupported-interaction";
+    /// The document points at data that is not inline.
+    pub const REMOTE_DATA: &str = "davinci.chart.remote-data";
 }
 
 pub(crate) fn chart_error(code: &str, message: impl Into<String>) -> Diagnostic {

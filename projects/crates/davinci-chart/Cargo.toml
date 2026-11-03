@@ -11,3 +11,13 @@ edition.workspace = true
 [dependencies]
 davinci-types = { workspace = true }
 davinci-scene = { workspace = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+default = []
+vega-lite = ["dep:serde_json"]
+
+[[test]]
+name = "vega_lite"
+path = "tests/vega_lite/mod.rs"
+required-features = ["vega-lite"]

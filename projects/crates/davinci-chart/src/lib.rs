@@ -37,6 +37,8 @@ pub mod render;
 pub mod scale;
 pub mod spec;
 pub mod statistic;
+#[cfg(feature = "vega-lite")]
+pub mod vega_lite;
 
 pub use davinci_types::Diagnostic;
 

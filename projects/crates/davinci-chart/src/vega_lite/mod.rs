@@ -427,6 +427,8 @@ fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {
     let scale_type = scale_type.ok_or_else(|| fail(codes::INVALID_SPEC, path, "`scale.type` is required"))?;
     match scale_type.as_str() {
         "linear" => Ok(ScaleSpec::Linear { domain }),
+        "log" => Ok(ScaleSpec::Log { domain }),
+        "sqrt" => Ok(ScaleSpec::Sqrt { domain }),
         "band" => {
             if domain.is_some() {
                 return Err(fail(codes::INVALID_SCALE, &format!("{path}.domain"), "a band scale cannot take a numeric domain"));

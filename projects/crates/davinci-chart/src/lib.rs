@@ -47,7 +47,7 @@ pub use data::{DataColumn, DataSnapshot, FieldKind, Value};
 pub use error::{ChartError, codes};
 pub use plan::{AxisPlan, AxisTick, ChartCompilePlan, ChartScale, MarkGeometry, MarkInstance, MarkStyle};
 pub use render::render;
-pub use scale::{BandScale, LinearScale, NominalScale, PointScale, Scale, ScaleKind};
+pub use scale::{BandScale, LinearScale, NominalScale, PointScale, Scale, ScaleKind, Transfer, TransformedScale};
 pub use spec::{Aggregate, Channel, ChannelEncoding, ChartSpec, Coordinate, Encoding, FieldRef, Guide, Mark, ScaleSpec, Scales};
 
 use davinci_scene::SemanticScene;

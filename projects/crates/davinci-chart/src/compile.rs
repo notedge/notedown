@@ -14,7 +14,7 @@ use crate::{
     data::{DataSnapshot, FieldKind, Value, format_number},
     error::{ChartError, chart_warning, codes},
     plan::{AxisPlan, AxisTick, ChartCompilePlan, ChartScale, MarkGeometry, MarkInstance, MarkStyle},
-    scale::{LinearScale, Scale, linear_ticks, train_band, train_linear, train_nominal, train_point},
+    scale::{Scale, Transfer, TransformedScale, linear_ticks, log_ticks, train_band, train_linear, train_nominal, train_point},
     spec::{Channel, ChartSpec, Guide, Mark, ScaleSpec},
     statistic::{Observation, aggregate},
 };
@@ -370,6 +370,8 @@ fn train_channel(
                     }
                     Ok(Scale::Linear(train_linear(&values, domain, range)))
                 }
+                ScaleSpec::Log { domain } => train_transformed(rows, channel, domain, range, Transfer::Log, diagnostics),
+                ScaleSpec::Sqrt { domain } => train_transformed(rows, channel, domain, range, Transfer::Sqrt, diagnostics),
                 ScaleSpec::Band { padding } => {
                     let categories = categories(rows, channel);
                     if categories.is_empty() {
@@ -390,6 +392,61 @@ fn train_channel(
             }
         }
     }
+}
+
+fn train_transformed(
+    rows: &[Row],
+    channel: Channel,
+    domain: Option<(f64, f64)>,
+    range: (f64, f64),
+    transfer: Transfer,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Scale, ChartError> {
+    let values = numbers(rows, channel);
+    if values.is_empty() {
+        return Err(empty_domain(channel));
+    }
+    let strictly_positive = transfer == Transfer::Log;
+    for value in &values {
+        let invalid = if strictly_positive { *value <= 0.0 } else { *value < 0.0 };
+        if invalid {
+            return Err(ChartError::new(
+                codes::INVALID_SCALE,
+                format!(
+                    "the `{}` channel has value `{value}`, a {} scale needs {} values",
+                    channel.as_str(),
+                    transfer.as_str(),
+                    if strictly_positive { "strictly positive" } else { "non-negative" }
+                ),
+            ));
+        }
+    }
+    let (min, max) = match domain {
+        Some((min, max)) => (min, max),
+        None => {
+            let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+            let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            if min == max {
+                diagnostics.push(chart_warning(
+                    codes::DEGENERATE_DOMAIN,
+                    format!(
+                        "the `{}` channel has one distinct value; its {} domain was expanded",
+                        channel.as_str(),
+                        transfer.as_str()
+                    ),
+                ));
+                match transfer {
+                    Transfer::Log => (min * 0.5, max * 2.0),
+                    Transfer::Sqrt if min == 0.0 => (0.0, 1.0),
+                    Transfer::Sqrt => (min * 0.5, max * 1.5),
+                }
+            }
+            else {
+                (min, max)
+            }
+        }
+    };
+    Ok(Scale::Transformed(TransformedScale::new(transfer, (min, max), range)))
 }
 
 fn default_spec(kind: FieldKind, mark: Mark) -> ScaleSpec {
@@ -443,6 +500,7 @@ fn find_scale(scales: &[ChartScale], channel: Channel) -> Option<&Scale> {
 fn map_value(scale: &Scale, value: &Value) -> Option<f64> {
     match scale {
         Scale::Linear(linear) => value.as_number().map(|number| linear.map(number)),
+        Scale::Transformed(transformed) => value.as_number().map(|number| transformed.map(number)),
         Scale::Band(band) => band.center(&value.label()),
         Scale::Point(point) => point.position(&value.label()),
         Scale::Nominal(_) => None,
@@ -508,25 +566,31 @@ fn source_for(row: &Row) -> String {
 /// The baseline position used by bars and areas.
 ///
 /// The baseline is zero when the domain contains it and the domain minimum
-/// otherwise, so bars always start inside the plot.
-fn baseline_position(scale: &LinearScale) -> f64 {
-    let (min, max) = scale.domain;
-    let value = if min <= 0.0 && 0.0 <= max { 0.0 } else { min };
-    scale.map(value)
+/// otherwise, so bars always start inside the plot. A transformed scale
+/// cannot contain zero, so it always uses the domain minimum.
+fn baseline_position(scale: &Scale) -> Option<f64> {
+    match scale {
+        Scale::Linear(linear) => {
+            let (min, max) = linear.domain;
+            Some(linear.map(if min <= 0.0 && 0.0 <= max { 0.0 } else { min }))
+        }
+        Scale::Transformed(transformed) => Some(transformed.map(transformed.domain.0)),
+        _ => None,
+    }
 }
 
 fn build_bars(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks: &mut Vec<MarkInstance>) -> Result<(), ChartError> {
     let x = find_scale(scales, Channel::X);
     let y = find_scale(scales, Channel::Y);
     match (x, y) {
-        (Some(Scale::Band(band)), Some(Scale::Linear(linear))) => {
-            let baseline = baseline_position(linear);
+        (Some(Scale::Band(band)), Some(y_scale)) if y_scale.numeric_domain().is_some() => {
+            let baseline = baseline_position(y_scale).expect("a numeric scale has a baseline");
             for (index, row) in rows.iter().enumerate() {
                 let category = row.get(Channel::X).map(Value::label).unwrap_or_default();
                 let start = band
                     .position(&category)
                     .ok_or_else(|| ChartError::new(codes::INVALID_SPEC, format!("category `{category}` is missing from the band scale")))?;
-                let position = linear.map(numeric(row, Channel::Y)?);
+                let position = y_scale.map_number(numeric(row, Channel::Y)?).expect("the guard checked a numeric scale");
                 let rect = Rect::new(start, position.min(baseline), band.band_width, (position - baseline).abs());
                 marks.push(MarkInstance {
                     id: format!("chart-bar-{index}"),
@@ -537,14 +601,14 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks:
                 });
             }
         }
-        (Some(Scale::Linear(linear)), Some(Scale::Band(band))) => {
-            let baseline = baseline_position(linear);
+        (Some(x_scale), Some(Scale::Band(band))) if x_scale.numeric_domain().is_some() => {
+            let baseline = baseline_position(x_scale).expect("a numeric scale has a baseline");
             for (index, row) in rows.iter().enumerate() {
                 let category = row.get(Channel::Y).map(Value::label).unwrap_or_default();
                 let start = band
                     .position(&category)
                     .ok_or_else(|| ChartError::new(codes::INVALID_SPEC, format!("category `{category}` is missing from the band scale")))?;
-                let position = linear.map(numeric(row, Channel::X)?);
+                let position = x_scale.map_number(numeric(row, Channel::X)?).expect("the guard checked a numeric scale");
                 let rect = Rect::new(position.min(baseline), start, (position - baseline).abs(), band.band_width);
                 marks.push(MarkInstance {
                     id: format!("chart-bar-{index}"),
@@ -556,7 +620,7 @@ fn build_bars(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks:
             }
         }
         _ => {
-            return Err(ChartError::new(codes::INVALID_SPEC, "the bar mark needs a band scale on one axis and a linear scale on the other"));
+            return Err(ChartError::new(codes::INVALID_SPEC, "the bar mark needs a band scale on one axis and a continuous scale on the other"));
         }
     }
     Ok(())
@@ -611,9 +675,9 @@ fn build_series(
     else {
         return Err(ChartError::new(codes::INVALID_SPEC, "the line and area marks need an `x` binding"));
     };
-    let Some(Scale::Linear(y_linear)) = find_scale(scales, Channel::Y)
+    let Some(y_scale) = find_scale(scales, Channel::Y).filter(|scale| scale.numeric_domain().is_some())
     else {
-        return Err(ChartError::new(codes::INVALID_SPEC, "the line and area marks need a linear `y` scale"));
+        return Err(ChartError::new(codes::INVALID_SPEC, "the line and area marks need a continuous `y` scale"));
     };
     let mut series: Vec<(String, Color, Vec<(f64, Point)>, f64)> = Vec::new();
     for row in rows {
@@ -640,7 +704,7 @@ fn build_series(
         }
         match mark {
             Mark::Area => {
-                let baseline = baseline_position(y_linear);
+                let baseline = baseline_position(y_scale).expect("the check above selected a numeric scale");
                 let first = points[0];
                 let last = points[points.len() - 1];
                 let mut polygon = points;
@@ -751,16 +815,16 @@ fn build_ticks(rows: &[Row], scales: &[ChartScale], paints: PaintDefaults, marks
             continue;
         };
         let geometry = match (x, y) {
-            (Some(Scale::Band(_) | Scale::Point(_)), Some(Scale::Linear(_))) => {
+            (Some(Scale::Band(_) | Scale::Point(_)), Some(other)) if other.numeric_domain().is_some() => {
                 MarkGeometry::Segment { from: Point::new(center.x, center.y - half), to: Point::new(center.x, center.y + half) }
             }
-            (Some(Scale::Linear(_)), Some(Scale::Band(_) | Scale::Point(_))) => {
+            (Some(other), Some(Scale::Band(_) | Scale::Point(_))) if other.numeric_domain().is_some() => {
                 MarkGeometry::Segment { from: Point::new(center.x - half, center.y), to: Point::new(center.x + half, center.y) }
             }
             _ => {
                 return Err(ChartError::new(
                     codes::INVALID_SPEC,
-                    "the tick mark needs a categorical scale on one axis and a linear scale on the other",
+                    "the tick mark needs a categorical scale on one axis and a continuous scale on the other",
                 ));
             }
         };
@@ -815,6 +879,15 @@ fn build_axis(channel: Channel, scales: &[ChartScale], plot: &Rect, options: &Ch
         Scale::Linear(linear) => {
             for value in linear_ticks(linear.domain, options.tick_count) {
                 ticks.push(make_tick(channel, linear.map(value), format_number(value), plot, options));
+            }
+        }
+        Scale::Transformed(transformed) => {
+            let values = match transformed.transfer {
+                Transfer::Log => log_ticks(transformed.domain, options.tick_count),
+                Transfer::Sqrt => linear_ticks(transformed.domain, options.tick_count),
+            };
+            for value in values {
+                ticks.push(make_tick(channel, transformed.map(value), format_number(value), plot, options));
             }
         }
         Scale::Nominal(_) => return None,

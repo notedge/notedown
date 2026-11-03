@@ -1,4 +1,6 @@
-use davinci_chart::scale::{MARKERS, PALETTE, Scale, linear_ticks, train_band, train_linear, train_nominal, train_point};
+use davinci_chart::scale::{
+    MARKERS, PALETTE, Scale, Transfer, TransformedScale, linear_ticks, log_ticks, train_band, train_linear, train_nominal, train_point,
+};
 use davinci_scene::MarkerShape;
 
 use crate::support::approx;
@@ -79,6 +81,56 @@ fn linear_ticks_stay_inside_the_domain_and_are_sorted() {
     let signed = linear_ticks((-1.0, 1.0), 3);
     assert!(signed.iter().all(|tick| (-1.0..=1.0).contains(tick)));
     assert!(signed.len() >= 2);
+}
+
+#[test]
+fn log_scales_place_decades_evenly() {
+    let scale = TransformedScale::new(Transfer::Log, (1.0, 100.0), (0.0, 100.0));
+
+    assert!(approx(scale.map(1.0), 0.0));
+    assert!(approx(scale.map(10.0), 50.0), "one decade lands in the middle");
+    assert!(approx(scale.map(100.0), 100.0));
+}
+
+#[test]
+fn sqrt_scales_compress_their_upper_half() {
+    let scale = TransformedScale::new(Transfer::Sqrt, (0.0, 16.0), (0.0, 100.0));
+
+    assert!(approx(scale.map(0.0), 0.0));
+    assert!(approx(scale.map(4.0), 50.0));
+    assert!(approx(scale.map(16.0), 100.0));
+}
+
+#[test]
+fn log_ticks_follow_decade_mantissas_inside_the_domain() {
+    let ticks = log_ticks((1.0, 1000.0), 5);
+
+    assert!(ticks.windows(2).all(|pair| pair[0] < pair[1]), "log ticks must be sorted: {ticks:?}");
+    assert!(ticks.iter().all(|tick| (1.0..=1000.0).contains(tick)));
+
+    for expected in [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0] {
+        assert!(
+            ticks.iter().any(|tick| approx(*tick, expected)),
+            "expected the 1-2-5 mantissa tick {expected}, got {ticks:?}"
+        );
+    }
+
+    let fractional = log_ticks((0.1, 1.0), 4);
+    assert!(!fractional.is_empty());
+    assert!(fractional.iter().all(|tick| (0.1..=1.0).contains(tick)));
+    assert!(fractional.iter().any(|tick| approx(*tick, 0.1)) || fractional.iter().any(|tick| approx(*tick, 0.2)));
+}
+
+#[test]
+fn transformed_scales_report_log_and_sqrt_families() {
+    let log = Scale::Transformed(TransformedScale::new(Transfer::Log, (1.0, 10.0), (0.0, 1.0)));
+    let sqrt = Scale::Transformed(TransformedScale::new(Transfer::Sqrt, (0.0, 4.0), (0.0, 1.0)));
+
+    assert!(matches!(log.kind(), davinci_chart::ScaleKind::Log));
+    assert!(matches!(sqrt.kind(), davinci_chart::ScaleKind::Sqrt));
+    assert_eq!(log.numeric_domain(), Some((1.0, 10.0)));
+    assert!(log.transformed().is_some());
+    assert!(approx(log.map_number(10.0).expect("log"), 1.0));
 }
 
 #[test]

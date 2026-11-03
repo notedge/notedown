@@ -26,6 +26,10 @@ pub const MARKERS: [MarkerShape; 3] = [MarkerShape::Circle, MarkerShape::Triangl
 pub enum ScaleKind {
     /// A continuous linear scale.
     Linear,
+    /// A continuous base-10 logarithmic scale.
+    Log,
+    /// A continuous square-root scale.
+    Sqrt,
     /// A categorical band scale.
     Band,
     /// A categorical point scale.
@@ -39,6 +43,8 @@ impl ScaleKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Linear => "linear",
+            Self::Log => "log",
+            Self::Sqrt => "sqrt",
             Self::Band => "band",
             Self::Point => "point",
             Self::Nominal => "nominal",
@@ -67,6 +73,64 @@ impl LinearScale {
         let (min, max) = self.domain;
         let (start, end) = self.range;
         start + (value - min) / (max - min) * (end - start)
+    }
+}
+
+/// The monotonic transform applied before mapping a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    /// Base-10 logarithm. The domain must be strictly positive.
+    Log,
+    /// Square root. The domain must be non-negative.
+    Sqrt,
+}
+
+impl Transfer {
+    /// Apply the transform to one non-negative value.
+    pub fn forward(self, value: f64) -> f64 {
+        match self {
+            Self::Log => value.log10(),
+            Self::Sqrt => value.sqrt(),
+        }
+    }
+
+    /// A stable lowercase keyword for diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Log => "log",
+            Self::Sqrt => "sqrt",
+        }
+    }
+}
+
+/// A continuous scale with a monotonic transform in front of a linear range.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransformedScale {
+    /// The monotonic transform.
+    pub transfer: Transfer,
+    /// Inclusive data domain in data space, always `min < max`.
+    pub domain: (f64, f64),
+    /// Output range. An inverted range, such as bottom-to-top, is supported.
+    pub range: (f64, f64),
+}
+
+impl TransformedScale {
+    /// Create a transformed scale from an already valid domain.
+    pub fn new(transfer: Transfer, domain: (f64, f64), range: (f64, f64)) -> Self {
+        let (min, max) = if domain.0 <= domain.1 { domain } else { (domain.1, domain.0) };
+        Self { transfer, domain: (min, max), range }
+    }
+
+    /// Map a domain value into the output range.
+    pub fn map(&self, value: f64) -> f64 {
+        let (min, max) = self.domain;
+        let (start, end) = self.range;
+        let min = self.transfer.forward(min);
+        let max = self.transfer.forward(max);
+        if !(max > min) {
+            return start;
+        }
+        start + (self.transfer.forward(value) - min) / (max - min) * (end - start)
     }
 }
 
@@ -211,6 +275,8 @@ impl NominalScale {
 pub enum Scale {
     /// A continuous linear scale.
     Linear(LinearScale),
+    /// A continuous log or square-root scale.
+    Transformed(TransformedScale),
     /// A categorical band scale.
     Band(BandScale),
     /// A categorical point scale.
@@ -224,6 +290,10 @@ impl Scale {
     pub fn kind(&self) -> ScaleKind {
         match self {
             Self::Linear(_) => ScaleKind::Linear,
+            Self::Transformed(scale) => match scale.transfer {
+                Transfer::Log => ScaleKind::Log,
+                Transfer::Sqrt => ScaleKind::Sqrt,
+            },
             Self::Band(_) => ScaleKind::Band,
             Self::Point(_) => ScaleKind::Point,
             Self::Nominal(_) => ScaleKind::Nominal,
@@ -234,6 +304,32 @@ impl Scale {
     pub fn linear(&self) -> Option<&LinearScale> {
         match self {
             Self::Linear(scale) => Some(scale),
+            _ => None,
+        }
+    }
+
+    /// The transformed scale, when this is one.
+    pub fn transformed(&self) -> Option<&TransformedScale> {
+        match self {
+            Self::Transformed(scale) => Some(scale),
+            _ => None,
+        }
+    }
+
+    /// The numeric domain for continuous scales.
+    pub fn numeric_domain(&self) -> Option<(f64, f64)> {
+        match self {
+            Self::Linear(scale) => Some(scale.domain),
+            Self::Transformed(scale) => Some(scale.domain),
+            _ => None,
+        }
+    }
+
+    /// Map a number through a continuous scale.
+    pub fn map_number(&self, value: f64) -> Option<f64> {
+        match self {
+            Self::Linear(scale) => Some(scale.map(value)),
+            Self::Transformed(scale) => Some(scale.map(value)),
             _ => None,
         }
     }
@@ -292,6 +388,39 @@ pub fn train_linear(values: &[f64], domain: Option<(f64, f64)>, range: (f64, f64
         (min, max)
     });
     LinearScale::new(domain, range)
+}
+
+/// Generate deterministic log axis ticks.
+///
+/// Ticks follow decades with `1`, `2` and `5` mantissas, stay inside the
+/// positive domain, and are snapped so repeated runs produce identical labels.
+pub fn log_ticks(domain: (f64, f64), count: usize) -> Vec<f64> {
+    let (min, max) = normalized_domain(domain);
+    let count = count.max(2);
+    if !(min > 0.0) || !(max > 0.0) {
+        return Vec::new();
+    }
+    let mut ticks = Vec::new();
+    let start = min.log10().floor() as i32 - 1;
+    let end = max.log10().ceil() as i32 + 1;
+    for exponent in start..=end {
+        let decade = 10f64.powi(exponent);
+        for mantissa in [1.0, 2.0, 5.0] {
+            let value = snap(mantissa * decade, decade);
+            if value >= min && value <= max && !ticks.contains(&value) {
+                ticks.push(value);
+            }
+        }
+        if ticks.len() > count * 3 {
+            break;
+        }
+    }
+    if ticks.len() < 2 {
+        vec![min, max]
+    }
+    else {
+        ticks
+    }
 }
 
 /// Train a band scale over a category domain.

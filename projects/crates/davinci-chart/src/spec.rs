@@ -215,6 +215,16 @@ pub enum ScaleSpec {
         /// Explicit `(min, max)` domain, or `None` to infer it from the data.
         domain: Option<(f64, f64)>,
     },
+    /// A continuous base-10 logarithmic scale. Every value must be positive.
+    Log {
+        /// Explicit `(min, max)` domain, or `None` to infer it from the data.
+        domain: Option<(f64, f64)>,
+    },
+    /// A continuous square-root scale. Every value must be non-negative.
+    Sqrt {
+        /// Explicit `(min, max)` domain, or `None` to infer it from the data.
+        domain: Option<(f64, f64)>,
+    },
     /// A categorical band scale.
     Band {
         /// Inner and outer padding in the inclusive range `0.0..1.0`.
@@ -238,6 +248,26 @@ impl ScaleSpec {
     /// A linear scale with an explicit domain.
     pub fn linear_domain(min: f64, max: f64) -> Self {
         Self::Linear { domain: Some((min, max)) }
+    }
+
+    /// A log scale with an inferred domain.
+    pub fn log() -> Self {
+        Self::Log { domain: None }
+    }
+
+    /// A log scale with an explicit domain.
+    pub fn log_domain(min: f64, max: f64) -> Self {
+        Self::Log { domain: Some((min, max)) }
+    }
+
+    /// A square-root scale with an inferred domain.
+    pub fn sqrt() -> Self {
+        Self::Sqrt { domain: None }
+    }
+
+    /// A square-root scale with an explicit domain.
+    pub fn sqrt_domain(min: f64, max: f64) -> Self {
+        Self::Sqrt { domain: Some((min, max)) }
     }
 
     /// A band scale with explicit padding.
@@ -557,6 +587,40 @@ fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate
                         ))
                     }
                 }
+            }
+        }
+        ScaleSpec::Log { domain } | ScaleSpec::Sqrt { domain } => {
+            let log = matches!(spec, ScaleSpec::Log { .. });
+            if let Some((min, max)) = domain {
+                let lower_ok = if log { min > 0.0 } else { min >= 0.0 };
+                if !min.is_finite() || !max.is_finite() || min >= max || !lower_ok {
+                    let rule = if log { "both bounds above zero" } else { "a non-negative minimum" };
+                    return Some(chart_error(
+                        codes::INVALID_SCALE,
+                        format!(
+                            "the `{}` scale on the `{}` channel needs a finite domain with min < max and {rule}",
+                            if log { "log" } else { "sqrt" },
+                            channel.as_str()
+                        ),
+                    ));
+                }
+            }
+            match channel {
+                Channel::X | Channel::Y => {
+                    if effective.is_quantitative() {
+                        None
+                    }
+                    else {
+                        Some(chart_error(
+                            codes::INVALID_SCALE,
+                            format!("the `{}` channel is categorical and cannot use a log or sqrt scale", channel.as_str()),
+                        ))
+                    }
+                }
+                _ => Some(chart_error(
+                    codes::INVALID_SCALE,
+                    format!("only `x` and `y` use log or sqrt scales, not `{}`", channel.as_str()),
+                )),
             }
         }
         ScaleSpec::Band { padding } | ScaleSpec::Point { padding } => {

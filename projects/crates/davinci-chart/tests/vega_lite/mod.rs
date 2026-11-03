@@ -111,6 +111,45 @@ fn an_encoding_color_channel_overrides_the_constant_mark_color() {
     assert_ne!(fills[0], fills[1], "each category keeps its own color");
 }
 
+#[test]
+fn log_and_sqrt_scales_lower_through_the_shared_transformed_path() {
+    let document = |scale: &str| {
+        format!(
+            r#"{{"data":{{"values":[{{"c":"A","v":1}},{{"c":"B","v":10}},{{"c":"C","v":100}}]}},
+              "mark":"bar",
+              "encoding":{{
+                "x":{{"field":"c","type":"nominal"}},
+                "y":{{"field":"v","type":"quantitative","scale":{{"type":"{scale}"}}}}
+              }}}}"#
+        )
+    };
+    let linear = vega_lite::lower(&document("linear")).expect("linear chart");
+    let log = vega_lite::lower(&document("log")).expect("log chart");
+    let sqrt = vega_lite::lower(&document("sqrt")).expect("sqrt chart");
+
+    let middle_y = |chart: &vega_lite::VegaChart| match &chart.plan.marks[1].geometry {
+        davinci_chart::MarkGeometry::Rect(rect) => rect.y,
+        _ => panic!("a bar must compile to a rectangle"),
+    };
+    assert!(middle_y(&linear) > middle_y(&log), "log places the middle decade higher than linear");
+    assert!(middle_y(&linear) > middle_y(&sqrt), "sqrt places the middle value higher than linear");
+    assert_ne!(middle_y(&log), middle_y(&sqrt));
+
+    let y_axis = log.plan.axes.iter().find(|axis| axis.channel == davinci_chart::Channel::Y).expect("log y axis");
+    let labels: Vec<&str> = y_axis.ticks.iter().map(|tick| tick.label.as_str()).collect();
+    assert!(labels.contains(&"10") && labels.contains(&"100"), "log tick labels: {labels:?}");
+    assert!(log.to_svg().expect("log SVG").contains(">10</text>"));
+
+    let zero = r#"{"data":{"values":[{"c":"A","v":0}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"log"}}}}"#;
+    let error = vega_lite::lower(zero).expect_err("zero cannot enter a log domain");
+    assert_eq!(error.code(), codes::INVALID_SCALE);
+    assert!(error.message().contains("strictly positive"), "{}", error.message());
+
+    let negative_sqrt = r#"{"data":{"values":[{"c":"A","v":-1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"sqrt"}}}}"#;
+    let error = vega_lite::lower(negative_sqrt).expect_err("negative values cannot enter a sqrt domain");
+    assert_eq!(error.code(), codes::INVALID_SCALE);
+}
+
 const REJECTIONS: &[(&str, &str, &str)] = &[
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}},"transform":[{"filter":"datum.v > 0"}]}"#,
@@ -146,11 +185,6 @@ const REJECTIONS: &[(&str, &str, &str)] = &[
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal","bin":true},"y":{"field":"v","type":"quantitative"}}}"#,
         codes::UNSUPPORTED_ENCODING,
         "$.encoding.x.bin",
-    ),
-    (
-        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"line","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"log"}}}}"#,
-        codes::UNSUPPORTED_SCALE,
-        "$.encoding.y.scale.type",
     ),
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"line","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":true}}}}"#,

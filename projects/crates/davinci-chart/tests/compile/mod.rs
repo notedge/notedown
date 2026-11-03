@@ -251,6 +251,67 @@ fn empty_guides_suppress_axes_and_legends_are_reported() {
 }
 
 #[test]
+fn a_log_scale_places_decades_evenly_and_rejects_non_positive_values() {
+    let data = snapshot(vec![
+        column("category", FieldKind::Nominal, texts(&["A", "B", "C"])),
+        column("value", FieldKind::Quantitative, numbers(&[1.0, 10.0, 100.0])),
+    ]);
+    let linear = compile(&bar_spec(), &data, &options()).expect("linear chart");
+    let log_spec = bar_spec().with_scale(Channel::Y, davinci_chart::ScaleSpec::log());
+    let log = compile(&log_spec, &data, &options()).expect("log chart");
+
+    let top_of = |plan: &davinci_chart::ChartCompilePlan, index: usize| match &plan.marks[index].geometry {
+        MarkGeometry::Rect(rect) => rect.y,
+        _ => panic!("a bar must compile to a rectangle"),
+    };
+    let linear_middle = top_of(&linear, 1);
+    let log_middle = top_of(&log, 1);
+
+    assert!(approx(log_middle, log.plot.y + log.plot.height * 0.5), "one decade lands at the plot midpoint");
+    assert!(linear_middle > log_middle + log.plot.height * 0.3, "linear and log must place the middle decade differently");
+
+    let y_axis = log.axes.iter().find(|axis| axis.channel == Channel::Y).expect("log y axis");
+    let labels: Vec<&str> = y_axis.ticks.iter().map(|tick| tick.label.as_str()).collect();
+    assert!(labels.contains(&"10") && labels.contains(&"100"), "log ticks follow decade mantissas: {labels:?}");
+    assert!(y_axis.ticks.windows(2).all(|pair| pair[0].position.y > pair[1].position.y), "log ticks ascend visually");
+
+    let zero = snapshot(vec![
+        column("category", FieldKind::Nominal, texts(&["A", "B", "C"])),
+        column("value", FieldKind::Quantitative, numbers(&[1.0, 0.0, 100.0])),
+    ]);
+    let error = compile(&log_spec, &zero, &options()).expect_err("a zero value cannot enter a log domain");
+    assert_eq!(error.code(), codes::INVALID_SCALE);
+    assert!(error.message().contains("strictly positive"), "{}", error.message());
+
+    let diagnostics = bar_spec()
+        .with_scale(Channel::Y, davinci_chart::ScaleSpec::log_domain(-1.0, 100.0))
+        .validate();
+    assert!(has_code(&diagnostics, codes::INVALID_SCALE), "an explicit non-positive log domain must be refused");
+}
+
+#[test]
+fn a_sqrt_scale_shares_the_transformed_path() {
+    let data = snapshot(vec![
+        column("category", FieldKind::Nominal, texts(&["A", "B", "C"])),
+        column("value", FieldKind::Quantitative, numbers(&[1.0, 10.0, 100.0])),
+    ]);
+    let linear = compile(&bar_spec(), &data, &options()).expect("linear chart");
+    let sqrt = compile(&bar_spec().with_scale(Channel::Y, davinci_chart::ScaleSpec::sqrt()), &data, &options()).expect("sqrt chart");
+
+    let linear_middle = match &linear.marks[1].geometry {
+        MarkGeometry::Rect(rect) => rect.y,
+        _ => panic!("a bar must compile to a rectangle"),
+    };
+    let sqrt_middle = match &sqrt.marks[1].geometry {
+        MarkGeometry::Rect(rect) => rect.y,
+        _ => panic!("a bar must compile to a rectangle"),
+    };
+    assert!(sqrt_middle < linear_middle, "sqrt compresses the upper half differently from linear");
+    let y_scale = sqrt.scale(Channel::Y).expect("sqrt y scale");
+    assert_eq!(y_scale.kind(), davinci_chart::ScaleKind::Sqrt);
+}
+
+#[test]
 fn compiling_the_same_input_twice_is_identical() {
     let first = compile(&bar_spec(), &bar_data(), &options()).expect("bar chart");
     let second = compile(&bar_spec(), &bar_data(), &options()).expect("bar chart");

@@ -124,8 +124,41 @@ fn unsupported_sequence_statements_fall_back_to_source() {
 
     assert_eq!(error.code(), codes::UNSUPPORTED);
     assert!(error.message().contains("Note"), "{}", error.message());
-    assert!(error.message().contains("line 4"), "{}", error.message());
     assert!(error.message().contains("falls back"), "{}", error.message());
+
+    let span = error.span().expect("a sequence refusal names the statement");
+    assert_eq!(&source[span], "Note over A,B: shared", "the span covers the statement text, not the fence body");
+}
+
+#[test]
+fn sequence_statement_spans_survive_crlf_sources() {
+    let source = "sequenceDiagram\r\n    participant A\r\n    alt happy path\r\n        A->>A: step\r\n    end\r\n";
+    let error = mermaid_to_scene(source).expect_err("`alt` blocks are not lowered");
+
+    assert_eq!(error.code(), codes::UNSUPPORTED);
+    let span = error.span().expect("the statement is located");
+    assert_eq!(&source[span], "alt happy path");
+}
+
+#[test]
+fn a_second_diagram_is_refused_at_its_header() {
+    let source = "graph LR\n    A --> B\ngraph LR\n    C --> D\n";
+    let error = mermaid_to_scene(source).expect_err("multiple diagrams are not lowered");
+
+    assert_eq!(error.code(), codes::UNSUPPORTED);
+    let span = error.span().expect("the second header is located");
+    assert_eq!(&source[span.clone()], "graph LR");
+    assert_eq!(span.start, source.rfind("graph LR").expect("the second header exists"));
+}
+
+#[test]
+fn an_unknown_orientation_is_refused_at_the_header_line() {
+    let source = "graph XY\n    A --> B\n";
+    let error = mermaid_to_scene(source).expect_err("`XY` is not a Mermaid orientation");
+
+    assert_eq!(error.code(), codes::UNSUPPORTED);
+    let span = error.span().expect("the header is located");
+    assert_eq!(&source[span], "graph XY");
 }
 
 const CLASS_SOURCE: &str = "classDiagram\n    class Animal {\n        +int age\n        +isMammal()\n    }\n    class Duck {\n        +swim()\n    }\n    Animal <|-- Duck : is a\n    Duck --> Pond : lives in\n";

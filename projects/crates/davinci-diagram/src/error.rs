@@ -40,6 +40,14 @@ impl DiagramError {
         self
     }
 
+    /// Attach the offending byte range when the frontend could locate one.
+    pub fn with_optional_span(self, span: Option<Range<usize>>) -> Self {
+        match span {
+            Some(span) => self.with_span(span),
+            None => self,
+        }
+    }
+
     /// The offending byte range, when the frontend could identify one.
     pub fn span(&self) -> Option<Range<usize>> {
         self.span.clone()

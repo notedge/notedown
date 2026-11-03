@@ -178,8 +178,8 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 /// frontend family rebuilds its scene with the ordinary `compile` pass.
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
-    match single_diagram(&root)? {
-        MermaidDiagram::Flowchart(flowchart) => flowchart_spec(flowchart),
+    match single_diagram(&root, source)? {
+        MermaidDiagram::Flowchart(flowchart) => flowchart_spec(flowchart, source),
         MermaidDiagram::Class(class) => class_spec(class, source),
         MermaidDiagram::Sequence(sequence) => sequence_spec(sequence),
     }
@@ -195,8 +195,8 @@ pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
 /// the authored source visible instead of dropping the diagram silently.
 pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let root = parse_mermaid(source)?;
-    match single_diagram(&root)? {
-        MermaidDiagram::Flowchart(flowchart) => lower_graph(flowchart_spec(flowchart)?),
+    match single_diagram(&root, source)? {
+        MermaidDiagram::Flowchart(flowchart) => lower_graph(flowchart_spec(flowchart, source)?),
         MermaidDiagram::Sequence(sequence) => {
             validate_sequence_source(source)?;
             lower_graph(sequence_spec(sequence)?)
@@ -213,9 +213,14 @@ fn lower_graph(spec: DiagramSpec) -> Result<LoweredDiagram, DiagramError> {
     Ok(LoweredDiagram { plan, scene, diagnostics })
 }
 
-fn flowchart_spec(flowchart: &Flowchart) -> Result<DiagramSpec, DiagramError> {
-    let direction = direction(&flowchart.orientation)
-        .ok_or_else(|| DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation)))?;
+fn flowchart_spec(flowchart: &Flowchart, source: &str) -> Result<DiagramSpec, DiagramError> {
+    if let Some((range, line)) = locate_unsupported_orientation(source) {
+        return Err(DiagramError::unsupported(format!("unsupported flowchart orientation `{line}`")).with_span(range));
+    }
+    let direction = direction(&flowchart.orientation).ok_or_else(|| {
+        DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation))
+            .with_optional_span(locate_header(source, "flowchart").or_else(|| locate_header(source, "graph")))
+    })?;
     let mut collector = Collector::default();
     collector.collect(&flowchart.elements, &[])?;
 
@@ -231,7 +236,7 @@ fn flowchart_spec(flowchart: &Flowchart) -> Result<DiagramSpec, DiagramError> {
     Ok(spec)
 }
 
-fn single_diagram(root: &MermaidRoot) -> Result<&MermaidDiagram, DiagramError> {
+fn single_diagram<'a>(root: &'a MermaidRoot, source: &str) -> Result<&'a MermaidDiagram, DiagramError> {
     if root.diagrams.is_empty() {
         return Err(DiagramError::ast_unavailable("Mermaid source produced no diagrams"));
     }
@@ -239,7 +244,8 @@ fn single_diagram(root: &MermaidRoot) -> Result<&MermaidDiagram, DiagramError> {
         return Err(DiagramError::unsupported(format!(
             "a Mermaid root with {} diagrams is not lowered yet, exactly one diagram is supported",
             root.diagrams.len()
-        )));
+        ))
+        .with_optional_span(locate_second_header(source)));
     }
     Ok(&root.diagrams[0])
 }
@@ -520,8 +526,7 @@ const DIAGRAM_HEADERS: &[&str] = &[
 /// second AST.
 fn validate_sequence_source(source: &str) -> Result<(), DiagramError> {
     let mut inside = false;
-    for (index, raw) in source.lines().enumerate() {
-        let line = raw.trim();
+    for (range, line) in trimmed_lines(source) {
         if !inside {
             inside = line.starts_with("sequenceDiagram");
             continue;
@@ -540,11 +545,73 @@ fn validate_sequence_source(source: &str) -> Result<(), DiagramError> {
         }
         let keyword = line.split_whitespace().next().unwrap_or(line);
         return Err(DiagramError::unsupported(format!(
-            "sequence statement `{keyword}` on line {} is not lowered, the diagram falls back to its source",
-            index + 1
-        )));
+            "sequence statement `{keyword}` is not lowered, the diagram falls back to its source"
+        ))
+        .with_span(range));
     }
     Ok(())
+}
+
+/// Every non-empty line with its byte range inside the authored source.
+///
+/// Leading and trailing whitespace is excluded so a span covers the statement
+/// text itself. Lines are split on `\n` with a trailing `\r` ignored, which
+/// keeps offsets identical on CRLF and LF copies of the same document.
+fn trimmed_lines(source: &str) -> Vec<(std::ops::Range<usize>, &str)> {
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    for raw in source.split_inclusive('\n') {
+        let content = raw.strip_suffix('\n').unwrap_or(raw);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        let start = offset + (content.len() - content.trim_start().len());
+        let trimmed = content.trim();
+        lines.push((start..start + trimmed.len(), trimmed));
+        offset += raw.len();
+    }
+    lines
+}
+
+/// The header line of an authored orientation outside the supported set.
+///
+/// `oak-mermaid` normalises an unknown orientation to top-down, which would
+/// silently redraw the diagram in a direction the author did not write. The
+/// authored token is therefore checked here before lowering.
+fn locate_unsupported_orientation(source: &str) -> Option<(std::ops::Range<usize>, &str)> {
+    const SUPPORTED: &[&str] = &["TD", "TB", "BT", "LR", "RL"];
+    for (range, line) in trimmed_lines(source) {
+        let rest = match line.strip_prefix("flowchart").or_else(|| line.strip_prefix("graph")) {
+            Some(rest) if rest.starts_with(char::is_whitespace) || rest.is_empty() => rest.trim_start(),
+            _ => continue,
+        };
+        let Some(token) = rest.split_whitespace().next()
+        else {
+            return None;
+        };
+        if !SUPPORTED.iter().any(|supported| supported.eq_ignore_ascii_case(token)) {
+            return Some((range, line));
+        }
+        return None;
+    }
+    None
+}
+
+/// The byte range of the first line that starts `keyword`.
+fn locate_header(source: &str, keyword: &str) -> Option<std::ops::Range<usize>> {
+    trimmed_lines(source).into_iter().find(|(_, line)| starts_with_keyword(line, keyword)).map(|(range, _)| range)
+}
+
+/// The byte range of the second diagram header, used for multi-diagram refusals.
+fn locate_second_header(source: &str) -> Option<std::ops::Range<usize>> {
+    let mut seen = 0usize;
+    for (range, line) in trimmed_lines(source) {
+        if DIAGRAM_HEADERS.iter().any(|header| starts_with_keyword(line, header)) {
+            seen += 1;
+            if seen == 2 {
+                return Some(range);
+            }
+        }
+    }
+    None
 }
 
 fn starts_with_keyword(line: &str, keyword: &str) -> bool {

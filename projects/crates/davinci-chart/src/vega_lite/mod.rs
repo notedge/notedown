@@ -3,8 +3,10 @@
 //! Vega-Lite is a JSON document, not a fence grammar, so this module is a
 //! `serde` model rather than a parser. It accepts inline `data.values`, one
 //! mark from `bar` / `line` / `area` / `point` / `rect` / `tick`, the `x` /
-//! `y` / `color` / `size` / `opacity` channels, and the `linear` / `band` /
-//! `point` / `ordinal` scales the chart kernel can train.
+//! `y` / `color` / `size` / `opacity` channels, and the `linear` / `log` /
+//! `sqrt` / `band` / `point` / `ordinal` scales the chart kernel can train.
+//! Linear scales additionally accept the opt-in `zero` and `nice` domain
+//! options.
 //!
 //! Everything else is refused before lowering with a `davinci.chart.*`
 //! diagnostic that names the JSON path. No JavaScript runtime, no evaluation
@@ -398,10 +400,14 @@ fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {
     let mut scale_type = None;
     let mut domain = None;
     let mut padding = None;
+    let mut zero = None;
+    let mut nice = None;
     for (key, item) in object {
         match key.as_str() {
             "type" => scale_type = Some(string_at(item, &format!("{path}.type"))?.to_string()),
             "padding" => padding = Some(number_at(item, &format!("{path}.padding"))?),
+            "zero" => zero = Some(boolean_at(item, &format!("{path}.zero"))?),
+            "nice" => nice = Some(boolean_at(item, &format!("{path}.nice"))?),
             "domain" => {
                 let Some(array) = item.as_array()
                 else {
@@ -418,7 +424,7 @@ fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {
                 return Err(fail(
                     codes::UNSUPPORTED_SCALE,
                     &format!("{path}.{other}"),
-                    "this scale option is not compiled yet (`type`, `domain`, and `padding` are supported)",
+                    "this scale option is not compiled yet (`type`, `domain`, `padding`, `zero`, and `nice` are supported)",
                 ));
             }
         }
@@ -426,24 +432,53 @@ fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {
 
     let scale_type = scale_type.ok_or_else(|| fail(codes::INVALID_SPEC, path, "`scale.type` is required"))?;
     match scale_type.as_str() {
-        "linear" => Ok(ScaleSpec::Linear { domain }),
-        "log" => Ok(ScaleSpec::Log { domain }),
-        "sqrt" => Ok(ScaleSpec::Sqrt { domain }),
+        "linear" => {
+            if zero == Some(true) && domain.is_some() {
+                return Err(fail(codes::INVALID_SCALE, &format!("{path}.zero"), "`zero` cannot widen an explicit `domain`"));
+            }
+            Ok(ScaleSpec::Linear { domain, zero: zero.unwrap_or(false), nice: nice.unwrap_or(false) })
+        }
+        "log" => {
+            refuse_non_linear_options(path, zero, nice)?;
+            Ok(ScaleSpec::Log { domain })
+        }
+        "sqrt" => {
+            refuse_non_linear_options(path, zero, nice)?;
+            Ok(ScaleSpec::Sqrt { domain })
+        }
         "band" => {
+            refuse_non_linear_options(path, zero, nice)?;
             if domain.is_some() {
                 return Err(fail(codes::INVALID_SCALE, &format!("{path}.domain"), "a band scale cannot take a numeric domain"));
             }
             Ok(ScaleSpec::Band { padding: padding.unwrap_or(0.1) })
         }
         "point" => {
+            refuse_non_linear_options(path, zero, nice)?;
             if domain.is_some() {
                 return Err(fail(codes::INVALID_SCALE, &format!("{path}.domain"), "a point scale cannot take a numeric domain"));
             }
             Ok(ScaleSpec::Point { padding: padding.unwrap_or(0.5) })
         }
-        "ordinal" => Ok(ScaleSpec::Nominal),
+        "ordinal" => {
+            refuse_non_linear_options(path, zero, nice)?;
+            Ok(ScaleSpec::Nominal)
+        }
         other => Err(fail(codes::UNSUPPORTED_SCALE, &format!("{path}.type"), format!("the chart kernel cannot train a `{other}` scale yet"))),
     }
+}
+
+fn refuse_non_linear_options(path: &str, zero: Option<bool>, nice: Option<bool>) -> Result<(), ChartError> {
+    for (option, present) in [("zero", zero.is_some()), ("nice", nice.is_some())] {
+        if present {
+            return Err(fail(
+                codes::UNSUPPORTED_SCALE,
+                &format!("{path}.{option}"),
+                format!("`{option}` only applies to linear scales in this slice"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn cell_value(row: &Map<String, Json>, field: &FieldRef, index: usize) -> Result<crate::Value, ChartError> {
@@ -514,6 +549,10 @@ fn number_at(value: &Json, path: &str) -> Result<f64, ChartError> {
         return Err(fail(codes::NON_FINITE_VALUE, path, "expected a finite number"));
     }
     Ok(number)
+}
+
+fn boolean_at(value: &Json, path: &str) -> Result<bool, ChartError> {
+    value.as_bool().ok_or_else(|| fail(codes::INVALID_SPEC, path, "expected a boolean"))
 }
 
 fn positive(value: f64, path: &str) -> Result<f64, ChartError> {

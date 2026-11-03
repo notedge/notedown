@@ -4,7 +4,7 @@
 mod chrome_gate;
 mod matrix;
 
-use davinci_chart::{codes, vega_lite};
+use davinci_chart::{Channel, Scale, codes, vega_lite};
 
 const BAR_DOCUMENT: &str = r#"{
   "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -150,6 +150,28 @@ fn log_and_sqrt_scales_lower_through_the_shared_transformed_path() {
     assert_eq!(error.code(), codes::INVALID_SCALE);
 }
 
+#[test]
+fn zero_and_nice_are_opt_in_scale_options() {
+    let base = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
+    let explicit_defaults = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":false,"nice":false}}}}"#;
+    let zeroed = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":true}}}}"#;
+    let niced = r#"{"data":{"values":[{"c":"A","v":3},{"c":"B","v":97}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","nice":true}}}}"#;
+
+    let base_svg = vega_lite::lower(base).expect("base chart").to_svg().expect("base svg");
+    let explicit_svg = vega_lite::lower(explicit_defaults).expect("explicit defaults").to_svg().expect("explicit svg");
+    assert_eq!(base_svg, explicit_svg, "explicit `zero: false` and `nice: false` must stay byte-identical to the default");
+
+    let chart = vega_lite::lower(zeroed).expect("zeroed chart");
+    let y_scale = chart.plan.scale(Channel::Y).and_then(Scale::linear).expect("zeroed y scale");
+    assert_eq!(y_scale.domain, (0.0, 20.0), "`zero` anchors the inferred domain at the origin");
+    let svg = chart.to_svg().expect("zeroed svg");
+    assert!(svg.contains(">0</text>"), "the zero tick label must be drawn: {svg}");
+
+    let nice = vega_lite::lower(niced).expect("nice chart");
+    let nice_y = nice.plan.scale(Channel::Y).and_then(Scale::linear).expect("nice y scale");
+    assert_eq!(nice_y.domain, (0.0, 100.0), "`nice` rounds 3..97 outward to 0..100");
+}
+
 const REJECTIONS: &[(&str, &str, &str)] = &[
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}},"transform":[{"filter":"datum.v > 0"}]}"#,
@@ -187,9 +209,19 @@ const REJECTIONS: &[(&str, &str, &str)] = &[
         "$.encoding.x.bin",
     ),
     (
-        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"line","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":true}}}}"#,
+        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"log","zero":true}}}}"#,
         codes::UNSUPPORTED_SCALE,
         "$.encoding.y.scale.zero",
+    ),
+    (
+        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","domain":[0,10],"zero":true}}}}"#,
+        codes::INVALID_SCALE,
+        "$.encoding.y.scale.zero",
+    ),
+    (
+        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","nice":"yes"}}}}"#,
+        codes::INVALID_SPEC,
+        "$.encoding.y.scale.nice",
     ),
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}},"foo":true}"#,

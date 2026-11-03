@@ -1,5 +1,6 @@
 use davinci_chart::scale::{
-    MARKERS, PALETTE, Scale, Transfer, TransformedScale, linear_ticks, log_ticks, train_band, train_linear, train_nominal, train_point,
+    MARKERS, PALETTE, Scale, Transfer, TransformedScale, inferred_domain, linear_ticks, log_ticks, nice_domain, train_band, train_linear, train_nominal,
+    train_point,
 };
 use davinci_scene::MarkerShape;
 
@@ -131,6 +132,34 @@ fn transformed_scales_report_log_and_sqrt_families() {
     assert_eq!(log.numeric_domain(), Some((1.0, 10.0)));
     assert!(log.transformed().is_some());
     assert!(approx(log.map_number(10.0).expect("log"), 1.0));
+}
+
+#[test]
+fn inferred_domains_ignore_non_finite_values() {
+    assert_eq!(inferred_domain(&[3.0, 7.0]), Some((3.0, 7.0)));
+    assert_eq!(inferred_domain(&[]), None);
+    assert_eq!(inferred_domain(&[f64::NAN, f64::INFINITY]), None);
+    assert_eq!(inferred_domain(&[f64::NAN, 4.0, f64::INFINITY]), Some((4.0, 4.0)));
+}
+
+#[test]
+fn nice_domains_round_outward_to_the_tick_grid() {
+    assert_eq!(nice_domain((0.0, 7.0), 5), (0.0, 8.0), "7 rounds up to the 2-step boundary");
+    assert_eq!(nice_domain((3.0, 97.0), 5), (0.0, 100.0), "span 94 uses a 50-step grid");
+    assert_eq!(nice_domain((-3.0, 3.0), 5), (-4.0, 4.0), "negative domains round outward symmetrically");
+    assert_eq!(nice_domain((0.0, 100.0), 5), (0.0, 100.0), "an already nice domain does not move");
+
+    let ticked = nice_domain((3.0, 97.0), 5);
+    let ticks = linear_ticks(ticked, 5);
+    assert!(approx(ticks[0], ticked.0) && approx(ticks[ticks.len() - 1], ticked.1), "boundary ticks land on the nice domain: {ticks:?}");
+}
+
+#[test]
+fn train_linear_stays_identical_to_the_inferred_extremes() {
+    let scale = train_linear(&[2.0, 8.0, -4.0], None, (0.0, 200.0));
+
+    assert_eq!(inferred_domain(&[2.0, 8.0, -4.0]), Some(scale.domain));
+    assert_eq!(scale.domain, (-4.0, 8.0), "the default trainer takes no zero or nice option");
 }
 
 #[test]

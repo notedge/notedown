@@ -214,6 +214,11 @@ pub enum ScaleSpec {
     Linear {
         /// Explicit `(min, max)` domain, or `None` to infer it from the data.
         domain: Option<(f64, f64)>,
+        /// Extend an inferred domain so it includes zero. Refused together
+        /// with an explicit `domain`.
+        zero: bool,
+        /// Round the domain outward to the 1-2-5 tick grid.
+        nice: bool,
     },
     /// A continuous base-10 logarithmic scale. Every value must be positive.
     Log {
@@ -242,12 +247,12 @@ pub enum ScaleSpec {
 impl ScaleSpec {
     /// A linear scale with an inferred domain.
     pub fn linear() -> Self {
-        Self::Linear { domain: None }
+        Self::Linear { domain: None, zero: false, nice: false }
     }
 
     /// A linear scale with an explicit domain.
     pub fn linear_domain(min: f64, max: f64) -> Self {
-        Self::Linear { domain: Some((min, max)) }
+        Self::Linear { domain: Some((min, max)), zero: false, nice: false }
     }
 
     /// A log scale with an inferred domain.
@@ -563,12 +568,18 @@ fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate
     let effective = if aggregate.is_some() { FieldKind::Quantitative } else { kind };
     match spec {
         ScaleSpec::Auto => None,
-        ScaleSpec::Linear { domain } => {
+        ScaleSpec::Linear { domain, zero, nice: _ } => {
             if let Some((min, max)) = domain {
                 if !min.is_finite() || !max.is_finite() || min >= max {
                     return Some(chart_error(
                         codes::INVALID_SCALE,
                         format!("linear scale on the `{}` channel needs a finite domain with min < max", channel.as_str()),
+                    ));
+                }
+                if zero {
+                    return Some(chart_error(
+                        codes::INVALID_SCALE,
+                        format!("`zero` on the `{}` channel cannot widen an explicit linear domain", channel.as_str()),
                     ));
                 }
             }

@@ -1,5 +1,5 @@
 use davinci_chart::{
-    Aggregate, Channel, ChannelEncoding, ChartOptions, ChartSpec, FieldKind, FieldRef, Mark, MarkGeometry, Scale, codes, compile,
+    Aggregate, Channel, ChannelEncoding, ChartOptions, ChartSpec, FieldKind, FieldRef, Mark, MarkGeometry, Scale, ScaleSpec, codes, compile,
 };
 
 use crate::support::{approx, bar_data, bar_spec, column, has_code, numbers, snapshot, texts};
@@ -438,4 +438,56 @@ fn opacity_channel_sets_the_mark_style_and_needs_a_numeric_field() {
         .with_encoding(Channel::Opacity, ChannelEncoding::field("category", FieldKind::Nominal));
     let error = compile(&invalid, &bar_data(), &options()).expect_err("nominal opacity is invalid");
     assert_eq!(error.code(), codes::INVALID_SPEC);
+}
+
+#[test]
+fn the_zero_option_widens_an_inferred_domain_and_moves_the_baseline() {
+    let plain = compile(&bar_spec(), &bar_data(), &options()).expect("default bar chart");
+    let zeroed = compile(
+        &bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: true, nice: false }),
+        &bar_data(),
+        &options(),
+    )
+    .expect("zeroed bar chart");
+
+    let plain_y = plain.scale(Channel::Y).and_then(Scale::linear).expect("default y scale");
+    let zero_y = zeroed.scale(Channel::Y).and_then(Scale::linear).expect("zeroed y scale");
+    assert_eq!(plain_y.domain, (5.0, 20.0), "the default domain stays the observed extremes");
+    assert_eq!(zero_y.domain, (0.0, 20.0), "`zero` pulls only the lower bound to the origin");
+    assert_eq!(zero_y.range, plain_y.range, "only the domain changes");
+    assert_eq!(zeroed.marks.len(), plain.marks.len(), "`zero` adds no mark instances");
+
+    let MarkGeometry::Rect(plain_smallest) = &plain.marks[2].geometry
+    else {
+        panic!("a bar must compile to a rectangle");
+    };
+    assert!(approx(plain_smallest.height, 0.0), "the minimum value has no height above the observed baseline");
+
+    let MarkGeometry::Rect(zero_smallest) = &zeroed.marks[2].geometry
+    else {
+        panic!("a bar must compile to a rectangle");
+    };
+    assert!(approx(zero_smallest.y + zero_smallest.height, zero_y.map(0.0)), "the bar starts at the zero baseline");
+    assert!(approx(zero_smallest.height, (zero_y.map(5.0) - zero_y.map(0.0)).abs()));
+}
+
+#[test]
+fn the_nice_option_rounds_the_domain_outward_to_the_tick_grid() {
+    let data = snapshot(vec![
+        column("category", FieldKind::Nominal, texts(&["A", "B"])),
+        column("value", FieldKind::Quantitative, numbers(&[3.0, 97.0])),
+    ]);
+    let spec = bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: false, nice: true });
+
+    let plan = compile(&spec, &data, &options()).expect("nice bar chart");
+    let y_scale = plan.scale(Channel::Y).and_then(Scale::linear).expect("y scale");
+    assert_eq!(y_scale.domain, (0.0, 100.0), "the domain rounds outward to the 50-step grid");
+
+    let default_plan = compile(&bar_spec(), &data, &options()).expect("default bar chart");
+    let default_y = default_plan.scale(Channel::Y).and_then(Scale::linear).expect("default y scale");
+    assert_eq!(default_y.domain, (3.0, 97.0), "`nice` is opt-in, the default keeps observed extremes");
+
+    let y_axis = plan.axes.iter().find(|axis| axis.channel == Channel::Y).expect("y axis");
+    assert_eq!(y_axis.ticks[0].label, "0", "the first tick lands on the nice lower bound");
+    assert_eq!(y_axis.ticks[y_axis.ticks.len() - 1].label, "100", "the last tick lands on the nice upper bound");
 }

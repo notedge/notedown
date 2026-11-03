@@ -73,6 +73,16 @@ fn a_degenerate_linear_domain_is_rejected() {
 }
 
 #[test]
+fn zero_cannot_widen_an_explicit_linear_domain() {
+    let spec = bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: Some((0.0, 100.0)), zero: true, nice: false });
+    let diagnostics = spec.validate();
+    assert_eq!(diagnostics.iter().filter(|record| record.code().as_str() == codes::INVALID_SCALE).count(), 1);
+
+    let inferred = bar_spec().with_scale(Channel::Y, ScaleSpec::Linear { domain: None, zero: true, nice: false });
+    assert!(inferred.validate().is_empty(), "`zero` alone is a valid opt-in");
+}
+
+#[test]
 fn the_bar_mark_rejects_a_size_channel() {
     let spec = bar_spec()
         .with_field(FieldRef::new("value2", FieldKind::Quantitative))

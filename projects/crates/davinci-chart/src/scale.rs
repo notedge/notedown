@@ -368,26 +368,48 @@ impl Scale {
     }
 }
 
+/// The finite value extremes of a list, or `None` when no finite value exists.
+pub fn inferred_domain(values: &[f64]) -> Option<(f64, f64)> {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut seen = false;
+    for value in values.iter().copied().filter(|value| value.is_finite()) {
+        min = min.min(value);
+        max = max.max(value);
+        seen = true;
+    }
+    if seen { Some((min, max)) } else { None }
+}
+
 /// Train a linear scale from optional explicit domain and observed values.
 ///
 /// Non-finite values are ignored. An empty value list infers the domain
 /// `(0.0, 1.0)`. A collapsed domain is expanded symmetrically so mapping never
 /// divides by zero.
 pub fn train_linear(values: &[f64], domain: Option<(f64, f64)>, range: (f64, f64)) -> LinearScale {
-    let domain = domain.unwrap_or_else(|| {
-        let finite: Vec<f64> = values.iter().copied().filter(|value| value.is_finite()).collect();
-        if finite.is_empty() {
-            return (0.0, 1.0);
-        }
-        let mut min = f64::INFINITY;
-        let mut max = f64::NEG_INFINITY;
-        for value in finite {
-            min = min.min(value);
-            max = max.max(value);
-        }
-        (min, max)
-    });
+    let domain = domain.or_else(|| inferred_domain(values)).unwrap_or((0.0, 1.0));
     LinearScale::new(domain, range)
+}
+
+/// Round a continuous domain outward to the 1-2-5 grid used by
+/// [`linear_ticks`].
+///
+/// `count` is the requested tick count, so the expanded domain and the tick
+/// step agree and the boundary ticks land on the domain ends.
+pub fn nice_domain(domain: (f64, f64), count: usize) -> (f64, f64) {
+    let (min, max) = normalized_domain(domain);
+    let count = count.max(2);
+    let span = max - min;
+    if !span.is_finite() || span <= 0.0 {
+        return (min, max);
+    }
+    let step = nice_step(span / (count as f64 - 1.0));
+    if !step.is_finite() || step <= 0.0 {
+        return (min, max);
+    }
+    let lower = snap((min / step).floor() * step, step);
+    let upper = snap((max / step).ceil() * step, step);
+    if lower.is_finite() && upper.is_finite() && lower < upper { (lower, upper) } else { (min, max) }
 }
 
 /// Generate deterministic log axis ticks.

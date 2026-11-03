@@ -14,7 +14,7 @@ use crate::{
     data::{DataSnapshot, FieldKind, Value, format_number},
     error::{ChartError, chart_warning, codes},
     plan::{AxisPlan, AxisTick, ChartCompilePlan, ChartScale, MarkGeometry, MarkInstance, MarkStyle},
-    scale::{Scale, Transfer, TransformedScale, linear_ticks, log_ticks, train_band, train_linear, train_nominal, train_point},
+    scale::{Scale, Transfer, TransformedScale, inferred_domain, linear_ticks, log_ticks, nice_domain, train_band, train_linear, train_nominal, train_point},
     spec::{Channel, ChartSpec, Guide, Mark, ScaleSpec},
     statistic::{Observation, aggregate},
 };
@@ -357,7 +357,7 @@ fn train_channel(
                 other => other,
             };
             match requested {
-                ScaleSpec::Linear { domain } => {
+                ScaleSpec::Linear { domain, zero, nice } => {
                     let values = numbers(rows, channel);
                     if values.is_empty() {
                         return Err(empty_domain(channel));
@@ -368,7 +368,20 @@ fn train_channel(
                             format!("the `{}` channel has one distinct value; its linear domain was expanded", channel.as_str()),
                         ));
                     }
-                    Ok(Scale::Linear(train_linear(&values, domain, range)))
+                    let resolved = if zero || nice {
+                        let mut bounds = domain.or_else(|| inferred_domain(&values)).unwrap_or((0.0, 1.0));
+                        if zero {
+                            bounds = (bounds.0.min(0.0), bounds.1.max(0.0));
+                        }
+                        if nice {
+                            bounds = nice_domain(bounds, options.tick_count);
+                        }
+                        Some(bounds)
+                    }
+                    else {
+                        domain
+                    };
+                    Ok(Scale::Linear(train_linear(&values, resolved, range)))
                 }
                 ScaleSpec::Log { domain } => train_transformed(rows, channel, domain, range, Transfer::Log, diagnostics),
                 ScaleSpec::Sqrt { domain } => train_transformed(rows, channel, domain, range, Transfer::Sqrt, diagnostics),

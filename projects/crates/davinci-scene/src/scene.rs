@@ -387,7 +387,26 @@ impl DisplayScene {
     /// `class="{class_prefix}-{role}"` and the root `<svg>` carries
     /// `class="{class_prefix}"`, so host CSS can scope rules under the
     /// container class without touching bare `node`/`edge` names.
+    ///
+    /// Every role is tinted from the theme palette, which is the diagram
+    /// contract: node and edge colors are theme semantics.
     pub fn to_svg_with_hooks(&self, id_namespace: &str, class_prefix: &str, theme: &davinci_types::DiagramTheme) -> Result<String, SceneError> {
-        crate::svg::write_svg(self, Some(crate::svg::SvgHooks { id_namespace, class_prefix, theme }))
+        crate::svg::write_svg(
+            self,
+            Some(crate::svg::SvgHooks { id_namespace, class_prefix, theme, palette: crate::svg::RolePalette::Diagram }),
+        )
+    }
+
+    /// Serialize a chart scene with the same naming hooks and a chart palette.
+    ///
+    /// Only chart chrome (`axis` and `tick`) is tinted from the theme. Marks
+    /// and text marks keep the paint authored by the compile plan, emitted as
+    /// an inline `style` so a palette rule cannot recolor a datum. The `mark`,
+    /// `axis`, and `tick` role classes are still emitted for host CSS.
+    pub fn to_svg_with_chart_hooks(&self, id_namespace: &str, class_prefix: &str, theme: &davinci_types::DiagramTheme) -> Result<String, SceneError> {
+        crate::svg::write_svg(
+            self,
+            Some(crate::svg::SvgHooks { id_namespace, class_prefix, theme, palette: crate::svg::RolePalette::Chart }),
+        )
     }
 }

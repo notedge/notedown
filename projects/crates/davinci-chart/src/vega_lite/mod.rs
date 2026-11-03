@@ -47,6 +47,19 @@ impl VegaChart {
     pub fn to_svg(&self) -> Result<String, davinci_scene::SceneError> {
         self.scene.resolve(&davinci_scene::SceneResolver::default()).to_svg()
     }
+
+    /// Render the scene to SVG with page-level hooks.
+    ///
+    /// Every emitted `id` (axes, ticks, marks, clip paths) is prefixed with
+    /// `{id_namespace}-` and every semantic node gains
+    /// `class="{class_prefix}-{role}"`, so several charts can share one page
+    /// without id collisions. Chart chrome follows the theme palette while
+    /// mark colors stay authored by the compile plan.
+    pub fn to_svg_with_hooks(&self, id_namespace: &str, class_prefix: &str) -> Result<String, davinci_scene::SceneError> {
+        self.scene
+            .resolve(&davinci_scene::SceneResolver::default())
+            .to_svg_with_chart_hooks(id_namespace, class_prefix, &davinci_types::DIAGRAM_THEME)
+    }
 }
 
 const CHART_TOP_KEYS: &[&str] = &["$schema", "title", "width", "height", "data", "mark", "encoding"];

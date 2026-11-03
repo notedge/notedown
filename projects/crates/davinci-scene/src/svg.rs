@@ -7,7 +7,7 @@ use davinci_types::{DiagramTheme, Point, Rect, Size, ThemeTokens, Transform};
 use crate::{
     error::SceneError,
     path::{PathCommand, PathData},
-    scene::{DisplayScene, MarkerShape, NodeKind, SceneNode, ShapeStyle, TextStyle},
+    scene::{DisplayScene, MarkerShape, NodeKind, SceneNode, SemanticRole, ShapeStyle, TextStyle},
 };
 
 // ---------------------------------------------------------------------------
@@ -164,8 +164,48 @@ fn validate_finite(value: f64, context: &str) -> Result<(), SceneError> {
 // Writer
 // ---------------------------------------------------------------------------
 
-/// Page-level naming hooks for SVG serialization: a per-scene id namespace
-/// and a shared class prefix for semantic roles.
+/// How a node takes its paint when page hooks are active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaintMode {
+    /// No hooks: paint is emitted as presentation attributes.
+    Inline,
+    /// Paint comes only from the embedded palette.
+    Themed,
+    /// Paint is authored per instance and emitted as an inline `style`,
+    /// which outranks the palette rule.
+    Authored,
+}
+
+/// Which semantic roles a palette owns.
+///
+/// Diagrams tint every role from theme tokens. Charts only own their chrome,
+/// because a mark's color is data semantics coming from the encoding or the
+/// mark declaration and must survive theming.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RolePalette {
+    /// Every role is theme-owned.
+    Diagram,
+    /// Only `axis` and `tick` are theme-owned, marks keep authored paint.
+    Chart,
+}
+
+impl RolePalette {
+    fn mode(self, role: Option<SemanticRole>, inherited: PaintMode) -> PaintMode {
+        let Some(role) = role else {
+            return inherited;
+        };
+        match self {
+            Self::Diagram => PaintMode::Themed,
+            Self::Chart => match role {
+                SemanticRole::Mark | SemanticRole::Label => PaintMode::Authored,
+                _ => PaintMode::Themed,
+            },
+        }
+    }
+}
+
+/// Page-level naming hooks for SVG serialization: a per-scene id namespace,
+/// a shared class prefix for semantic roles, and the active palette.
 pub(crate) struct SvgHooks<'a> {
     /// Prefix applied to every emitted `id` as `{id_namespace}-{id}`.
     pub id_namespace: &'a str,
@@ -174,6 +214,8 @@ pub(crate) struct SvgHooks<'a> {
     pub class_prefix: &'a str,
     /// Theme tokens inlined as an embedded `<style>` block.
     pub theme: &'a DiagramTheme,
+    /// Which roles the palette owns.
+    pub palette: RolePalette,
 }
 
 pub(crate) fn write_svg(scene: &DisplayScene, hooks: Option<SvgHooks>) -> Result<String, SceneError> {
@@ -191,20 +233,24 @@ pub(crate) fn write_svg(scene: &DisplayScene, hooks: Option<SvgHooks>) -> Result
     out.push(' ');
     out.push_str(&number(scene.size.height));
     out.push_str("\">\n");
+    let initial = match &hooks {
+        Some(_) => PaintMode::Themed,
+        None => PaintMode::Inline,
+    };
     if let Some(hooks) = &hooks {
         write_theme_style(&mut out, hooks);
     }
 
     let mut clip_index = 0usize;
     for node in &scene.nodes {
-        write_node(&mut out, node, 1, &mut clip_index, hooks.as_ref(), false);
+        write_node(&mut out, node, 1, &mut clip_index, hooks.as_ref(), initial);
     }
 
     out.push_str("</svg>\n");
     Ok(out)
 }
 
-fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>, themed: bool) {
+fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>, kind: PaintMode) {
     match node.clip {
         Some(clip) => {
             let id = match hooks {
@@ -233,20 +279,24 @@ fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut
             out.push_str("<g clip-path=\"url(#");
             out.push_str(&escape(&id));
             out.push_str(")\">\n");
-            write_element(out, node, depth + 1, clip_index, hooks, themed);
+            write_element(out, node, depth + 1, clip_index, hooks, kind);
             out.push_str(&indent);
             out.push_str("</g>\n");
         }
-        None => write_element(out, node, depth, clip_index, hooks, themed),
+        None => write_element(out, node, depth, clip_index, hooks, kind),
     }
 }
 
-fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>, themed: bool) {
+fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>, inherited: PaintMode) {
     let indent = indent(depth);
-    // A themed element takes its paint from the embedded `<style>`: its own
-    // role class, or inheritance from a themed ancestor group.
-    let element_themed = hooks.is_some() && (node.role.is_some() || themed);
-    let child_themed = element_themed;
+    // A role-bearing element takes the paint mode its palette assigns. A
+    // role-less node inherits its parent's mode, so a decoration inside a
+    // themed group stays themed.
+    let paint = match hooks {
+        Some(hooks) => hooks.palette.mode(node.role, inherited),
+        None => PaintMode::Inline,
+    };
+    let child_paint = paint;
     match &node.kind {
         NodeKind::Group { children, opacity } => {
             out.push_str(&indent);
@@ -259,7 +309,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             }
             out.push_str(">\n");
             for child in children {
-                write_node(out, child, depth + 1, clip_index, hooks, child_themed);
+                write_node(out, child, depth + 1, clip_index, hooks, child_paint);
             }
             out.push_str(&indent);
             out.push_str("</g>\n");
@@ -273,7 +323,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             out.push_str(&path_data(path));
             out.push('"');
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, true, element_themed);
+            write_shape_paint(out, style, true, paint);
             out.push_str("/>\n");
         }
         NodeKind::Line { from, to, style } => {
@@ -286,7 +336,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_number_attribute(out, "x2", to.x);
             push_number_attribute(out, "y2", to.y);
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, false, element_themed);
+            write_shape_paint(out, style, false, paint);
             out.push_str("/>\n");
         }
         NodeKind::Rect { rect, style } => {
@@ -296,7 +346,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_semantic_attributes(out, node, hooks);
             push_rect_attributes(out, *rect);
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, true, element_themed);
+            write_shape_paint(out, style, true, paint);
             out.push_str("/>\n");
         }
         NodeKind::RoundedRect { rect, radius, style } => {
@@ -307,7 +357,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_rect_attributes(out, *rect);
             push_number_attribute(out, "rx", *radius);
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, true, element_themed);
+            write_shape_paint(out, style, true, paint);
             out.push_str("/>\n");
         }
         NodeKind::Ellipse { center, radii, style } => {
@@ -320,7 +370,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_number_attribute(out, "rx", radii.width);
             push_number_attribute(out, "ry", radii.height);
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, true, element_themed);
+            write_shape_paint(out, style, true, paint);
             out.push_str("/>\n");
         }
         NodeKind::Text { position, text, style } => {
@@ -331,7 +381,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
             push_number_attribute(out, "x", position.x);
             push_number_attribute(out, "y", position.y);
             push_transform_attribute(out, node.transform);
-            write_text_paint(out, style, element_themed);
+            write_text_paint(out, style, paint);
             out.push('>');
             out.push_str(&escape(text));
             out.push_str("</text>\n");
@@ -391,7 +441,7 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
                 }
             }
             push_transform_attribute(out, node.transform);
-            write_shape_paint(out, style, true, element_themed);
+            write_shape_paint(out, style, true, paint);
             out.push_str("/>\n");
         }
     }
@@ -421,14 +471,14 @@ fn push_semantic_attributes(out: &mut String, node: &SceneNode, hooks: Option<&S
 /// the font family come from the theme.
 fn write_theme_style(out: &mut String, hooks: &SvgHooks) {
     out.push_str("<style>");
-    write_palette(out, hooks.class_prefix, &hooks.theme.light);
+    write_palette(out, hooks.class_prefix, &hooks.theme.light, hooks.palette);
     out.push_str("@media (prefers-color-scheme: dark) {");
-    write_palette(out, hooks.class_prefix, &hooks.theme.dark);
+    write_palette(out, hooks.class_prefix, &hooks.theme.dark, hooks.palette);
     out.push_str("}");
     out.push_str("</style>\n");
 }
 
-fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens) {
+fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens, palette: RolePalette) {
     let node_fill = tokens.node_fill.to_css();
     let node_stroke = tokens.node_stroke.to_css();
     let node_text = tokens.node_text.to_css();
@@ -436,14 +486,9 @@ fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens) {
     let edge_label_text = tokens.edge_label_text.to_css();
     let edge_label_bg = tokens.edge_label_bg.to_css();
     let cluster_fill = tokens.cluster_fill.to_css();
-    let _ = write!(
-        out,
-        ".{prefix} .{prefix}-node {{ fill: {node_fill}; stroke: {node_stroke} }}",
-    );
-    let _ = write!(
-        out,
-        ".{prefix} .{prefix}-cluster {{ fill: {cluster_fill}; stroke: {node_stroke} }}",
-    );
+    let diagram = format!(".{prefix} .{prefix}");
+    let _ = write!(out, ".{prefix} .{prefix}-node {{ fill: {node_fill}; stroke: {node_stroke} }}");
+    let _ = write!(out, ".{prefix} .{prefix}-cluster {{ fill: {cluster_fill}; stroke: {node_stroke} }}");
     let _ = write!(out, ".{prefix} .{prefix}-edge {{ fill: none; stroke: {edge_stroke} }}");
     let _ = write!(out, ".{prefix} .{prefix}-edge polygon, .{prefix} .{prefix}-edge circle {{ fill: {edge_stroke}; stroke: none }}");
     let _ = write!(out, ".{prefix} .{prefix}-edge-label-bg {{ fill: {edge_label_bg}; fill-opacity: {} }}", davinci_types::EDGE_LABEL_BG_OPACITY);
@@ -451,21 +496,45 @@ fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens) {
     let _ = write!(out, ".{prefix} .{prefix}-label {{ fill: {node_text} }}");
     let _ = write!(out, ".{prefix} .{prefix}-decoration {{ fill: none; stroke: {edge_stroke} }}");
     let _ = write!(out, ".{prefix} text {{ font-family: Trebuchet MS, Verdana, sans-serif }}");
+
+    // Chart chrome. Marks carry authored colors as an inline `style`, so the
+    // mark rule only supplies a neutral default and never repaints a datum.
+    if palette == RolePalette::Chart {
+        let _ = write!(out, "{diagram}-axis line {{ stroke: {edge_stroke} }}");
+        let _ = write!(out, "{diagram}-tick line {{ stroke: {edge_stroke} }}");
+        let _ = write!(out, "{diagram}-tick text {{ fill: {node_text} }}");
+        let _ = write!(out, "{diagram}-mark {{ fill: none; stroke: none }}");
+        let _ = write!(out, "{diagram}-legend {{ stroke: {edge_stroke} }}");
+    }
 }
 
-fn write_shape_paint(out: &mut String, style: &ShapeStyle, include_fill: bool, themed: bool) {
-    if !themed {
-        if include_fill {
-            match style.fill {
-                Some(color) => push_string_attribute(out, "fill", &color.to_css()),
-                None => push_string_attribute(out, "fill", "none"),
+fn write_shape_paint(out: &mut String, style: &ShapeStyle, include_fill: bool, mode: PaintMode) {
+    match mode {
+        PaintMode::Inline => {
+            if include_fill {
+                match style.fill {
+                    Some(color) => push_string_attribute(out, "fill", &color.to_css()),
+                    None => push_string_attribute(out, "fill", "none"),
+                }
+            }
+            if let Some(stroke) = style.stroke {
+                push_string_attribute(out, "stroke", &stroke.to_css());
+            }
+            if style.opacity != 1.0 {
+                push_number_attribute(out, "opacity", style.opacity);
             }
         }
-        if let Some(stroke) = style.stroke {
-            push_string_attribute(out, "stroke", &stroke.to_css());
-        }
-        if style.opacity != 1.0 {
-            push_number_attribute(out, "opacity", style.opacity);
+        PaintMode::Themed => {}
+        PaintMode::Authored => {
+            let mut inline = String::new();
+            // Authored marks declare both paint slots so the palette rule
+            // cannot fill a stroked series or outline a filled bar.
+            let _ = write!(inline, "fill: {};", if include_fill { style.fill.map_or("none".to_string(), |color| color.to_css()) } else { "none".to_string() });
+            let _ = write!(inline, "stroke: {};", style.stroke.map_or("none".to_string(), |color| color.to_css()));
+            if style.opacity != 1.0 {
+                let _ = write!(inline, "opacity: {};", number(style.opacity));
+            }
+            push_string_attribute(out, "style", inline.trim_end_matches(';'));
         }
     }
     if let Some(_) = style.stroke {
@@ -473,8 +542,8 @@ fn write_shape_paint(out: &mut String, style: &ShapeStyle, include_fill: bool, t
     }
 }
 
-fn write_text_paint(out: &mut String, style: &TextStyle, themed: bool) {
-    if !themed {
+fn write_text_paint(out: &mut String, style: &TextStyle, mode: PaintMode) {
+    if mode != PaintMode::Themed {
         if let Some(family) = &style.font_family {
             push_string_attribute(out, "font-family", family);
         }
@@ -486,12 +555,23 @@ fn write_text_paint(out: &mut String, style: &TextStyle, themed: bool) {
         out.push('"');
     }
     push_string_attribute(out, "text-anchor", style.text_anchor.as_svg());
-    if !themed {
-        if let Some(fill) = style.fill {
-            push_string_attribute(out, "fill", &fill.to_css());
+    match mode {
+        PaintMode::Inline => {
+            if let Some(fill) = style.fill {
+                push_string_attribute(out, "fill", &fill.to_css());
+            }
+            if style.opacity != 1.0 {
+                push_number_attribute(out, "opacity", style.opacity);
+            }
         }
-        if style.opacity != 1.0 {
-            push_number_attribute(out, "opacity", style.opacity);
+        PaintMode::Themed => {}
+        PaintMode::Authored => {
+            let mut inline = String::new();
+            let _ = write!(inline, "fill: {};", style.fill.map_or("none".to_string(), |fill| fill.to_css()));
+            if style.opacity != 1.0 {
+                let _ = write!(inline, "opacity: {};", number(style.opacity));
+            }
+            push_string_attribute(out, "style", inline.trim_end_matches(';'));
         }
     }
 }

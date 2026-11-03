@@ -151,6 +151,51 @@ fn log_and_sqrt_scales_lower_through_the_shared_transformed_path() {
 }
 
 #[test]
+fn page_hooks_namespace_every_chart_id_and_keep_mark_colors() {
+    let document = r##"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":{"type":"bar","color":"#3366cc"},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"##;
+    let first = vega_lite::lower(document).expect("first chart");
+    let second = vega_lite::lower(document).expect("second chart");
+
+    let plain = first.to_svg().expect("plain svg");
+    assert!(plain.contains("id=\"chart-bar-0\""), "the plain path keeps bare ids");
+    assert!(!plain.contains("class=\""), "the plain path emits no role classes");
+
+    let left = first.to_svg_with_hooks("chart-0", "chart").expect("first hooked svg");
+    let right = second.to_svg_with_hooks("chart-1", "chart").expect("second hooked svg");
+
+    let mut ids = element_ids(&left);
+    ids.extend(element_ids(&right));
+    ids.sort();
+    let mut deduped = ids.clone();
+    deduped.dedup();
+    assert_eq!(ids, deduped, "every id on the page must be unique: {ids:?}");
+    assert_eq!(ids.iter().filter(|id| id.starts_with("chart-0-")).count() + ids.iter().filter(|id| id.starts_with("chart-1-")).count(), ids.len());
+    assert!(ids.iter().all(|id| id.starts_with("chart-0-") || id.starts_with("chart-1-")));
+
+    assert!(left.contains("class=\"chart\"") && right.contains("class=\"chart\""));
+    for role in ["chart-axis", "chart-tick", "chart-mark"] {
+        assert!(
+            left.contains(&format!("class=\"{role}\"")),
+            "the `{role}` class must reach the element: {left}"
+        );
+    }
+    assert!(left.contains("style=\"fill: #3366cc;stroke: none\""), "the authored mark color must survive theming: {left}");
+
+    assert!(left.contains(".chart .chart-axis line { stroke:"), "the palette must own axis chrome: {left}");
+    assert!(left.contains(".chart .chart-tick text { fill:"), "the palette must own tick labels");
+    assert!(left.contains(".chart .chart-mark { fill: none; stroke: none }"), "the palette must declare a neutral mark default");
+}
+
+fn element_ids(svg: &str) -> Vec<String> {
+    svg.match_indices("id=\"")
+        .map(|(index, _)| {
+            let rest = &svg[index + 4..];
+            rest[..rest.find('"').expect("a closed id attribute")].to_string()
+        })
+        .collect()
+}
+
+#[test]
 fn zero_and_nice_are_opt_in_scale_options() {
     let base = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}"#;
     let explicit_defaults = r#"{"data":{"values":[{"c":"A","v":10},{"c":"B","v":20}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative","scale":{"type":"linear","zero":false,"nice":false}}}}"#;

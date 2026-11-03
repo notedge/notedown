@@ -23,6 +23,7 @@ use crate::{
     Aggregate, Channel, ChannelEncoding, ChartCompilePlan, ChartError, ChartOptions, ChartSpec, DataColumn, DataSnapshot, FieldKind, FieldRef,
     Guide, Mark, ScaleSpec,
     error::codes,
+    transform::{BinSpec, ChannelTransform, TimeUnit},
 };
 
 /// A lowered Vega-Lite document ready for rendering.
@@ -189,6 +190,9 @@ fn lower_document(source: &str) -> Result<VegaChart, ChartError> {
         if let Some(scale) = binding.scale {
             spec.scales.set(binding.channel, scale);
         }
+        if let Some(transform) = binding.transform {
+            spec.transforms.set(binding.channel, transform);
+        }
     }
     let mut guides = Vec::new();
     if spec.encoding.x.is_some() {
@@ -239,6 +243,8 @@ struct Binding {
     aggregate: Option<Aggregate>,
     /// The declared scale, if any.
     scale: Option<ScaleSpec>,
+    /// The chart-level transform declared by `bin` or `timeUnit`.
+    transform: Option<ChannelTransform>,
     /// The JSON path used by diagnostics.
     path: String,
 }
@@ -398,6 +404,9 @@ fn lower_channel(channel: Channel, value: &Json, path: &str) -> Result<Binding, 
     let mut kind = None;
     let mut aggregate = None;
     let mut scale = None;
+    let mut transform = None;
+    let mut has_bin = false;
+    let mut has_time_unit = false;
 
     for (key, item) in object {
         match key.as_str() {
@@ -413,10 +422,36 @@ fn lower_channel(channel: Channel, value: &Json, path: &str) -> Result<Binding, 
                 ));
             }
             "bin" => {
-                return Err(fail(codes::UNSUPPORTED_ENCODING, &format!("{path}.bin"), "binning is refused in the first subset"));
+                if !matches!(channel, Channel::X | Channel::Y) {
+                    return Err(fail(
+                        codes::UNSUPPORTED_ENCODING,
+                        &format!("{path}.bin"),
+                        "`bin` applies to the `x` and `y` channels only",
+                    ));
+                }
+                has_bin = true;
+                transform = lower_bin(item, &format!("{path}.bin"))?;
+                if transform.is_none() {
+                    has_bin = false;
+                }
+            }
+            "timeUnit" => {
+                if !matches!(channel, Channel::X | Channel::Y) {
+                    return Err(fail(
+                        codes::UNSUPPORTED_ENCODING,
+                        &format!("{path}.timeUnit"),
+                        "`timeUnit` applies to the `x` and `y` channels only",
+                    ));
+                }
+                has_time_unit = true;
+                transform = Some(ChannelTransform::TimeUnit(time_unit_at(item, &format!("{path}.timeUnit"))?));
             }
             other => return Err(fail(codes::UNKNOWN_KEY, &format!("{path}.{other}"), "unknown channel key")),
         }
+    }
+
+    if has_bin && has_time_unit {
+        return Err(fail(codes::INVALID_SPEC, path, "`bin` and `timeUnit` cannot both be declared on one channel"));
     }
 
     let name = name.ok_or_else(|| fail(codes::INVALID_SPEC, path, "`field` is required"))?;
@@ -425,7 +460,135 @@ fn lower_channel(channel: Channel, value: &Json, path: &str) -> Result<Binding, 
     }
     let kind = kind.ok_or_else(|| fail(codes::INVALID_SPEC, path, "`type` is required"))?;
 
-    Ok(Binding { channel, name, kind, aggregate, scale, path: format!("{path}.field") })
+    if let Some(ChannelTransform::Bin(_)) = transform {
+        if kind != FieldKind::Quantitative {
+            return Err(fail(
+                codes::TYPE_MISMATCH,
+                &format!("{path}.bin"),
+                format!("`bin` needs a quantitative field, but `{name}` is {}", kind.as_str()),
+            ));
+        }
+    }
+    if let Some(ChannelTransform::TimeUnit(_)) = transform {
+        if kind != FieldKind::Temporal {
+            return Err(fail(
+                codes::TYPE_MISMATCH,
+                &format!("{path}.timeUnit"),
+                format!("`timeUnit` needs a temporal field, but `{name}` is {}", kind.as_str()),
+            ));
+        }
+    }
+
+    Ok(Binding { channel, name, kind, aggregate, scale, transform, path: format!("{path}.field") })
+}
+
+/// Lower a channel `bin` declaration into a chart-level transform.
+///
+/// `false` and `null` mean "no binning"; `true` takes the default 1-2-5 grid.
+/// Pre-binned input, string forms, and non-finite options are refused because
+/// they would either bypass bucket semantics or change the domain silently.
+fn lower_bin(value: &Json, path: &str) -> Result<Option<ChannelTransform>, ChartError> {
+    match value {
+        Json::Bool(true) => return Ok(Some(ChannelTransform::Bin(BinSpec::new()))),
+        Json::Bool(false) | Json::Null => return Ok(None),
+        Json::String(text) => {
+            return Err(if text == "binned" {
+                fail(codes::UNSUPPORTED_ENCODING, path, "pre-binned input (`bin: \"binned\"`) is refused because the chart cannot verify bucket edges")
+            }
+            else {
+                fail(codes::INVALID_SPEC, path, "string `bin` values are not supported (`true` or an options object is required)")
+            });
+        }
+        Json::Object(_) => {}
+        _ => return Err(fail(codes::INVALID_SPEC, path, "`bin` must be a boolean or an options object")),
+    }
+    let Json::Object(object) = value
+    else {
+        unreachable!("the match above guarantees an object")
+    };
+
+    let mut spec = BinSpec { step: None, maxbins: None, extent: None, nice: false };
+    let mut step_seen = false;
+    let mut maxbins_seen = false;
+    for (key, item) in object {
+        match key.as_str() {
+            "step" => {
+                let step = number_at(item, &format!("{path}.step"))?;
+                if step <= 0.0 {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.step"), "`step` must be a positive number"));
+                }
+                spec.step = Some(step);
+                step_seen = true;
+            }
+            "maxbins" => {
+                let Some(maxbins) = item.as_u64()
+                else {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.maxbins"), "`maxbins` must be an integer"));
+                };
+                if !(2..=64).contains(&maxbins) {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.maxbins"), "`maxbins` must be within 2..=64"));
+                }
+                spec.maxbins = Some(maxbins as u32);
+                maxbins_seen = true;
+            }
+            "extent" => {
+                let Some(array) = item.as_array()
+                else {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.extent"), "`extent` must be a `[min, max]` array"));
+                };
+                if array.len() != 2 {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.extent"), "`extent` must have two bounds"));
+                }
+                let min = number_at(&array[0], &format!("{path}.extent[0]"))?;
+                let max = number_at(&array[1], &format!("{path}.extent[1]"))?;
+                if min >= max {
+                    return Err(fail(codes::INVALID_SPEC, &format!("{path}.extent"), "`extent` needs min < max"));
+                }
+                spec.extent = Some((min, max));
+            }
+            "nice" => spec.nice = boolean_at(item, &format!("{path}.nice"))?,
+            other => {
+                return Err(fail(
+                    codes::UNKNOWN_KEY,
+                    &format!("{path}.{other}"),
+                    "unknown `bin` option (`step`, `maxbins`, `extent`, and `nice` are supported)",
+                ));
+            }
+        }
+    }
+    if step_seen && maxbins_seen {
+        return Err(fail(codes::INVALID_SPEC, path, "`step` and `maxbins` cannot both be declared"));
+    }
+    Ok(Some(ChannelTransform::Bin(spec)))
+}
+
+/// Lower a `timeUnit` keyword into its calendar-truncation unit.
+fn time_unit_at(value: &Json, path: &str) -> Result<TimeUnit, ChartError> {
+    let Some(text) = value.as_str()
+    else {
+        return Err(fail(
+            codes::UNSUPPORTED_ENCODING,
+            path,
+            "`timeUnit` must be a string in this subset (object forms with `maxbins` are refused)",
+        ));
+    };
+    if text.starts_with("local:") {
+        return Err(fail(
+            codes::UNSUPPORTED_ENCODING,
+            path,
+            "`local:` units depend on the host time zone and cannot produce byte-identical scenes",
+        ));
+    }
+    TimeUnit::parse(text).ok_or_else(|| {
+        fail(
+            codes::UNSUPPORTED_ENCODING,
+            path,
+            format!(
+                "time unit `{text}` is outside the subset ({})",
+                TimeUnit::ALL.iter().map(|unit| unit.as_str()).collect::<Vec<_>>().join(", ")
+            ),
+        )
+    })
 }
 
 fn lower_scale(value: &Json, path: &str) -> Result<ScaleSpec, ChartError> {

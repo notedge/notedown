@@ -17,6 +17,7 @@ use crate::{
     scale::{Scale, Transfer, TransformedScale, inferred_domain, linear_ticks, log_ticks, nice_domain, train_band, train_linear, train_nominal, train_point},
     spec::{Channel, ChartSpec, Guide, Mark, ScaleSpec},
     statistic::{Observation, aggregate},
+    transform::{ChannelTransform, ResolvedBin, ResolvedTransform},
 };
 
 const DEFAULT_MARK_COLOR: Color = Color::rgb(0x4a, 0x7f, 0xbf);
@@ -92,7 +93,8 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
     check_fields(spec, data)?;
 
     let measure = measure_channel(spec)?;
-    let mut rows = project_rows(spec, data, measure, &mut diagnostics)?;
+    let transforms = resolve_transforms(spec, data)?;
+    let mut rows = project_rows(spec, data, measure, &transforms, &mut diagnostics)?;
     if let Some(channel) = measure {
         rows = aggregate_rows(spec, channel, rows, &mut diagnostics);
     }
@@ -112,6 +114,7 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
             channel,
             encoding.field.kind,
             encoding.aggregate.is_some(),
+            spec.transforms.channel(channel).is_some(),
             declared,
             spec.mark,
             &rows,
@@ -223,10 +226,40 @@ fn measure_channel(spec: &ChartSpec) -> Result<Option<Channel>, ChartError> {
     Ok(measure)
 }
 
+fn resolve_transforms(spec: &ChartSpec, data: &DataSnapshot) -> Result<[Option<ResolvedTransform>; 6], ChartError> {
+    let mut resolved: [Option<ResolvedTransform>; 6] = [None; 6];
+    for channel in [Channel::X, Channel::Y] {
+        let Some(transform) = spec.transforms.channel(channel)
+        else {
+            continue;
+        };
+        let Some(encoding) = spec.encoding.channel(channel)
+        else {
+            return Err(ChartError::new(
+                codes::INVALID_SPEC,
+                format!("`{}` is declared on the `{}` channel, which binds no field", transform.as_str(), channel.as_str()),
+            ));
+        };
+        let applied = match transform {
+            ChannelTransform::Bin(bin) => {
+                let column = data
+                    .field(&encoding.field.name)
+                    .ok_or_else(|| ChartError::new(codes::UNKNOWN_FIELD, format!("field `{}` is not in the data snapshot", encoding.field.name)))?;
+                let values: Vec<f64> = column.values.iter().filter_map(Value::as_number).filter(|value| value.is_finite()).collect();
+                ResolvedTransform::Bin(ResolvedBin::resolve(bin, &values)?)
+            }
+            ChannelTransform::TimeUnit(unit) => ResolvedTransform::TimeUnit(unit),
+        };
+        resolved[channel_index(channel)] = Some(applied);
+    }
+    Ok(resolved)
+}
+
 fn project_rows(
     spec: &ChartSpec,
     data: &DataSnapshot,
     measure: Option<Channel>,
+    transforms: &[Option<ResolvedTransform>; 6],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Vec<Row>, ChartError> {
     let mut missing = [0usize; 6];
@@ -252,6 +285,10 @@ fn project_rows(
                 complete = false;
                 continue;
             }
+            let value = match transforms[channel_index(channel)] {
+                Some(transform) => transform.label(&value)?,
+                None => value,
+            };
             row.set(channel, value);
         }
         if complete {
@@ -307,6 +344,7 @@ fn train_channel(
     channel: Channel,
     kind: FieldKind,
     aggregated: bool,
+    transformed: bool,
     declared: ScaleSpec,
     mark: Mark,
     rows: &[Row],
@@ -314,7 +352,15 @@ fn train_channel(
     options: &ChartOptions,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Scale, ChartError> {
-    let effective = if aggregated { FieldKind::Quantitative } else { kind };
+    let effective = if transformed {
+        FieldKind::Ordinal
+    }
+    else if aggregated {
+        FieldKind::Quantitative
+    }
+    else {
+        kind
+    };
     match channel {
         Channel::Color | Channel::Shape => {
             let categories = categories(rows, channel);

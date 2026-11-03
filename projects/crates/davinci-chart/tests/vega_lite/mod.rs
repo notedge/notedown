@@ -4,6 +4,7 @@
 mod chrome_gate;
 mod matrix;
 mod spans;
+mod transforms;
 
 use davinci_chart::{Channel, Scale, codes, vega_lite};
 
@@ -258,6 +259,11 @@ const REJECTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal","bin":true},"y":{"field":"v","type":"quantitative"}}}"#,
+        codes::TYPE_MISMATCH,
+        "$.encoding.x.bin",
+    ),
+    (
+        r#"{"data":{"values":[{"c":"A","v":1}]},"mark":"bar","encoding":{"x":{"field":"c","type":"nominal","bin":"binned"},"y":{"field":"v","type":"quantitative"}}}"#,
         codes::UNSUPPORTED_ENCODING,
         "$.encoding.x.bin",
     ),

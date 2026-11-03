@@ -12,6 +12,7 @@ use davinci_types::Diagnostic;
 use crate::{
     data::FieldKind,
     error::{chart_error, codes},
+    transform::{ChannelTransform, Transforms},
 };
 
 /// The minimum mark set understood by this crate.
@@ -381,6 +382,11 @@ pub struct ChartSpec {
     pub encoding: Encoding,
     /// Scale declarations. Missing entries fall back to [`ScaleSpec::Auto`].
     pub scales: Scales,
+    /// Optional per-channel transforms executed before scales are trained.
+    ///
+    /// A transformed positional channel becomes an ordered categorical domain,
+    /// so its scale is a band or point scale rather than a continuous one.
+    pub transforms: Transforms,
     /// Chart coordinate system.
     pub coordinate: Coordinate,
     /// Guides in declaration order. An empty list suppresses axes.
@@ -402,6 +408,7 @@ impl ChartSpec {
             mark,
             encoding: Encoding::default(),
             scales: Scales::default(),
+            transforms: Transforms::default(),
             coordinate: Coordinate::Cartesian,
             guides: vec![Guide::axis(Channel::X), Guide::axis(Channel::Y)],
             mark_color: None,
@@ -441,6 +448,15 @@ impl ChartSpec {
     /// Declare one channel scale.
     pub fn with_scale(mut self, channel: Channel, spec: ScaleSpec) -> Self {
         self.scales.set(channel, spec);
+        self
+    }
+
+    /// Declare one positional channel transform.
+    ///
+    /// Only `x` and `y` accept transforms; other channels are ignored here and
+    /// refused by the frontends that authored the request.
+    pub fn with_transform(mut self, channel: Channel, transform: ChannelTransform) -> Self {
+        self.transforms.set(channel, transform);
         self
     }
 
@@ -534,8 +550,55 @@ impl ChartSpec {
                     ));
                 }
             }
+            if let Some(transform) = self.transforms.channel(channel) {
+                match transform {
+                    ChannelTransform::Bin(bin) => {
+                        if let Some(problem) = bin.check() {
+                            diagnostics.push(chart_error(
+                                codes::INVALID_SPEC,
+                                format!("`bin` on the `{}` channel is invalid: {problem}", channel.as_str()),
+                            ));
+                        }
+                        if field.kind != FieldKind::Quantitative {
+                            diagnostics.push(chart_error(
+                                codes::TYPE_MISMATCH,
+                                format!(
+                                    "`bin` on the `{}` channel needs a quantitative field, but `{}` is {}",
+                                    channel.as_str(),
+                                    field.name,
+                                    field.kind.as_str()
+                                ),
+                            ));
+                        }
+                    }
+                    ChannelTransform::TimeUnit(unit) => {
+                        if field.kind != FieldKind::Temporal {
+                            diagnostics.push(chart_error(
+                                codes::TYPE_MISMATCH,
+                                format!(
+                                    "`timeUnit` ({}) on the `{}` channel needs a temporal field, but `{}` is {}",
+                                    unit.as_str(),
+                                    channel.as_str(),
+                                    field.name,
+                                    field.kind.as_str()
+                                ),
+                            ));
+                        }
+                    }
+                }
+                if encoding.aggregate.is_some() {
+                    diagnostics.push(chart_error(
+                        codes::INVALID_SPEC,
+                        format!(
+                            "`{}` cannot share the `{}` channel with an aggregate: a transformed channel is a grouping key",
+                            transform.as_str(),
+                            channel.as_str()
+                        ),
+                    ));
+                }
+            }
             if let Some(spec) = self.scales.channel(channel) {
-                if let Some(record) = scale_conflict(channel, field.kind, encoding.aggregate, *spec) {
+                if let Some(record) = scale_conflict(channel, field.kind, encoding.aggregate, self.transforms.channel(channel).is_some(), *spec) {
                     diagnostics.push(record);
                 }
             }
@@ -566,8 +629,16 @@ fn supports(mark: Mark, channel: Channel) -> bool {
     }
 }
 
-fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate>, spec: ScaleSpec) -> Option<Diagnostic> {
-    let effective = if aggregate.is_some() { FieldKind::Quantitative } else { kind };
+fn scale_conflict(channel: Channel, kind: FieldKind, aggregate: Option<Aggregate>, transformed: bool, spec: ScaleSpec) -> Option<Diagnostic> {
+    let effective = if transformed {
+        FieldKind::Ordinal
+    }
+    else if aggregate.is_some() {
+        FieldKind::Quantitative
+    }
+    else {
+        kind
+    };
     match spec {
         ScaleSpec::Auto => None,
         ScaleSpec::Linear { domain, zero, nice: _ } => {

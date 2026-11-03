@@ -486,7 +486,11 @@ pub fn linear_ticks(domain: (f64, f64), count: usize) -> Vec<f64> {
     if ticks.len() < 2 { vec![min, max] } else { ticks }
 }
 
-fn nice_step(span: f64) -> f64 {
+/// The 1-2-5 step closest to `span` at the same order of magnitude.
+///
+/// Axis ticks and binning share this function so a derived bucket width lands
+/// on the same grid as the ticks of the scale it feeds.
+pub fn nice_step(span: f64) -> f64 {
     let exponent = span.log10().floor();
     let magnitude = 10f64.powf(exponent);
     let fraction = span / magnitude;

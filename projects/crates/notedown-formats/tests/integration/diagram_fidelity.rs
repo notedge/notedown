@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use notedown_formats::{
-    export::{docx::export_docx_bytes, html::export_html, markdown::export_markdown, pdf::export_pdf_bytes},
+    export::{docx::export_docx_bytes, html::{RenderedDiagram, export_html, export_html_with_diagrams}, markdown::export_markdown, pdf::export_pdf_bytes},
     import::{docx::import_docx_bytes, html::import_html_bytes, markdown::import_markdown_bytes, pdf::import_pdf_bytes},
 };
-use notedown_ir::{Block, DocumentGraph, Inline};
+use notedown_ir::{Block, DocumentGraph, Inline, NodeId};
 
 /// The source bodies include the fuzz boundaries a diagram fence must keep:
 /// an empty body, a long body, backticks, a tilde run, a nested backtick fence,
@@ -75,6 +77,27 @@ fn markdown_diagram_sources_survive_markdown_and_html_round_trips() {
         let html = export_html(&graph).expect("export diagram html");
         assert!(html.contains("data-diagram-language=\"mermaid\""), "{name}\n{html}");
         let from_html = import_html_bytes(&format!("{name}.html"), html.as_bytes()).expect("reopen diagram html");
+        assert_eq!(diagram_block(&from_html, "mermaid"), *source, "{name}\n{html}");
+    }
+}
+
+#[test]
+fn rendered_diagram_figures_round_trip_the_authored_source() {
+    for (name, source) in DIAGRAM_SOURCES {
+        let graph = import_diagram(source);
+        let diagrams = graph
+            .blocks
+            .iter()
+            .filter_map(|node| match &node.block {
+                Block::Diagram { .. } => Some((node.id, RenderedDiagram { svg: "<svg><text>rendered &amp; escaped</text></svg>".to_string() })),
+                _ => None,
+            })
+            .collect::<HashMap<NodeId, RenderedDiagram>>();
+        assert_eq!(diagrams.len(), 1, "{name}");
+
+        let html = export_html_with_diagrams(&graph, &diagrams).expect("export rendered diagram html");
+        assert!(html.contains("<figure class=\"notedown-diagram\""), "{name}\n{html}");
+        let from_html = import_html_bytes(&format!("{name}.rendered.html"), html.as_bytes()).expect("reopen rendered diagram html");
         assert_eq!(diagram_block(&from_html, "mermaid"), *source, "{name}\n{html}");
     }
 }

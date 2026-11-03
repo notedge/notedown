@@ -368,8 +368,22 @@ impl DisplayScene {
     /// Serialize the scene to a deterministic SVG document.
     ///
     /// Attribute order and number formatting are fixed, so equal scenes
-    /// produce byte-identical output.
+    /// produce byte-identical output. The emitted `id` attributes keep the
+    /// caller-provided identities verbatim: use [`Self::to_svg_with_hooks`]
+    /// when several scenes share one page.
     pub fn to_svg(&self) -> Result<String, SceneError> {
-        crate::svg::write_svg(self)
+        crate::svg::write_svg(self, None)
+    }
+
+    /// Serialize the scene with page-level styling and identity hooks.
+    ///
+    /// Every emitted `id` (including clip paths) is prefixed with
+    /// `{id_namespace}-`, so two scenes carrying identical node identities
+    /// never collide on one page. Every node with a [`SemanticRole`] gains
+    /// `class="{class_prefix}-{role}"` and the root `<svg>` carries
+    /// `class="{class_prefix}"`, so host CSS can scope rules under the
+    /// container class without touching bare `node`/`edge` names.
+    pub fn to_svg_with_hooks(&self, id_namespace: &str, class_prefix: &str) -> Result<String, SceneError> {
+        crate::svg::write_svg(self, Some(crate::svg::SvgHooks { id_namespace, class_prefix }))
     }
 }

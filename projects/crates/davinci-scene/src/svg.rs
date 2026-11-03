@@ -164,11 +164,24 @@ fn validate_finite(value: f64, context: &str) -> Result<(), SceneError> {
 // Writer
 // ---------------------------------------------------------------------------
 
-pub(crate) fn write_svg(scene: &DisplayScene) -> Result<String, SceneError> {
+/// Page-level naming hooks for SVG serialization: a per-scene id namespace
+/// and a shared class prefix for semantic roles.
+pub(crate) struct SvgHooks<'a> {
+    /// Prefix applied to every emitted `id` as `{id_namespace}-{id}`.
+    pub id_namespace: &'a str,
+    /// Prefix for role classes: `class="{class_prefix}-{role}"` plus
+    /// `class="{class_prefix}"` on the root `<svg>`.
+    pub class_prefix: &'a str,
+}
+
+pub(crate) fn write_svg(scene: &DisplayScene, hooks: Option<SvgHooks>) -> Result<String, SceneError> {
     validate_scene(scene)?;
 
     let mut out = String::new();
     out.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\"");
+    if let Some(hooks) = &hooks {
+        push_string_attribute(&mut out, "class", hooks.class_prefix);
+    }
     push_number_attribute(&mut out, "width", scene.size.width);
     push_number_attribute(&mut out, "height", scene.size.height);
     out.push_str(" viewBox=\"0 0 ");
@@ -179,17 +192,20 @@ pub(crate) fn write_svg(scene: &DisplayScene) -> Result<String, SceneError> {
 
     let mut clip_index = 0usize;
     for node in &scene.nodes {
-        write_node(&mut out, node, 1, &mut clip_index);
+        write_node(&mut out, node, 1, &mut clip_index, hooks.as_ref());
     }
 
     out.push_str("</svg>\n");
     Ok(out)
 }
 
-fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize) {
+fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>) {
     match node.clip {
         Some(clip) => {
-            let id = format!("clip-{clip_index}");
+            let id = match hooks {
+                Some(hooks) => format!("{}-clip-{clip_index}", hooks.id_namespace),
+                None => format!("clip-{clip_index}"),
+            };
             *clip_index += 1;
 
             let indent = indent(depth);
@@ -212,29 +228,29 @@ fn write_node(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut
             out.push_str("<g clip-path=\"url(#");
             out.push_str(&escape(&id));
             out.push_str(")\">\n");
-            write_element(out, node, depth + 1, clip_index);
+            write_element(out, node, depth + 1, clip_index, hooks);
             out.push_str(&indent);
             out.push_str("</g>\n");
         }
-        None => write_element(out, node, depth, clip_index),
+        None => write_element(out, node, depth, clip_index, hooks),
     }
 }
 
-fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize) {
+fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &mut usize, hooks: Option<&SvgHooks>) {
     let indent = indent(depth);
     match &node.kind {
         NodeKind::Group { children, opacity } => {
             out.push_str(&indent);
             out.push_str("<g");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_transform_attribute(out, node.transform);
             if *opacity != 1.0 {
                 push_number_attribute(out, "opacity", *opacity);
             }
             out.push_str(">\n");
             for child in children {
-                write_node(out, child, depth + 1, clip_index);
+                write_node(out, child, depth + 1, clip_index, hooks);
             }
             out.push_str(&indent);
             out.push_str("</g>\n");
@@ -242,8 +258,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Path { path, style } => {
             out.push_str(&indent);
             out.push_str("<path");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             out.push_str(" d=\"");
             out.push_str(&path_data(path));
             out.push('"');
@@ -254,8 +270,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Line { from, to, style } => {
             out.push_str(&indent);
             out.push_str("<line");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_number_attribute(out, "x1", from.x);
             push_number_attribute(out, "y1", from.y);
             push_number_attribute(out, "x2", to.x);
@@ -267,8 +283,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Rect { rect, style } => {
             out.push_str(&indent);
             out.push_str("<rect");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_rect_attributes(out, *rect);
             push_transform_attribute(out, node.transform);
             write_shape_paint(out, style, true);
@@ -277,8 +293,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::RoundedRect { rect, radius, style } => {
             out.push_str(&indent);
             out.push_str("<rect");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_rect_attributes(out, *rect);
             push_number_attribute(out, "rx", *radius);
             push_transform_attribute(out, node.transform);
@@ -288,8 +304,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Ellipse { center, radii, style } => {
             out.push_str(&indent);
             out.push_str("<ellipse");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_number_attribute(out, "cx", center.x);
             push_number_attribute(out, "cy", center.y);
             push_number_attribute(out, "rx", radii.width);
@@ -301,8 +317,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Text { position, text, style } => {
             out.push_str(&indent);
             out.push_str("<text");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_number_attribute(out, "x", position.x);
             push_number_attribute(out, "y", position.y);
             push_transform_attribute(out, node.transform);
@@ -314,8 +330,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
         NodeKind::Image { rect, resource, opacity } => {
             out.push_str(&indent);
             out.push_str("<image");
-            push_id_attribute(out, node.id.as_deref());
-            push_semantic_attributes(out, node);
+            push_id_attribute(out, node.id.as_deref(), hooks);
+            push_semantic_attributes(out, node, hooks);
             push_rect_attributes(out, *rect);
             push_string_attribute(out, "href", &resource.href);
             if let Some(mime) = resource.mime.as_deref() {
@@ -333,8 +349,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
                 MarkerShape::Circle => {
                     out.push_str(&indent);
                     out.push_str("<circle");
-                    push_id_attribute(out, node.id.as_deref());
-                    push_semantic_attributes(out, node);
+                    push_id_attribute(out, node.id.as_deref(), hooks);
+                    push_semantic_attributes(out, node, hooks);
                     push_number_attribute(out, "cx", at.x);
                     push_number_attribute(out, "cy", at.y);
                     push_number_attribute(out, "r", half);
@@ -342,8 +358,8 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
                 MarkerShape::Triangle | MarkerShape::Diamond => {
                     out.push_str(&indent);
                     out.push_str("<polygon");
-                    push_id_attribute(out, node.id.as_deref());
-                    push_semantic_attributes(out, node);
+                    push_id_attribute(out, node.id.as_deref(), hooks);
+                    push_semantic_attributes(out, node, hooks);
                     out.push_str(" points=\"");
                     let points = if matches!(*shape, MarkerShape::Triangle) {
                         vec![Point::new(at.x, at.y - half), Point::new(at.x - half, at.y + half), Point::new(at.x + half, at.y + half)]
@@ -372,9 +388,12 @@ fn write_element(out: &mut String, node: &SceneNode, depth: usize, clip_index: &
     }
 }
 
-fn push_semantic_attributes(out: &mut String, node: &SceneNode) {
+fn push_semantic_attributes(out: &mut String, node: &SceneNode, hooks: Option<&SvgHooks>) {
     if let Some(role) = node.role {
         push_string_attribute(out, "data-role", role.as_str());
+        if let Some(hooks) = hooks {
+            push_string_attribute(out, "class", &format!("{}-{}", hooks.class_prefix, role.as_str()));
+        }
     }
     if let Some(source) = node.source.as_ref() {
         if let Some(element) = source.element.as_deref() {
@@ -428,9 +447,12 @@ fn push_rect_attributes(out: &mut String, rect: Rect) {
     push_number_attribute(out, "height", rect.height);
 }
 
-fn push_id_attribute(out: &mut String, id: Option<&str>) {
+fn push_id_attribute(out: &mut String, id: Option<&str>, hooks: Option<&SvgHooks>) {
     if let Some(id) = id {
-        push_string_attribute(out, "id", id);
+        match hooks {
+            Some(hooks) => push_string_attribute(out, "id", &format!("{}-{id}", hooks.id_namespace)),
+            None => push_string_attribute(out, "id", id),
+        }
     }
 }
 

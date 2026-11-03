@@ -132,6 +132,63 @@ fn semantic_role_and_source_emit_data_attributes() {
 }
 
 #[test]
+fn namespaced_hooks_prefix_ids_and_scope_role_classes() {
+    let build = || {
+        let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
+        scene.push(
+            SceneNode::new(NodeKind::Rect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), style: ShapeStyle::filled(Color::WHITE) })
+                .with_id("node-A")
+                .with_role(SemanticRole::Node)
+                .with_clip(Rect::new(0.0, 0.0, 20.0, 20.0)),
+        );
+        scene.push(
+            SceneNode::new(NodeKind::Line { from: Point::new(0.0, 0.0), to: Point::new(10.0, 10.0), style: ShapeStyle::stroked(Color::BLACK, 1.5) })
+                .with_id("edge-0")
+                .with_role(SemanticRole::Edge),
+        );
+        scene
+    };
+
+    let first = build().to_svg_with_hooks("diagram-1", "diagram").expect("first scene");
+    let second = build().to_svg_with_hooks("diagram-2", "diagram").expect("second scene");
+
+    // Root carries the container class, ids and clip paths are namespaced.
+    assert!(first.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" class="diagram""#), "{first}");
+    assert!(first.contains(r#"<clipPath id="diagram-1-clip-0">"#), "{first}");
+    assert!(first.contains(r#"clip-path="url(#diagram-1-clip-0)""#), "{first}");
+    assert!(first.contains(r#"id="diagram-1-node-A""#), "{first}");
+    assert!(first.contains(r#"class="diagram-node""#), "{first}");
+    assert!(first.contains(r#"id="diagram-1-edge-0""#), "{first}");
+    assert!(first.contains(r#"class="diagram-edge""#), "{first}");
+
+    // Identical scenes under different namespaces share no id.
+    assert!(second.contains(r#"id="diagram-2-node-A""#), "{second}");
+    let ids = |svg: &str| {
+        svg.match_indices("id=\"")
+            .map(|(start, _)| {
+                let rest = &svg[start + 4..];
+                rest[..rest.find('"').expect("closing quote")].to_string()
+            })
+            .collect::<Vec<_>>()
+    };
+    let first_ids = ids(&first);
+    let second_ids = ids(&second);
+    assert!(first_ids.iter().all(|id| id.starts_with("diagram-1-")), "{first_ids:?}");
+    assert!(second_ids.iter().all(|id| id.starts_with("diagram-2-")), "{second_ids:?}");
+    assert!(first_ids.iter().all(|id| !second_ids.contains(id)), "namespaces must not overlap: {first_ids:?} vs {second_ids:?}");
+
+    // No bare generic class names leak into the output.
+    for bare in ["class=\"node\"", "class=\"edge\"", "class=\"label\"", "class=\"cluster\""] {
+        assert!(!first.contains(bare), "bare class `{bare}` must not appear: {first}");
+    }
+
+    // The plain serializer keeps verbatim ids and emits no classes.
+    let plain = build().to_svg().expect("plain scene");
+    assert!(plain.contains(r#"id="node-A""#), "{plain}");
+    assert!(!plain.contains("class="), "{plain}");
+}
+
+#[test]
 fn ellipses_lines_and_diamond_markers_render() {
     let mut scene = DisplayScene::new(Size::new(50.0, 50.0));
     scene.push(SceneNode::new(NodeKind::Line {

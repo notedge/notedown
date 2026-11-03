@@ -264,3 +264,66 @@ fn nested_subgraphs_flatten_with_a_diagnostic() {
     assert!(svg.contains(">One</text>"), "{svg}");
     assert!(svg.contains(">Inner</text>"), "{svg}");
 }
+
+/// `oak-mermaid` parses these flowchart statements and then discards them.
+/// Refusing keeps styling, interaction, and accessibility metadata from
+/// vanishing behind a successful render.
+#[test]
+fn flowchart_dropped_statements_are_refused_at_their_line() {
+    let statements = [
+        "style A fill:#f9f",
+        "classDef warn fill:#ff0",
+        "class A,B warn",
+        "linkStyle 0 stroke:#333",
+        "click A \"https://example.com\"",
+        "direction LR",
+        "accTitle: Flow",
+    ];
+    for statement in statements {
+        let source = format!("flowchart TD\n  A --> B\n  {statement}\n");
+        let error = mermaid_to_scene(&source).expect_err(statement);
+
+        assert_eq!(error.code(), codes::UNSUPPORTED, "{statement}: {}", error.message());
+        let span = error.span().expect("the statement is located");
+        assert_eq!(&source[span], statement, "the span covers the authored statement");
+    }
+}
+
+/// The class frontend drops the same family of statements, so the guard must
+/// name them before the graph is lowered.
+#[test]
+fn class_dropped_statements_are_refused_at_their_line() {
+    let statements = [
+        "note for Animal \"mammal\"",
+        "namespace Zoo",
+        "style Animal fill:#eee",
+        "cssClass \"big\"",
+        "linkStyle default color:#000",
+    ];
+    for statement in statements {
+        let source = format!("classDiagram\n  class Animal\n  Animal <|-- Duck\n  {statement}\n");
+        let error = mermaid_to_scene(&source).expect_err(statement);
+
+        assert_eq!(error.code(), codes::UNSUPPORTED, "{statement}: {}", error.message());
+        let span = error.span().expect("the statement is located");
+        assert_eq!(&source[span], statement, "the span covers the authored statement");
+    }
+}
+
+/// A class member may share a name with a dropped statement keyword. The class
+/// guard therefore only inspects lines outside `{ ... }` bodies.
+#[test]
+fn class_members_sharing_a_statement_keyword_still_lower() {
+    let source = "classDiagram\n  class Animal {\n    +note\n    +style\n  }\n";
+    let spec = mermaid_to_spec(source).expect("members must not be mistaken for statements");
+    assert_eq!(spec.nodes.len(), 1);
+    assert_eq!(spec.nodes[0].label.as_deref(), Some("Animal\n+note\n+style"));
+}
+
+/// Node labels keep the authored text even when it names a dropped statement.
+#[test]
+fn a_node_label_that_mentions_a_dropped_statement_still_lowers() {
+    let source = "flowchart TD\n  A[style A] --> B\n";
+    let lowered = mermaid_to_scene(source).expect("the label is data, not a statement");
+    assert_eq!(lowered.plan.node("A").expect("A").label, "style A");
+}

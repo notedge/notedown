@@ -26,6 +26,22 @@ use crate::{
     spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, SequenceLayout},
 };
 
+/// Flowchart statements that `oak-mermaid` parses and then discards.
+///
+/// Styling, interaction, accessibility metadata and inner-direction overrides
+/// never reach the spec, so lowering them would drop authored meaning. The
+/// guard refuses the statement instead and keeps the source visible.
+const DROPPED_FLOWCHART_STATEMENTS: &[&str] =
+    &["style", "classDef", "class", "linkStyle", "click", "direction", "accTitle", "accDescr"];
+
+/// Class-diagram statements that `oak-mermaid` parses and then discards.
+///
+/// `class ... { ... }` declarations are lowered, so `class` is absent here. The
+/// guard ignores lines inside a class body: a member may legitimately share a
+/// statement keyword.
+const DROPPED_CLASS_STATEMENTS: &[&str] =
+    &["style", "cssClass", "linkStyle", "click", "callback", "namespace", "note", "Note", "accTitle", "accDescr"];
+
 struct NodeSeed {
     id: String,
     label: Option<String>,
@@ -217,6 +233,12 @@ fn flowchart_spec(flowchart: &Flowchart, source: &str) -> Result<DiagramSpec, Di
     if let Some((range, line)) = locate_unsupported_orientation(source) {
         return Err(DiagramError::unsupported(format!("unsupported flowchart orientation `{line}`")).with_span(range));
     }
+    if let Some((range, keyword)) = locate_dropped_statement(source, DROPPED_FLOWCHART_STATEMENTS, false) {
+        return Err(DiagramError::unsupported(format!(
+            "flowchart statement `{keyword}` is not lowered, the diagram falls back to its source"
+        ))
+        .with_span(range));
+    }
     let direction = direction(&flowchart.orientation).ok_or_else(|| {
         DiagramError::unsupported(format!("unsupported flowchart orientation `{}`", flowchart.orientation))
             .with_optional_span(locate_header(source, "flowchart").or_else(|| locate_header(source, "graph")))
@@ -340,6 +362,12 @@ struct ClassRelationLine {
 /// matched back to the relation to place the marker on the correct operand.
 /// This keeps `A <|-- B` and `A --|> B` pointing at the same superclass.
 fn class_spec(diagram: &ClassDiagram, source: &str) -> Result<DiagramSpec, DiagramError> {
+    if let Some((range, keyword)) = locate_dropped_statement(source, DROPPED_CLASS_STATEMENTS, true) {
+        return Err(DiagramError::unsupported(format!(
+            "class statement `{keyword}` is not lowered, the diagram falls back to its source"
+        ))
+        .with_span(range));
+    }
     let mut spec = DiagramSpec::new(Direction::BottomUp);
     let mut known: BTreeSet<String> = BTreeSet::new();
 
@@ -591,6 +619,36 @@ fn locate_unsupported_orientation(source: &str) -> Option<(std::ops::Range<usize
             return Some((range, line));
         }
         return None;
+    }
+    None
+}
+
+/// The first authored statement that the frontend parses and then discards.
+///
+/// The statement token is the first word of a trimmed line with a trailing
+/// `:` removed, so `accTitle: Graph` matches `accTitle`. When `skip_braced` is
+/// set, lines inside `{ ... }` blocks are ignored, which keeps class members
+/// from being mistaken for statements. Each hit reports the line byte range, so
+/// the refusal names authored bytes rather than an AST position the frontend
+/// does not keep.
+fn locate_dropped_statement(
+    source: &str,
+    keywords: &[&str],
+    skip_braced: bool,
+) -> Option<(std::ops::Range<usize>, String)> {
+    let mut depth = 0usize;
+    for (range, line) in trimmed_lines(source) {
+        if skip_braced && depth > 0 {
+            depth = depth.saturating_add(line.matches('{').count()).saturating_sub(line.matches('}').count());
+            continue;
+        }
+        let token = line.split_whitespace().next().unwrap_or_default().trim_end_matches(':');
+        if keywords.iter().any(|keyword| *keyword == token) {
+            return Some((range, token.to_string()));
+        }
+        if skip_braced {
+            depth = depth.saturating_add(line.matches('{').count()).saturating_sub(line.matches('}').count());
+        }
     }
     None
 }

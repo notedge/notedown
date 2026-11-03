@@ -218,3 +218,128 @@ fn cycles_are_placed_deterministically_and_reported() {
     assert!(has_message(&plan, "cycle"), "a cycle must be reported");
     assert_eq!(plan, compile_spec(&spec));
 }
+
+// ---------------------------------------------------------------------------
+// Edge routing around nodes
+// ---------------------------------------------------------------------------
+
+/// Test-side oracle for orthogonal segment vs rectangle interior checks. The
+/// caller supplies the inflation: node obstacles use half the node stroke
+/// (1.5 / 2) plus the 4px minimum gap, label obstacles use the 4px label
+/// clearance.
+fn oracle_segment_hits_rect(a: Point, b: Point, rect: davinci_scene::Rect, inflate: f64) -> bool {
+    let (x, y, right, bottom) = (rect.x - inflate, rect.y - inflate, rect.right() + inflate, rect.bottom() + inflate);
+    if (a.y - b.y).abs() < f64::EPSILON {
+        let (low, high) = if a.x <= b.x { (a.x, b.x) } else { (b.x, a.x) };
+        return a.y > y && a.y < bottom && high > x && low < right;
+    }
+    if (a.x - b.x).abs() < f64::EPSILON {
+        let (low, high) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+        return a.x > x && a.x < right && high > y && low < bottom;
+    }
+    panic!("routes must stay orthogonal: {a:?} -> {b:?}")
+}
+
+fn oracle_segment_hits_inflated_node(a: Point, b: Point, rect: davinci_scene::Rect) -> bool {
+    oracle_segment_hits_rect(a, b, rect, 4.75)
+}
+
+/// The acceptance topology: a long bypass edge whose straight track would
+/// pass through an unrelated intermediate node, plus a converging join.
+fn bypass_plan() -> DiagramLayoutPlan {
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    spec.nodes =
+        vec![node("A"), node("B"), node("C"), node("D"), node("E"), node("F"), node("G"), node("H"), node("I")];
+    spec.edges = vec![
+        edge("A", "B"),
+        DiagramEdge { label: Some("yes".to_string()), ..edge("B", "C") },
+        DiagramEdge { label: Some("no".to_string()), ..edge("B", "D") },
+        edge("C", "E"),
+        edge("E", "F"),
+        DiagramEdge { label: Some("no".to_string()), ..edge("F", "G") },
+        DiagramEdge { label: Some("yes".to_string()), ..edge("F", "H") },
+        edge("H", "G"),
+        edge("G", "I"),
+    ];
+    compile_spec(&spec)
+}
+
+#[test]
+fn edges_never_cross_a_non_endpoint_node() {
+    let plan = bypass_plan();
+    assert!(plan.diagnostics.iter().all(|diagnostic| !diagnostic.message().fallback().unwrap_or_default().contains("no channel")),
+        "every edge must find a clearing channel: {:?}", plan.diagnostics);
+
+    for routed in &plan.edges {
+        let from_id = routed.from.node.as_str();
+        let to_id = routed.to.node.as_str();
+        for obstacle in plan.nodes.iter().filter(|placed| placed.id != from_id && placed.id != to_id) {
+            for segment in routed.points.windows(2) {
+                assert!(
+                    !oracle_segment_hits_inflated_node(segment[0], segment[1], obstacle.rect),
+                    "edge {from_id}->{to_id} crosses node {}: {:?} vs {:?}",
+                    obstacle.id,
+                    segment,
+                    obstacle.rect
+                );
+            }
+        }
+    }
+
+    // Foreign edge label boxes are obstacles too: no segment may cross the
+    // inflated label box of another edge.
+    for (index, routed) in plan.edges.iter().enumerate() {
+        for (other_index, other) in plan.edges.iter().enumerate() {
+            if other_index == index {
+                continue;
+            }
+            let Some(label_box) = other.label_box else { continue };
+            for segment in routed.points.windows(2) {
+                assert!(
+                    !oracle_segment_hits_rect(segment[0], segment[1], label_box, 4.0),
+                    "edge {}->{} crosses the label of {}->{}: {:?} vs {:?}",
+                    routed.from.node,
+                    routed.to.node,
+                    other.from.node,
+                    other.to.node,
+                    segment,
+                    label_box
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_bypass_edge_visibly_detours_around_the_intermediate_node() {
+    let plan = bypass_plan();
+    let bypass = plan.edges.iter().find(|routed| routed.from.node == "F" && routed.to.node == "G").expect("F->G edge");
+    assert!(bypass.points.len() > 2, "the bypass must leave the straight track: {:?}", bypass.points);
+    let h = plan.node("H").expect("H");
+    let lane_x = bypass.points.iter().map(|point| point.x).fold(f64::NAN, f64::min).min(
+        bypass.points.iter().map(|point| point.x).fold(f64::NAN, f64::max),
+    );
+    assert!(lane_x <= h.rect.x - 4.0 || lane_x >= h.rect.right() + 4.0, "the detour lane must clear H by the gap: {lane_x} vs {:?}", h.rect);
+}
+
+#[test]
+fn converging_edges_share_a_track_in_front_of_the_target() {
+    let plan = bypass_plan();
+    let target = plan.node("G").expect("G");
+    let anchor = Point::new(target.rect.center().x, target.rect.y);
+    let merge_y = anchor.y - 16.0;
+    for routed in plan.edges.iter().filter(|routed| routed.to.node == "G") {
+        assert!(
+            routed.points.iter().any(|point| (point.x - anchor.x).abs() < f64::EPSILON && (point.y - merge_y).abs() < f64::EPSILON),
+            "edge {}->G must pass the shared merge point ({}, {merge_y}): {:?}",
+            routed.from.node,
+            anchor.x,
+            routed.points
+        );
+    }
+}
+
+#[test]
+fn routing_is_byte_deterministic() {
+    assert_eq!(bypass_plan(), bypass_plan());
+}

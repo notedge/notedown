@@ -140,13 +140,35 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
     }
 
     let memberships = node_memberships(&clusters, nodes.len());
-    let mut resolver =
-        EndpointResolver { nodes: &nodes, rects: &rects, ports: &ports, direction: spec.direction, reported_ports: BTreeSet::new() };
-    let mut routed = Vec::with_capacity(edges.len());
-    for edge in &edges {
-        let from = resolver.resolve(&edge.from, edge.from_index, true, &mut diagnostics);
-        let to = resolver.resolve(&edge.to, edge.to_index, false, &mut diagnostics);
-        let points = route(from, to, spec.direction);
+    let anchors = {
+        let mut resolver =
+            EndpointResolver { nodes: &nodes, rects: &rects, ports: &ports, direction: spec.direction, reported_ports: BTreeSet::new() };
+        edges
+            .iter()
+            .map(|edge| {
+                let from = resolver.resolve(&edge.from, edge.from_index, true, &mut diagnostics);
+                let to = resolver.resolve(&edge.to, edge.to_index, false, &mut diagnostics);
+                (from, to)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // Routing stage 1: node avoidance. Every route keeps at least
+    // `ROUTE_NODE_CLEARANCE` around every non-endpoint node; a route that
+    // cannot clear the obstacles keeps the direct path with a diagnostic
+    // instead of silently overlapping.
+    let mut lanes: Vec<UsedLane> = Vec::new();
+    let mut routed: Vec<RoutedEdge> = Vec::with_capacity(edges.len());
+    for (edge, &(from, to)) in edges.iter().zip(anchors.iter()) {
+        let obstacles = inflated_node_obstacles(&rects, edge.from_index, edge.to_index);
+        let points = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes)
+            .unwrap_or_else(|| {
+                diagnostics.push(warning(
+                    codes::APPROXIMATED,
+                    format!("edge `{}->{}` found no channel that clears every node and keeps the direct route", edge.from.node, edge.to.node),
+                ));
+                route(from, to, spec.direction)
+            });
         let label = edge.label.clone().filter(|label| !label.trim().is_empty());
         let label_box = label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), options.font_size));
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
@@ -160,6 +182,42 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         }
         routed.push(RoutedEdge { from: edge.from.clone(), to: edge.to.clone(), points, label, label_box, style: edge.style });
     }
+
+    // Routing stage 2: edge labels are obstacles for other edges. An edge
+    // crossing a foreign label box is re-routed with that box included; its
+    // own label box follows the final polyline midpoint.
+    for index in 0..routed.len() {
+        let foreign_labels: Vec<Rect> = routed
+            .iter()
+            .enumerate()
+            .filter_map(|(other, edge)| (other != index).then_some(edge.label_box?).map(|rect| inflate(rect, ROUTE_LABEL_CLEARANCE)))
+            .collect();
+        if foreign_labels.is_empty() || !route_hits_obstacles(&routed[index].points, &foreign_labels) {
+            continue;
+        }
+        let from = routed[index].points[0];
+        let to = *routed[index].points.last().expect("non-empty route");
+        let mut obstacles = inflated_node_obstacles(&rects, edges[index].from_index, edges[index].to_index);
+        obstacles.extend(foreign_labels.iter().copied());
+        if let Some(points) = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes) {
+            let label_box =
+                routed[index].label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), options.font_size));
+            routed[index].points = points;
+            routed[index].label_box = label_box;
+        }
+        else {
+            diagnostics.push(warning(
+                codes::APPROXIMATED,
+                format!("edge `{}->{}` crosses a foreign edge label and found no clearing channel", routed[index].from.node, routed[index].to.node),
+            ));
+        }
+    }
+
+    // Routing stage 3: converging edges share one track in front of the
+    // target. A vertical (or horizontal for sideways layouts) final segment
+    // is split at `ROUTE_MERGE_STUB` before the target so parallel approaches
+    // visibly join.
+    merge_converging_tracks(&mut routed, spec.direction);
 
     let placed_nodes = nodes
         .iter()
@@ -833,6 +891,178 @@ fn route(from: Point, to: Point, direction: Direction) -> Vec<Point> {
     };
     dedupe_points(points)
 }
+
+/// Inflation of a node rectangle when it acts as a routing obstacle: half the
+/// node stroke width plus the minimum edge-to-node gap.
+const ROUTE_NODE_CLEARANCE: f64 = 4.75;
+/// Inflation of a foreign edge label box when it acts as a routing obstacle.
+const ROUTE_LABEL_CLEARANCE: f64 = 4.0;
+/// Extra lateral clearance of a candidate lane from an inflated obstacle.
+const ROUTE_LANE_CLEARANCE: f64 = 6.0;
+/// Length of the straight stub leaving the source anchor on a detour.
+const ROUTE_STUB: f64 = 12.0;
+/// Distance in front of the target anchor where a detour rejoins and
+/// converging edges share one track.
+const ROUTE_MERGE_STUB: f64 = 16.0;
+/// Minimum distance between two parallel detour lanes with overlapping spans.
+const ROUTE_CHANNEL_SPACING: f64 = 12.0;
+
+/// A detour lane already claimed by an earlier edge: the lane coordinate
+/// (x for vertical lanes, y for horizontal ones) plus its span on the
+/// routing axis.
+#[derive(Clone, Copy, Debug)]
+struct UsedLane {
+    coordinate: f64,
+    low: f64,
+    high: f64,
+}
+
+fn inflate(rect: Rect, amount: f64) -> Rect {
+    Rect::new(rect.x - amount, rect.y - amount, rect.width + amount * 2.0, rect.height + amount * 2.0)
+}
+
+fn inflated_node_obstacles(rects: &[Rect], from_index: usize, to_index: usize) -> Vec<Rect> {
+    rects
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != from_index && *index != to_index)
+        .map(|(_, rect)| inflate(*rect, ROUTE_NODE_CLEARANCE))
+        .collect()
+}
+
+/// Orthogonal segment vs rectangle interior. Degenerate segments count as a
+/// point test. Non-orthogonal segments never occur in our routes; they are
+/// treated as hitting to stay conservative.
+fn segment_hits_rect(a: Point, b: Point, rect: &Rect) -> bool {
+    let dx = (a.x - b.x).abs();
+    let dy = (a.y - b.y).abs();
+    if dx < f64::EPSILON && dy < f64::EPSILON {
+        return a.x > rect.x && a.x < rect.right() && a.y > rect.y && a.y < rect.bottom();
+    }
+    if dy < f64::EPSILON {
+        if a.y <= rect.y || a.y >= rect.bottom() {
+            return false;
+        }
+        let (low, high) = if a.x <= b.x { (a.x, b.x) } else { (b.x, a.x) };
+        return high > rect.x && low < rect.right();
+    }
+    if dx < f64::EPSILON {
+        if a.x <= rect.x || a.x >= rect.right() {
+            return false;
+        }
+        let (low, high) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+        return high > rect.y && low < rect.bottom();
+    }
+    true
+}
+
+fn route_hits_obstacles(points: &[Point], obstacles: &[Rect]) -> bool {
+    points.windows(2).any(|segment| obstacles.iter().any(|rect| segment_hits_rect(segment[0], segment[1], rect)))
+}
+
+/// Route an edge around the given obstacles. Returns the direct orthogonal
+/// route when it is already clean, otherwise the nearest channel lane whose
+/// detour clears every obstacle, or `None` when no candidate lane works.
+///
+/// Lanes claimed by earlier edges are spaced at least
+/// [`ROUTE_CHANNEL_SPACING`] apart so parallel detours never overlap.
+fn route_avoiding(from: Point, to: Point, direction: Direction, obstacles: &[Rect], lanes: &mut Vec<UsedLane>) -> Option<Vec<Point>> {
+    let direct = route(from, to, direction);
+    if !route_hits_obstacles(&direct, obstacles) {
+        return Some(direct);
+    }
+    let vertical = matches!(direction, Direction::TopDown | Direction::BottomUp);
+    let (start, end, start_cross, end_cross) = if vertical { (from.y, to.y, from.x, to.x) } else { (from.x, to.x, from.y, to.y) };
+    let sign = if end >= start { 1.0 } else { -1.0 };
+    let (span_low, span_high) = if start <= end { (start, end) } else { (end, start) };
+
+    // Candidate lanes come from the lateral edges of every obstacle that the
+    // direct route crosses, extended by the lane clearance.
+    let mut candidates: Vec<f64> = obstacles
+        .iter()
+        .flat_map(|rect| {
+            let (rect_low, rect_high, rect_cross_low, rect_high_cross) =
+                if vertical { (rect.y, rect.bottom(), rect.x, rect.right()) } else { (rect.x, rect.right(), rect.y, rect.bottom()) };
+            if rect_high > span_low && rect_low < span_high {
+                vec![rect_cross_low - ROUTE_LANE_CLEARANCE, rect_high_cross + ROUTE_LANE_CLEARANCE]
+            }
+            else {
+                Vec::new()
+            }
+        })
+        .collect();
+    let reference = (start_cross + end_cross) * 0.5;
+    candidates.sort_by(|left, right| {
+        (left - reference).abs().partial_cmp(&(right - reference).abs()).unwrap_or(std::cmp::Ordering::Equal).then(left.total_cmp(right))
+    });
+    candidates.dedup();
+
+    for candidate in candidates {
+        // Parallel detours with overlapping spans keep the channel spacing.
+        let mut lane = candidate;
+        loop {
+            let conflict = lanes
+                .iter()
+                .any(|used| used.high > span_low && used.low < span_high && (used.coordinate - lane).abs() < ROUTE_CHANNEL_SPACING);
+            if !conflict {
+                break;
+            }
+            let direction_away = if lane >= reference { 1.0 } else { -1.0 };
+            lane += direction_away * ROUTE_CHANNEL_SPACING;
+        }
+        let stub = start + sign * ROUTE_STUB;
+        let rejoin = end - sign * ROUTE_MERGE_STUB;
+        let (stub, rejoin) = if sign * (rejoin - stub) <= 0.0 {
+            let middle = (start + end) * 0.5;
+            (middle, middle)
+        }
+        else {
+            (stub, rejoin)
+        };
+        let points = if vertical {
+            vec![from, Point::new(start_cross, stub), Point::new(lane, stub), Point::new(lane, rejoin), Point::new(end_cross, rejoin), to]
+        }
+        else {
+            vec![from, Point::new(stub, start_cross), Point::new(stub, lane), Point::new(rejoin, lane), Point::new(rejoin, end_cross), to]
+        };
+        let points = dedupe_points(points);
+        if !route_hits_obstacles(&points, obstacles) {
+            lanes.push(UsedLane { coordinate: lane, low: span_low, high: span_high });
+            return Some(points);
+        }
+    }
+    None
+}
+
+/// Split the final approach of converging edges at [`ROUTE_MERGE_STUB`] in
+/// front of the target so parallel tracks share one visible join segment.
+fn merge_converging_tracks(routed: &mut [RoutedEdge], direction: Direction) {
+    let vertical = matches!(direction, Direction::TopDown | Direction::BottomUp);
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for edge in routed.iter() {
+        *counts.entry(edge.to.node.clone()).or_default() += 1;
+    }
+    for edge in routed.iter_mut() {
+        if counts.get(edge.to.node.as_str()).copied().unwrap_or(0) < 2 || edge.points.len() < 2 {
+            continue;
+        }
+        let to = *edge.points.last().expect("non-empty route");
+        let (anchor, cross) = if vertical { (to.y, to.x) } else { (to.x, to.y) };
+        let previous = edge.points[edge.points.len() - 2];
+        let previous_along = if vertical { previous.y } else { previous.x };
+        let sign = if anchor >= previous_along { 1.0 } else { -1.0 };
+        let merge = anchor - sign * ROUTE_MERGE_STUB;
+        // Only split a straight final approach that spans the merge point.
+        let final_is_axial = if vertical { (previous.x - cross).abs() < f64::EPSILON } else { (previous.y - cross).abs() < f64::EPSILON };
+        let spans_merge = sign * (anchor - previous_along) > ROUTE_MERGE_STUB * 2.0;
+        if final_is_axial && spans_merge {
+            let point = if vertical { Point::new(cross, merge) } else { Point::new(merge, cross) };
+            let last = edge.points.len() - 1;
+            edge.points.insert(last, point);
+        }
+    }
+}
+
 
 fn dedupe_points(points: Vec<Point>) -> Vec<Point> {
     let mut deduped = Vec::with_capacity(points.len());

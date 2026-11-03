@@ -38,9 +38,23 @@ const DROPPED_FLOWCHART_STATEMENTS: &[&str] =
 ///
 /// `class ... { ... }` declarations are lowered, so `class` is absent here. The
 /// guard ignores lines inside a class body: a member may legitimately share a
-/// statement keyword.
-const DROPPED_CLASS_STATEMENTS: &[&str] =
-    &["style", "cssClass", "linkStyle", "click", "callback", "namespace", "note", "Note", "accTitle", "accDescr"];
+/// statement keyword. The list mirrors the frontend's own skipped keywords, so
+/// a frontend change is visible here as one list to review.
+const DROPPED_CLASS_STATEMENTS: &[&str] = &[
+    "direction",
+    "note",
+    "Note",
+    "style",
+    "cssClass",
+    "linkStyle",
+    "namespace",
+    "click",
+    "acctitle",
+    "accTitle",
+    "accDescr",
+    "callback",
+    "link",
+];
 
 struct NodeSeed {
     id: String,

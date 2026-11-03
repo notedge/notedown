@@ -47,7 +47,9 @@ fn fixture_dir() -> PathBuf {
 }
 
 fn manifest_path() -> PathBuf {
-    fixture_dir().join("manifest.txt")
+    // No `.txt` suffix: the repository ignores every `*.txt` file, and a
+    // silently ignored manifest would turn the pixel gate off.
+    fixture_dir().join("manifest")
 }
 
 fn chrome() -> PathBuf {

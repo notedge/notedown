@@ -278,7 +278,9 @@ fn lower_command(command: &TexCommand, source: &str, base: usize) -> MathExpress
     let name = command.name.as_str();
     let command_span = span_from(base, command.span.start, command.span.end);
     match name {
-        "frac" | "dfrac" | "tfrac" => fraction(command, source, MathFractionLine::Solid, base),
+        "frac" => fraction(command, source, MathFractionLine::Solid, base),
+        "dfrac" => styled_fraction(command, source, MathStyleKind::Display, base),
+        "tfrac" => styled_fraction(command, source, MathStyleKind::Text, base),
         "binom" => MathExpression::Delimited {
             // The parentheses are synthesized by `\binom`; the author typed
             // no delimiter, so neither carries a source span.
@@ -351,6 +353,21 @@ fn fraction(command: &TexCommand, source: &str, line: MathFractionLine, base: us
             MathExpression::Fraction { numerator: Box::new(numerator.clone()), denominator: Box::new(denominator.clone()), line }
         }
         _ => unsupported(command.span.start, command.span.end, source, "fraction", base),
+    }
+}
+
+/// `\dfrac` / `\tfrac` set their fraction in a fixed style whatever the ambient
+/// one is: amsmath defines them as `{\displaystyle\frac{#1}{#2}}` and
+/// `{\textstyle\frac{#1}{#2}}`, so the fraction derives its numerator and
+/// denominator one text level down from that style rather than from the
+/// surrounding formula. The group keeps the switch from reaching the siblings
+/// that follow the command.
+fn styled_fraction(command: &TexCommand, source: &str, style: MathStyleKind, base: usize) -> MathExpression {
+    MathExpression::Group {
+        body: Box::new(MathExpression::Sequence(vec![
+            MathExpression::StyleSwitch { style },
+            fraction(command, source, MathFractionLine::Solid, base),
+        ])),
     }
 }
 
@@ -862,6 +879,25 @@ mod tests {
         assert!(matches!(expression, MathExpression::Fraction { .. }));
         let expression = lower(r"\sqrt[3]{x}");
         assert!(matches!(expression, MathExpression::Radical { index: Some(_), .. }));
+    }
+
+    /// `\dfrac` / `\tfrac` pin the fraction's style instead of inheriting the
+    /// formula's: amsmath sets them in `\displaystyle` / `\textstyle`, so the
+    /// command has to survive as a scoped style switch in front of the
+    /// fraction. Collapsing all three onto `\frac` erased that distinction.
+    #[test]
+    fn dfrac_and_tfrac_pin_the_fraction_style() {
+        for (source, want) in [(r"\dfrac{a}{b}", MathStyleKind::Display), (r"\tfrac{a}{b}", MathStyleKind::Text)] {
+            let MathExpression::Group { body } = lower(source)
+            else {
+                panic!("`{source}` must stay a scoped group so the switch cannot leak")
+            };
+            let MathExpression::Sequence(items) = *body
+            else {
+                panic!("`{source}` must lower to a style switch followed by the fraction")
+            };
+            assert!(matches!(items.as_slice(), [MathExpression::StyleSwitch { style }, MathExpression::Fraction { .. }] if *style == want));
+        }
     }
 
     #[test]

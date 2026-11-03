@@ -98,7 +98,7 @@ fn node_shapes_map_to_scene_primitives() {
     let plan = compile(&spec, &LayoutOptions::default());
     let scene = render(&plan);
     assert!(matches!(scene_node(&scene, "node-N0").kind, SemanticKind::Rect { .. }));
-    assert!(matches!(scene_node(&scene, "node-N1").kind, SemanticKind::RoundedRect { radius, .. } if radius == 8.0));
+    assert!(matches!(scene_node(&scene, "node-N1").kind, SemanticKind::RoundedRect { radius, .. } if radius == 5.0));
     assert!(
         matches!(scene_node(&scene, "node-N2").kind, SemanticKind::RoundedRect { radius, .. } if (radius - plan.node("N2").expect("N2").rect.height * 0.5).abs() < f64::EPSILON)
     );

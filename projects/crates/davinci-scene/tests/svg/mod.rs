@@ -149,8 +149,8 @@ fn namespaced_hooks_prefix_ids_and_scope_role_classes() {
         scene
     };
 
-    let first = build().to_svg_with_hooks("diagram-1", "diagram").expect("first scene");
-    let second = build().to_svg_with_hooks("diagram-2", "diagram").expect("second scene");
+    let first = build().to_svg_with_hooks("diagram-1", "diagram", &davinci_types::DIAGRAM_THEME).expect("first scene");
+    let second = build().to_svg_with_hooks("diagram-2", "diagram", &davinci_types::DIAGRAM_THEME).expect("second scene");
 
     // Root carries the container class, ids and clip paths are namespaced.
     assert!(first.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" class="diagram""#), "{first}");
@@ -221,4 +221,35 @@ fn ellipses_lines_and_diamond_markers_render() {
     assert!(svg.contains("points=\"30,26 34,30 30,34 26,30\""), "{svg}");
     assert!(svg.contains("<circle cx=\"40\" cy=\"40\" r=\"3\" fill=\"#000000\"/>"), "{svg}");
     assert!(svg.contains("<g opacity=\"0.5\">"), "{svg}");
+}
+
+#[test]
+fn themed_output_inlines_both_palettes_and_skips_inline_paint() {
+    let mut scene = DisplayScene::new(Size::new(100.0, 100.0));
+    scene.push(
+        SceneNode::new(NodeKind::Rect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), style: ShapeStyle::filled(Color::WHITE) })
+            .with_id("node-A")
+            .with_role(SemanticRole::Node),
+    );
+    let svg = scene.to_svg_with_hooks("diagram-1", "diagram", &davinci_types::DIAGRAM_THEME).expect("themed scene");
+
+    // Both palettes are inlined, switched by the media query, and every
+    // selector hangs under the container class.
+    assert!(svg.contains("<style>"), "{svg}");
+    assert!(svg.contains("@media (prefers-color-scheme: dark)"), "{svg}");
+    assert!(svg.contains(".diagram .diagram-node { fill: #ececff; stroke: #9370db }"), "{svg}");
+    assert!(svg.contains(".diagram .diagram-node { fill: #2d2a4a; stroke: #8b7ec8 }"), "{svg}");
+    assert!(!svg.contains("<style>.diagram-node") && !svg.contains("}.diagram-node"), "selectors must be scoped under the container class: {svg}");
+
+    // Classed elements carry no inline paint: colors come from the theme.
+    assert!(svg.contains(r#"<rect id="diagram-1-node-A" data-role="node" class="diagram-node""#), "{svg}");
+    assert!(!svg.contains("fill=\"#ffffff\""), "themed elements must not inline colors: {svg}");
+
+    // The retired dark-invisible palette is gone.
+    assert!(!svg.contains("#2d3748"), "{svg}");
+
+    // The unthemed serializer keeps full inline paint as the light fallback.
+    let plain = scene.to_svg().expect("plain scene");
+    assert!(plain.contains("fill=\"#ffffff\""), "{plain}");
+    assert!(!plain.contains("<style>"), "{plain}");
 }

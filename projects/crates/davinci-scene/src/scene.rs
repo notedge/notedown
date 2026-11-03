@@ -387,7 +387,7 @@ impl DisplayScene {
     /// `class="{class_prefix}-{role}"` and the root `<svg>` carries
     /// `class="{class_prefix}"`, so host CSS can scope rules under the
     /// container class without touching bare `node`/`edge` names.
-    pub fn to_svg_with_hooks(&self, id_namespace: &str, class_prefix: &str) -> Result<String, SceneError> {
-        crate::svg::write_svg(self, Some(crate::svg::SvgHooks { id_namespace, class_prefix }))
+    pub fn to_svg_with_hooks(&self, id_namespace: &str, class_prefix: &str, theme: &davinci_types::DiagramTheme) -> Result<String, SceneError> {
+        crate::svg::write_svg(self, Some(crate::svg::SvgHooks { id_namespace, class_prefix, theme }))
     }
 }

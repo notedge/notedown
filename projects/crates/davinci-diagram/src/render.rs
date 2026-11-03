@@ -14,20 +14,26 @@ use crate::{
     spec::{EdgeStyle, NodeShape},
 };
 
-const NODE_FILL: Color = Color::rgb(0xe8, 0xf0, 0xfe);
-const NODE_STROKE: Color = Color::rgb(0x4a, 0x55, 0x68);
-const EDGE_COLOR: Color = Color::rgb(0x2d, 0x37, 0x48);
-const CLUSTER_FILL: Color = Color::rgb(0xf5, 0xf7, 0xfa);
-const CLUSTER_STROKE: Color = Color::rgb(0x9a, 0xa6, 0xb8);
-const ROUND_RADIUS: f64 = 8.0;
+use davinci_types::{DIAGRAM_THEME, EDGE_LABEL_BG_OPACITY};
+
+/// Light-palette tokens; dark hosts get the inlined dark palette from the
+/// themed SVG serializer.
+const NODE_FILL: Color = DIAGRAM_THEME.light.node_fill;
+const NODE_STROKE: Color = DIAGRAM_THEME.light.node_stroke;
+const EDGE_COLOR: Color = DIAGRAM_THEME.light.edge_stroke;
+const CLUSTER_FILL: Color = DIAGRAM_THEME.light.cluster_fill;
+const CLUSTER_STROKE: Color = DIAGRAM_THEME.light.node_stroke;
+const NODE_TEXT: Color = DIAGRAM_THEME.light.node_text;
+const EDGE_LABEL_TEXT: Color = DIAGRAM_THEME.light.edge_label_text;
+const LIFELINE_COLOR: Color = DIAGRAM_THEME.light.edge_stroke;
+const ROUND_RADIUS: f64 = 5.0;
 const CLUSTER_RADIUS: f64 = 10.0;
 const LINE_HEIGHT: f64 = 1.4;
 const BASELINE_SHIFT: f64 = 0.35;
-const ARROW_SIZE: f64 = 10.0;
+const ARROW_SIZE: f64 = 8.0;
 const CLUSTER_LABEL_X: f64 = 10.0;
 const CLUSTER_LABEL_Y: f64 = 14.0;
 const CLUSTER_FONT_SIZE: f64 = 12.0;
-const LIFELINE_COLOR: Color = Color::rgb(0x9a, 0xa6, 0xb8);
 const GRAPH_EDGE_PREFIX: &str = "edge";
 const SEQUENCE_MESSAGE_PREFIX: &str = "sequence-message";
 
@@ -218,22 +224,13 @@ fn push_edge_label(scene: &mut SemanticScene, id_prefix: &str, index: usize, edg
 }
 
 fn label_backdrop_style() -> ShapeStyle {
-    ShapeStyle { fill: Some(Color::rgb(0xff, 0xff, 0xff)), stroke: None, stroke_width: 0.0, opacity: 0.85 }
+    ShapeStyle { fill: Some(DIAGRAM_THEME.light.edge_label_bg), stroke: None, stroke_width: 0.0, opacity: EDGE_LABEL_BG_OPACITY }
 }
 
 #[derive(Clone, Copy)]
 enum LabelKind {
     Node,
     Edge,
-}
-
-impl LabelKind {
-    fn paint(self) -> (Color, SemanticRole) {
-        match self {
-            Self::Node => (Color::BLACK, SemanticRole::Label),
-            Self::Edge => (EDGE_COLOR, SemanticRole::EdgeLabel),
-        }
-    }
 }
 
 fn push_centered_text(
@@ -245,7 +242,10 @@ fn push_centered_text(
     kind: LabelKind,
     source: SourceRef,
 ) {
-    let (fill, role) = kind.paint();
+    let (fill, role) = match kind {
+        LabelKind::Node => (NODE_TEXT, SemanticRole::Label),
+        LabelKind::Edge => (EDGE_LABEL_TEXT, SemanticRole::EdgeLabel),
+    };
     let lines: Vec<&str> = text.split('\n').collect();
     for (index, line) in lines.iter().enumerate() {
         let offset = (index as f64 - (lines.len() - 1) as f64 * 0.5) * font_size * LINE_HEIGHT;
@@ -308,7 +308,7 @@ fn rhombus_path(rect: Rect) -> PathData {
 }
 
 fn node_style() -> ShapeStyle {
-    ShapeStyle { fill: Some(NODE_FILL), stroke: Some(NODE_STROKE), stroke_width: 1.5, opacity: 1.0 }
+    ShapeStyle { fill: Some(NODE_FILL), stroke: Some(NODE_STROKE), stroke_width: 1.0, opacity: 1.0 }
 }
 
 fn cluster_style() -> ShapeStyle {
@@ -318,7 +318,7 @@ fn cluster_style() -> ShapeStyle {
 fn edge_style(style: EdgeStyle) -> ShapeStyle {
     let width = match style {
         EdgeStyle::ThickArrow => 2.5,
-        _ => 1.5,
+        _ => 1.0,
     };
     ShapeStyle::stroked(EDGE_COLOR, width)
 }
@@ -327,7 +327,7 @@ fn label_text_style(font_size: f64, fill: Color) -> TextStyle {
     TextStyle {
         fill: Some(fill),
         opacity: 1.0,
-        font_family: Some("sans-serif".to_string()),
+        font_family: Some("Trebuchet MS, Verdana, sans-serif".to_string()),
         font_size,
         font_weight: None,
         text_anchor: TextAnchor::Middle,

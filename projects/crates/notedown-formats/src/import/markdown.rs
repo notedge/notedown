@@ -627,7 +627,7 @@ fn is_markdown_marker(text: &str) -> bool {
 /// Unknown or absent language tags stay `Block::Code` instead of being guessed
 /// as diagrams, and every listed language must have a lowering frontend.
 fn is_diagram_language(language: &str) -> bool {
-    language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot")
+    language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") || language.eq_ignore_ascii_case("plantuml")
 }
 
 /// Fenced code keeps the raw source slice between the two fences.

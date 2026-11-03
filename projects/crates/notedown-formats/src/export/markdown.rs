@@ -424,7 +424,7 @@ fn write_fenced(out: &mut String, language: Option<&str>, content: &str) {
 /// same fence back to `Block::Diagram`. Any other language would silently
 /// reopen as a plain code block, so it is reported instead.
 fn ensure_reopenable_language(language: &str) -> Result<(), FormatError> {
-    if language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") {
+    if language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") || language.eq_ignore_ascii_case("plantuml") {
         Ok(())
     }
     else {

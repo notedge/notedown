@@ -647,10 +647,10 @@ fn markdown_diagram_round_trips_through_a_mermaid_fence() {
 #[test]
 fn markdown_diagram_export_rejects_languages_without_a_reopen_rule() {
     let mut graph = DocumentGraph::new(DocumentId(3));
-    graph.push_block(Block::Diagram { language: "plantuml".into(), source: "@startuml\nA -> B\n@enduml".into() });
+    graph.push_block(Block::Diagram { language: "custom-diagram".into(), source: "A -> B".into() });
 
-    let error = export_markdown(&graph).expect_err("a non-mermaid diagram cannot silently reopen as code");
-    assert!(error.to_string().contains("plantuml"), "{error}");
+    let error = export_markdown(&graph).expect_err("a diagram without a reopen rule cannot silently reopen as code");
+    assert!(error.to_string().contains("custom-diagram"), "{error}");
 }
 
 #[test]

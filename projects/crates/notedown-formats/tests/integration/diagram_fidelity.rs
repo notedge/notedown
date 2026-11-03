@@ -47,6 +47,32 @@ const DOT_SOURCES: &[(&str, &str)] = &[
     ),
 ];
 
+/// PlantUML rises through the same fence surfaces as Mermaid and DOT. The
+/// corpus keeps the fence boundaries plus one rejected directive, which must
+/// still reopen as authored text.
+const PLANTUML_SOURCES: &[(&str, &str)] = &[
+    ("empty", ""),
+    ("single-line", "@startuml"),
+    (
+        "ordinary",
+        "@startuml\nclass Order {\n  +String id\n  -void submit()\n}\nclass Item\nOrder o-- Item : contains\n@enduml",
+    ),
+    ("backticks", "@startuml\nparticipant \"`code`\" as P\n@enduml"),
+    ("tilde-run", "@startuml\n' ~~~\nclass A\n@enduml"),
+    ("nested-backtick-fence", "@startuml\n```\nclass A\n```\n@enduml"),
+    ("rejected-include", "@startuml\n!include other.puml\nclass A\n@enduml"),
+    ("escaped-characters", "@startuml\nclass \"a & b < c > d ?\" as Q\n@enduml"),
+    (
+        "long",
+        "@startuml\nclass N0\nclass N1\nclass N2\nN0 --> N1\nN1 --> N2\nN2 --> N3\nN3 --> N4\nN4 --> N5\nN5 --> N6\nN6 --> N7\nN7 --> N8\nN8 --> N9\nN9 --> N10\nN10 --> N11\nN11 --> N12\n@enduml",
+    ),
+];
+
+/// Every fence language shares one corpus shape so a new language cannot
+/// silently skip a round-trip surface.
+const DIAGRAM_CORPORA: &[(&str, &[(&str, &str)])] =
+    &[("mermaid", DIAGRAM_SOURCES), ("dot", DOT_SOURCES), ("plantuml", PLANTUML_SOURCES)];
+
 fn fenced(language: &str, source: &str) -> String {
     let run = source.split(|character| character == '\n').map(longest_backtick_run).max().unwrap_or(0);
     let fence = "`".repeat((run + 1).max(3));
@@ -89,7 +115,7 @@ fn diagram_block(graph: &DocumentGraph, expected_language: &str) -> String {
 
 #[test]
 fn markdown_diagram_sources_survive_markdown_and_html_round_trips() {
-    for (language, corpus) in [("mermaid", DIAGRAM_SOURCES), ("dot", DOT_SOURCES)] {
+    for (language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -109,7 +135,7 @@ fn markdown_diagram_sources_survive_markdown_and_html_round_trips() {
 
 #[test]
 fn rendered_diagram_figures_round_trip_the_authored_source() {
-    for (language, corpus) in [("mermaid", DIAGRAM_SOURCES), ("dot", DOT_SOURCES)] {
+    for (language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -136,7 +162,7 @@ fn rendered_diagram_figures_round_trip_the_authored_source() {
 
 #[test]
 fn docx_diagram_paragraphs_preserve_language_and_source() {
-    for (language, corpus) in [("mermaid", DIAGRAM_SOURCES), ("dot", DOT_SOURCES)] {
+    for (language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -149,7 +175,7 @@ fn docx_diagram_paragraphs_preserve_language_and_source() {
 
 #[test]
 fn pdf_diagram_export_keeps_every_source_line_intact() {
-    for (language, corpus) in [("mermaid", DIAGRAM_SOURCES), ("dot", DOT_SOURCES)] {
+    for (language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);

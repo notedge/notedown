@@ -57,9 +57,29 @@ pub struct PlacedCluster {
     pub rect: Rect,
 }
 
+/// The layout rule that produced a plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanLayout {
+    /// Layered graph layout.
+    Layered,
+    /// Time-ordered sequence layout.
+    TimeOrdered,
+}
+
+/// An activation bar on a sequence participant lifeline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedActivation {
+    /// The participant whose lifeline is active.
+    pub participant: String,
+    /// The bar rectangle in scene coordinates.
+    pub rect: Rect,
+}
+
 /// A deterministic layout plan for one diagram.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiagramLayoutPlan {
+    /// The layout rule that produced this plan.
+    pub layout: PlanLayout,
     /// Canvas size that fits every node and cluster frame.
     pub canvas: Size,
     /// Nodes in spec declaration order.
@@ -68,6 +88,8 @@ pub struct DiagramLayoutPlan {
     pub edges: Vec<RoutedEdge>,
     /// Cluster frames in spec declaration order.
     pub clusters: Vec<PlacedCluster>,
+    /// Activation bars in declaration order, empty outside sequence layout.
+    pub activations: Vec<PlacedActivation>,
     /// Non-fatal loss, approximation, and conflict records.
     pub diagnostics: Vec<Diagnostic>,
 }

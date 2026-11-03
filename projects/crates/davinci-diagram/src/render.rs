@@ -10,7 +10,7 @@ use davinci_scene::{
 };
 
 use crate::{
-    plan::{DiagramLayoutPlan, PlacedCluster, PlacedNode, RoutedEdge},
+    plan::{DiagramLayoutPlan, PlacedCluster, PlacedNode, PlanLayout, RoutedEdge},
     spec::{EdgeStyle, NodeShape},
 };
 
@@ -61,12 +61,22 @@ pub fn render(plan: &DiagramLayoutPlan) -> SemanticScene {
 
 /// Render a layout plan with explicit text options.
 ///
-/// The output keeps one shape node per placed node carrying
-/// [`SemanticRole::Node`], a [`SourceRef`] for the spec node id, and a hit
-/// region equal to the node rectangle. Edges are groups with
-/// [`SemanticRole::Edge`], edge labels use [`SemanticRole::EdgeLabel`], and
-/// cluster frames use [`SemanticRole::Cluster`].
+/// The plan's [`PlanLayout`] chooses the renderer: layered plans paint
+/// clusters, edges, nodes, and labels, sequence plans paint lifelines and
+/// activations around the same participant and message surfaces. The output
+/// keeps one shape node per placed node carrying [`SemanticRole::Node`], a
+/// [`SourceRef`] for the spec node id, and a hit region equal to the node
+/// rectangle. Edges are groups with [`SemanticRole::Edge`], edge labels use
+/// [`SemanticRole::EdgeLabel`], and cluster frames use
+/// [`SemanticRole::Cluster`].
 pub fn render_with_options(plan: &DiagramLayoutPlan, options: &RenderOptions) -> SemanticScene {
+    match plan.layout {
+        PlanLayout::Layered => render_layered(plan, options),
+        PlanLayout::TimeOrdered => render_sequence_with_options(plan, options),
+    }
+}
+
+fn render_layered(plan: &DiagramLayoutPlan, options: &RenderOptions) -> SemanticScene {
     let mut scene = SemanticScene::new(plan.canvas);
 
     for cluster in &plan.clusters {
@@ -114,6 +124,17 @@ pub fn render_sequence_with_options(plan: &DiagramLayoutPlan, options: &RenderOp
             .with_id(format!("sequence-lifeline-{}", participant.id))
             .with_role(SemanticRole::Decoration)
             .with_source(SourceRef::element(participant.id.clone())),
+        );
+    }
+    for (index, activation) in plan.activations.iter().enumerate() {
+        scene.push(
+            SemanticNode::new(SemanticKind::Rect {
+                rect: activation.rect,
+                style: ShapeStyle { fill: Some(NODE_FILL), stroke: Some(NODE_STROKE), stroke_width: 1.0, ..ShapeStyle::default() },
+            })
+            .with_id(format!("sequence-activation-{index}"))
+            .with_role(SemanticRole::Decoration)
+            .with_source(SourceRef::element(activation.participant.clone())),
         );
     }
     for (index, message) in plan.edges.iter().enumerate() {
@@ -194,15 +215,7 @@ fn push_node(scene: &mut SemanticScene, node: &PlacedNode) {
 
 fn push_node_label(scene: &mut SemanticScene, node: &PlacedNode, options: &RenderOptions) {
     let source = SourceRef::element(node.id.clone());
-    push_centered_text(
-        scene,
-        &format!("node-{}-label", node.id),
-        &node.label,
-        node.rect.center(),
-        options.font_size,
-        LabelKind::Node,
-        source,
-    );
+    push_centered_text(scene, &format!("node-{}-label", node.id), &node.label, node.rect.center(), options.font_size, LabelKind::Node, source);
 }
 
 fn push_edge_label(scene: &mut SemanticScene, id_prefix: &str, index: usize, edge: &RoutedEdge, options: &RenderOptions) {

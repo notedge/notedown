@@ -157,11 +157,53 @@ pub enum Constraint {
     },
 }
 
+/// An activation span on a sequence participant axis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Activation {
+    /// The participant whose lifeline is active.
+    pub participant: String,
+    /// First message index included in the span.
+    pub from_message: usize,
+    /// Last message index included in the span, inclusive.
+    pub to_message: usize,
+}
+
+/// The time-ordered layout declaration of a sequence diagram.
+///
+/// A sequence diagram is not a ranked graph: participants share one horizontal
+/// axis and messages stack downwards in the order the source declares them.
+/// [`DiagramSpec::nodes`] carries the participants and [`DiagramSpec::edges`]
+/// the messages, so this declaration only fixes the ordering the layout must
+/// honour and the activation spans the renderer may draw.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SequenceLayout {
+    /// Participant ids from left to right. Empty means declaration order.
+    pub participants: Vec<String>,
+    /// Message indices into [`DiagramSpec::edges`] from top to bottom. Empty
+    /// means declaration order.
+    pub messages: Vec<usize>,
+    /// Activation spans in paint order.
+    pub activations: Vec<Activation>,
+}
+
+/// How a diagram is laid out.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LayoutModel {
+    /// Layered graph layout driven by [`DiagramSpec::direction`] and
+    /// [`DiagramSpec::constraints`].
+    Layered,
+    /// Sequence layout driven by participant axis, message order, and
+    /// activation spans.
+    TimeOrdered(SequenceLayout),
+}
+
 /// A complete, source-independent diagram description.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiagramSpec {
     /// Layer advance direction.
     pub direction: Direction,
+    /// The layout rule this diagram requires.
+    pub layout: LayoutModel,
     /// Nodes in declaration order.
     pub nodes: Vec<DiagramNode>,
     /// Edges in declaration order.
@@ -175,6 +217,6 @@ pub struct DiagramSpec {
 impl DiagramSpec {
     /// Create an empty diagram with the given direction.
     pub fn new(direction: Direction) -> Self {
-        Self { direction, nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), constraints: Vec::new() }
+        Self { direction, layout: LayoutModel::Layered, nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), constraints: Vec::new() }
     }
 }

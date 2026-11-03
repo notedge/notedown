@@ -20,10 +20,10 @@ use oak_uml::model::{Class, RelationKind};
 
 use crate::{
     LoweredDiagram,
-    compile::{LayoutOptions, compile, compile_sequence},
+    compile::{LayoutOptions, compile},
     error::DiagramError,
-    render::{render, render_sequence},
-    spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape},
+    render::render,
+    spec::{Cluster, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, SequenceLayout},
 };
 
 struct NodeSeed {
@@ -166,47 +166,40 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 
 /// Lower Mermaid source into a source-independent diagram spec.
 ///
-/// Only a single `graph`/`flowchart` diagram is accepted. Node ids keep the
-/// first seen label, an edge endpoint that has no node definition becomes an
-/// implicit `Box` node, and each `subgraph` block becomes a flat [`Cluster`].
-/// Nested subgraphs are flattened: a node joins every ancestor cluster of the
-/// block that declares it, so an outer frame still contains nested members.
+/// Only a single diagram is accepted. Node ids keep the first seen label, an
+/// edge endpoint that has no node definition becomes an implicit `Box` node,
+/// and each `subgraph` block becomes a flat [`Cluster`]. Nested subgraphs are
+/// flattened: a node joins every ancestor cluster of the block that declares
+/// it, so an outer frame still contains nested members.
 ///
-/// Flowcharts and class diagrams both lower to a plain graph spec, so a
-/// frontend-independent consumer can rebuild their scene with the ordinary
-/// compile pass. Sequence diagrams carry a time-ordered layout rule that the
-/// spec does not declare yet, so they still lower through [`mermaid_to_scene`].
+/// Flowcharts and class diagrams lower to a layered graph spec. Sequence
+/// diagrams lower to a [`LayoutModel::TimeOrdered`] spec whose participant
+/// axis, message order, and activation spans are declared explicitly, so every
+/// frontend family rebuilds its scene with the ordinary `compile` pass.
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
     match single_diagram(&root)? {
         MermaidDiagram::Flowchart(flowchart) => flowchart_spec(flowchart),
         MermaidDiagram::Class(class) => class_spec(class, source),
-        MermaidDiagram::Sequence(_) => Err(DiagramError::unsupported(
-            "sequence diagrams need a time-ordered layout the spec does not declare, so they lower through `mermaid_to_scene`",
-        )),
+        MermaidDiagram::Sequence(sequence) => sequence_spec(sequence),
     }
 }
 
 /// Lower Mermaid source to a layout plan and resolved display scene.
 ///
-/// The pipeline is `spec -> compile -> render -> resolve`. Flowcharts and class
-/// diagrams use layered graph layout, sequence diagrams use time-ordered
-/// layout. Diagnostics come from the layout plan; rendering and resolution have
-/// no loss surface because every plan construct has a deterministic scene
-/// mapping. Unsupported sequence statements fail before compilation so the host
-/// keeps the authored source visible instead of dropping the diagram silently.
+/// The pipeline is `spec -> compile -> render -> resolve` for every family.
+/// [`DiagramSpec::layout`] selects layered or time-ordered compilation.
+/// Diagnostics come from the layout plan; rendering and resolution have no loss
+/// surface because every plan construct has a deterministic scene mapping.
+/// Unsupported sequence statements fail before compilation so the host keeps
+/// the authored source visible instead of dropping the diagram silently.
 pub fn mermaid_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let root = parse_mermaid(source)?;
     match single_diagram(&root)? {
         MermaidDiagram::Flowchart(flowchart) => lower_graph(flowchart_spec(flowchart)?),
         MermaidDiagram::Sequence(sequence) => {
             validate_sequence_source(source)?;
-            let spec = sequence_spec(sequence)?;
-            let plan = compile_sequence(&spec, &LayoutOptions::default());
-            let semantic = render_sequence(&plan);
-            let scene = semantic.resolve(&SceneResolver::default());
-            let diagnostics = plan.diagnostics.clone();
-            Ok(LoweredDiagram { plan, scene, diagnostics })
+            lower_graph(sequence_spec(sequence)?)
         }
         MermaidDiagram::Class(class) => lower_graph(class_spec(class, source)?),
     }
@@ -303,6 +296,11 @@ fn sequence_spec(sequence: &SequenceDiagram) -> Result<DiagramSpec, DiagramError
     if spec.nodes.is_empty() {
         return Err(DiagramError::empty_diagram("sequence diagram contains no participants"));
     }
+    spec.layout = LayoutModel::TimeOrdered(SequenceLayout {
+        participants: spec.nodes.iter().map(|node| node.id.clone()).collect(),
+        messages: (0..spec.edges.len()).collect(),
+        activations: Vec::new(),
+    });
     Ok(spec)
 }
 

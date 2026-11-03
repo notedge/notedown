@@ -1,6 +1,6 @@
 use davinci_diagram::{
     parse::{mermaid_to_scene, mermaid_to_spec, parse_mermaid},
-    spec::{Direction, EdgeStyle, NodeShape},
+    spec::{Direction, EdgeStyle, LayoutModel, NodeShape},
 };
 use davinci_scene::codes;
 
@@ -43,9 +43,14 @@ fn empty_source_is_unavailable_while_sequence_families_parse() {
     let root = parse_mermaid("sequenceDiagram\n  Alice->>Bob: Hello\n").expect("sequence AST should be available");
     assert_eq!(root.diagrams.len(), 1);
 
-    let spec = mermaid_to_spec("sequenceDiagram\n  Alice->>Bob: Hello\n").expect_err("the graph spec is flowchart-only");
-    assert_eq!(spec.code(), codes::UNSUPPORTED);
-    assert!(spec.message().contains("mermaid_to_scene"));
+    let spec = mermaid_to_spec("sequenceDiagram\n  Alice->>Bob: Hello\n").expect("a sequence lowers to a time-ordered spec");
+    let LayoutModel::TimeOrdered(sequence) = &spec.layout
+    else {
+        panic!("a sequence spec must declare time-ordered layout: {:?}", spec.layout)
+    };
+    assert_eq!(sequence.participants, ["Alice", "Bob"]);
+    assert_eq!(sequence.messages, [0]);
+    assert!(sequence.activations.is_empty());
 }
 
 const SEQUENCE_SOURCE: &str = "sequenceDiagram\n    participant Client as Browser\n    actor Server\n    participant DB\n    Client->>Server: request\n    Server->>DB: query\n    DB->>Server: rows\n    Server->>Client: response\n    Client->Server: ping\n";

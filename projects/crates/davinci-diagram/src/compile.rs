@@ -6,8 +6,8 @@ use davinci_scene::{Point, Rect, Size};
 use davinci_types::{Diagnostic, DiagnosticSeverity, codes, diagnostic, measure_line, wrap_label};
 
 use crate::{
-    plan::{DiagramLayoutPlan, PlacedCluster, PlacedNode, RoutedEdge},
-    spec::{Constraint, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape, Port, Side},
+    plan::{DiagramLayoutPlan, PlacedActivation, PlacedCluster, PlacedNode, PlanLayout, RoutedEdge},
+    spec::{Constraint, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, Port, SequenceLayout, Side},
 };
 
 /// Tuning for deterministic layered compilation.
@@ -46,6 +46,9 @@ impl Default for LayoutOptions {
     }
 }
 
+/// Width of an activation bar drawn on a sequence lifeline.
+const ACTIVATION_WIDTH: f64 = 8.0;
+
 struct ResolvedNode {
     id: String,
     label: Option<String>,
@@ -72,8 +75,11 @@ struct ResolvedEdge {
 /// Compile a diagram spec into a deterministic layout plan.
 ///
 /// The pass is pure and deterministic: it never uses randomness or hash-map
-/// iteration order, and it keeps nodes in spec declaration order. Loss,
-/// approximation, and conflict records are reported through
+/// iteration order, and it keeps nodes in spec declaration order.
+///
+/// The layout rule comes from [`DiagramSpec::layout`]: layered graphs use
+/// [`compile_layered`], sequence diagrams use [`compile_sequence`]. Every
+/// loss, approximation, and conflict record is reported through
 /// [`DiagramLayoutPlan::diagnostics`].
 ///
 /// Documented degradation rules:
@@ -87,6 +93,14 @@ struct ResolvedEdge {
 /// - Unknown cluster references, cluster members that do not exist, and
 ///   clusters without members are reported; unusable members are ignored.
 pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    match &spec.layout {
+        LayoutModel::Layered => compile_layered(spec, options),
+        LayoutModel::TimeOrdered(sequence) => compile_time_ordered(spec, sequence, options),
+    }
+}
+
+/// Compile a layered graph spec.
+pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
     let mut diagnostics = Vec::new();
     let nodes = resolve_nodes(spec, &mut diagnostics);
     let index_by_id: BTreeMap<String, usize> = nodes.iter().enumerate().map(|(index, node)| (node.id.clone(), index)).collect();
@@ -104,7 +118,15 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
     let edges = resolve_edges(spec, &index_by_id, &mut diagnostics);
 
     if nodes.is_empty() {
-        return DiagramLayoutPlan { canvas: Size::ZERO, nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), diagnostics };
+        return DiagramLayoutPlan {
+            layout: PlanLayout::Layered,
+            canvas: Size::ZERO,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            clusters: Vec::new(),
+            activations: Vec::new(),
+            diagnostics,
+        };
     }
 
     let layers = assign_layers(&nodes, &edges, &spec.constraints, &index_by_id, &mut diagnostics);
@@ -161,19 +183,18 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
     let mut routed: Vec<RoutedEdge> = Vec::with_capacity(edges.len());
     for (edge, &(from, to)) in edges.iter().zip(anchors.iter()) {
         let obstacles = inflated_node_obstacles(&rects, edge.from_index, edge.to_index);
-        let points = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes)
-            .unwrap_or_else(|| {
-                diagnostics.push(warning(
-                    codes::APPROXIMATED,
-                    format!("edge `{}->{}` found no channel that clears every node and keeps the direct route", edge.from.node, edge.to.node),
-                ));
-                route(from, to, spec.direction)
-            });
-        let label = edge
-            .label
-            .as_deref()
-            .and_then(|label| prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics));
-        let label_box = label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
+        let points = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes).unwrap_or_else(|| {
+            diagnostics.push(warning(
+                codes::APPROXIMATED,
+                format!("edge `{}->{}` found no channel that clears every node and keeps the direct route", edge.from.node, edge.to.node),
+            ));
+            route(from, to, spec.direction)
+        });
+        let label = edge.label.as_deref().and_then(|label| {
+            prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics)
+        });
+        let label_box =
+            label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
@@ -203,15 +224,20 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         let mut obstacles = inflated_node_obstacles(&rects, edges[index].from_index, edges[index].to_index);
         obstacles.extend(foreign_labels.iter().copied());
         if let Some(points) = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes) {
-            let label_box =
-                routed[index].label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
+            let label_box = routed[index]
+                .label
+                .as_ref()
+                .map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
             routed[index].points = points;
             routed[index].label_box = label_box;
         }
         else {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
-                format!("edge `{}->{}` crosses a foreign edge label and found no clearing channel", routed[index].from.node, routed[index].to.node),
+                format!(
+                    "edge `{}->{}` crosses a foreign edge label and found no clearing channel",
+                    routed[index].from.node, routed[index].to.node
+                ),
             ));
         }
     }
@@ -247,7 +273,15 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
         })
         .collect();
 
-    DiagramLayoutPlan { canvas, nodes: placed_nodes, edges: routed, clusters: placed_clusters, diagnostics }
+    DiagramLayoutPlan {
+        layout: PlanLayout::Layered,
+        canvas,
+        nodes: placed_nodes,
+        edges: routed,
+        clusters: placed_clusters,
+        activations: Vec::new(),
+        diagnostics,
+    }
 }
 
 /// Compile a sequence diagram into a deterministic time-ordered layout plan.
@@ -273,6 +307,18 @@ pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan
 /// - Cluster and ordering-constraint declarations are ignored with a diagnostic
 ///   because sequence rows come from source position.
 pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    let sequence = match &spec.layout {
+        LayoutModel::TimeOrdered(sequence) => sequence.clone(),
+        LayoutModel::Layered => SequenceLayout {
+            participants: spec.nodes.iter().map(|node| node.id.clone()).collect(),
+            messages: (0..spec.edges.len()).collect(),
+            activations: Vec::new(),
+        },
+    };
+    compile_time_ordered(spec, &sequence, options)
+}
+
+fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: &LayoutOptions) -> DiagramLayoutPlan {
     let mut diagnostics = Vec::new();
     if !spec.clusters.is_empty() {
         diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence layout ignores {} cluster declarations", spec.clusters.len())));
@@ -281,9 +327,10 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
         diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence layout ignores {} ordering constraints", spec.constraints.len())));
     }
 
-    let mut participants: Vec<ResolvedNode> = Vec::with_capacity(spec.nodes.len());
+    let axis = declared_axis(spec, sequence, &mut diagnostics);
+    let mut participants: Vec<ResolvedNode> = Vec::with_capacity(axis.len());
     let mut indices: BTreeMap<String, usize> = BTreeMap::new();
-    for node in &spec.nodes {
+    for node in axis {
         if node.id.is_empty() {
             diagnostics.push(warning(codes::UNSUPPORTED, "sequence participant with an empty id is ignored"));
             continue;
@@ -297,7 +344,15 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
     }
 
     if participants.is_empty() {
-        return DiagramLayoutPlan { canvas: Size::ZERO, nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), diagnostics };
+        return DiagramLayoutPlan {
+            layout: PlanLayout::TimeOrdered,
+            canvas: Size::ZERO,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            clusters: Vec::new(),
+            activations: Vec::new(),
+            diagnostics,
+        };
     }
 
     let sizes: Vec<Size> = participants.iter().map(|participant| node_size(participant, options)).collect();
@@ -313,8 +368,11 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
     let row_height = options.font_size * 1.4 + options.padding_y * 2.0;
     let first_row = header_bottom + options.layer_gap;
 
+    let message_indices = declared_messages(spec, sequence, &mut diagnostics);
     let mut messages: Vec<RoutedEdge> = Vec::with_capacity(spec.edges.len());
-    for edge in &spec.edges {
+    let mut row_centers: Vec<f64> = Vec::with_capacity(spec.edges.len());
+    for edge_index in message_indices {
+        let edge = &spec.edges[edge_index];
         let (Some(&from_index), Some(&to_index)) = (indices.get(&edge.from.node), indices.get(&edge.to.node))
         else {
             let missing = if indices.contains_key(&edge.from.node) { edge.to.node.as_str() } else { edge.from.node.as_str() };
@@ -332,15 +390,15 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
             continue;
         }
         let line_y = first_row + row_height * (messages.len() as f64 + 0.5);
+        row_centers.push(line_y);
         let from = Point::new(rects[from_index].center().x, line_y);
         let to = Point::new(rects[to_index].center().x, line_y);
-        let label = edge
-            .label
-            .as_deref()
-            .and_then(|label| prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics));
-        let label_box = label
-            .as_ref()
-            .map(|label| estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), edge_label_font_size(options.font_size)));
+        let label = edge.label.as_deref().and_then(|label| {
+            prepare_edge_label(label, &edge.from.node, &edge.to.node, edge_label_font_size(options.font_size), &mut diagnostics)
+        });
+        let label_box = label.as_ref().map(|label| {
+            estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), edge_label_font_size(options.font_size))
+        });
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
             diagnostics.push(warning(
                 codes::APPROXIMATED,
@@ -351,6 +409,35 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
             ));
         }
         messages.push(RoutedEdge { from: edge.from.clone(), to: edge.to.clone(), points: vec![from, to], label, label_box, style: edge.style });
+    }
+
+    let mut activations = Vec::new();
+    for activation in &sequence.activations {
+        let Some(&participant_index) = indices.get(&activation.participant)
+        else {
+            diagnostics.push(warning(codes::UNSUPPORTED, format!("activation on unknown participant `{}` is ignored", activation.participant)));
+            continue;
+        };
+        if activation.from_message > activation.to_message || activation.to_message >= row_centers.len() {
+            diagnostics.push(warning(
+                codes::UNSUPPORTED,
+                format!(
+                    "activation on `{}` spans messages {}..={} outside the {} routed rows and is ignored",
+                    activation.participant,
+                    activation.from_message,
+                    activation.to_message,
+                    row_centers.len()
+                ),
+            ));
+            continue;
+        }
+        let center = rects[participant_index].center().x;
+        let top = row_centers[activation.from_message] - row_height * 0.5;
+        let bottom = row_centers[activation.to_message] + row_height * 0.5;
+        activations.push(PlacedActivation {
+            participant: activation.participant.clone(),
+            rect: Rect::new(center - ACTIVATION_WIDTH * 0.5, top, ACTIVATION_WIDTH, bottom - top),
+        });
     }
 
     let content_bottom = first_row + row_height * messages.len() as f64;
@@ -368,7 +455,59 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
         })
         .collect();
 
-    DiagramLayoutPlan { canvas, nodes: placed_nodes, edges: messages, clusters: Vec::new(), diagnostics }
+    DiagramLayoutPlan {
+        layout: PlanLayout::TimeOrdered,
+        canvas,
+        nodes: placed_nodes,
+        edges: messages,
+        clusters: Vec::new(),
+        activations,
+        diagnostics,
+    }
+}
+
+/// Participant ids in the declared axis order.
+///
+/// A declaration that names an unknown id reports it and otherwise keeps every
+/// node: a missing participant means the declaration is stale, and dropping a
+/// whole lifeline would hide it.
+fn declared_axis<'a>(spec: &'a DiagramSpec, sequence: &SequenceLayout, diagnostics: &mut Vec<Diagnostic>) -> Vec<&'a DiagramNode> {
+    if sequence.participants.is_empty() {
+        return spec.nodes.iter().collect();
+    }
+    let mut ordered: Vec<&DiagramNode> = Vec::with_capacity(spec.nodes.len());
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for id in &sequence.participants {
+        match spec.nodes.iter().find(|node| &node.id == id) {
+            Some(node) if seen.insert(node.id.as_str()) => ordered.push(node),
+            Some(_) => {}
+            None => diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence axis names unknown participant `{id}` and is ignored"))),
+        }
+    }
+    ordered.extend(spec.nodes.iter().filter(|node| !seen.contains(node.id.as_str())));
+    ordered
+}
+
+/// Message indices in the declared top-to-bottom order.
+fn declared_messages(spec: &DiagramSpec, sequence: &SequenceLayout, diagnostics: &mut Vec<Diagnostic>) -> Vec<usize> {
+    if sequence.messages.is_empty() {
+        return (0..spec.edges.len()).collect();
+    }
+    let mut ordered: Vec<usize> = Vec::with_capacity(spec.edges.len());
+    let mut seen: BTreeSet<usize> = BTreeSet::new();
+    for &index in &sequence.messages {
+        if index >= spec.edges.len() {
+            diagnostics.push(warning(
+                codes::UNSUPPORTED,
+                format!("sequence message index {index} is outside the {} declared edges and is ignored", spec.edges.len()),
+            ));
+        }
+        else if seen.insert(index) {
+            ordered.push(index);
+        }
+    }
+    ordered.extend((0..spec.edges.len()).filter(|index| !seen.contains(index)));
+    ordered
 }
 
 fn resolve_nodes(spec: &DiagramSpec, diagnostics: &mut Vec<Diagnostic>) -> Vec<ResolvedNode> {
@@ -1007,9 +1146,8 @@ fn route_avoiding(from: Point, to: Point, direction: Direction, obstacles: &[Rec
         // Parallel detours with overlapping spans keep the channel spacing.
         let mut lane = candidate;
         loop {
-            let conflict = lanes
-                .iter()
-                .any(|used| used.high > span_low && used.low < span_high && (used.coordinate - lane).abs() < ROUTE_CHANNEL_SPACING);
+            let conflict =
+                lanes.iter().any(|used| used.high > span_low && used.low < span_high && (used.coordinate - lane).abs() < ROUTE_CHANNEL_SPACING);
             if !conflict {
                 break;
             }
@@ -1068,7 +1206,6 @@ fn merge_converging_tracks(routed: &mut [RoutedEdge], direction: Direction) {
         }
     }
 }
-
 
 fn dedupe_points(points: Vec<Point>) -> Vec<Point> {
     let mut deduped = Vec::with_capacity(points.len());

@@ -172,14 +172,17 @@ pub fn parse_mermaid(source: &str) -> Result<MermaidRoot, DiagramError> {
 /// Nested subgraphs are flattened: a node joins every ancestor cluster of the
 /// block that declares it, so an outer frame still contains nested members.
 ///
-/// Sequence and class diagrams lower through [`mermaid_to_scene`], which
-/// selects their family-specific compile pass.
+/// Flowcharts and class diagrams both lower to a plain graph spec, so a
+/// frontend-independent consumer can rebuild their scene with the ordinary
+/// compile pass. Sequence diagrams carry a time-ordered layout rule that the
+/// spec does not declare yet, so they still lower through [`mermaid_to_scene`].
 pub fn mermaid_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_mermaid(source)?;
     match single_diagram(&root)? {
         MermaidDiagram::Flowchart(flowchart) => flowchart_spec(flowchart),
-        MermaidDiagram::Sequence(_) | MermaidDiagram::Class(_) => Err(DiagramError::unsupported(
-            "`mermaid_to_spec` returns the flowchart graph spec, sequence and class diagrams lower through `mermaid_to_scene`",
+        MermaidDiagram::Class(class) => class_spec(class, source),
+        MermaidDiagram::Sequence(_) => Err(DiagramError::unsupported(
+            "sequence diagrams need a time-ordered layout the spec does not declare, so they lower through `mermaid_to_scene`",
         )),
     }
 }

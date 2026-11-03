@@ -1,6 +1,9 @@
 //! Stable chart diagnostics and fatal compilation failures.
 
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::{
+    fmt::{Display, Formatter, Result as FmtResult},
+    ops::Range,
+};
 
 use davinci_types::{Diagnostic, DiagnosticSeverity, diagnostic};
 
@@ -67,11 +70,16 @@ pub(crate) fn chart_warning(code: &str, message: impl Into<String>) -> Diagnosti
 ///
 /// The small code-and-message surface mirrors [`davinci_scene::SceneError`] and
 /// [`davinci_diagram::DiagramError`]. The structured record is available
-/// through [`ChartError::diagnostic`].
+/// through [`ChartError::diagnostic`]. Frontends attach the offending
+/// specification path with [`ChartError::with_path`] and the offending byte
+/// range with [`ChartError::with_span`], so a rejection names both the
+/// construct and the exact source text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChartError {
     code: String,
     message: String,
+    path: Option<String>,
+    span: Option<Range<usize>>,
     diagnostic: Box<Diagnostic>,
 }
 
@@ -80,7 +88,37 @@ impl ChartError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
         let message = message.into();
         let diagnostic = chart_error(code, message.clone());
-        Self { code: code.to_string(), message, diagnostic: Box::new(diagnostic) }
+        Self { code: code.to_string(), message, path: None, span: None, diagnostic: Box::new(diagnostic) }
+    }
+
+    /// Attach the specification path that triggered the failure.
+    ///
+    /// Paths use the frontend's own notation, for example `$.encoding.y.bin`
+    /// for Vega-Lite. Cases with no path keep `None` instead of inventing one.
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    /// Attach the offending byte range inside the lowered source.
+    ///
+    /// The range is half-open and relative to the authored block text, so
+    /// hosts add their block offset before reporting a document span.
+    pub fn with_span(mut self, span: Range<usize>) -> Self {
+        if span.start < span.end {
+            self.span = Some(span);
+        }
+        self
+    }
+
+    /// The offending byte range, when the frontend could identify one.
+    pub fn span(&self) -> Option<Range<usize>> {
+        self.span.clone()
+    }
+
+    /// The specification path, when the frontend reports one.
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
     }
 
     /// The stable `davinci.chart.*` diagnostic code.
@@ -102,6 +140,8 @@ impl ChartError {
         Self {
             code: record.code().as_str().to_string(),
             message: record.message().fallback().unwrap_or_default().to_string(),
+            path: None,
+            span: None,
             diagnostic: Box::new(record.clone()),
         }
     }

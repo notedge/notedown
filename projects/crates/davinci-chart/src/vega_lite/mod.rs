@@ -13,6 +13,8 @@
 //! of `transform`, and no second chart kernel: the result is a [`ChartSpec`]
 //! plus a [`DataSnapshot`] for [`crate::compile`].
 
+mod span;
+
 use davinci_scene::{Color, SemanticScene};
 use davinci_types::{Diagnostic, DiagnosticSeverity};
 use serde_json::{Map, Value as Json};
@@ -81,8 +83,30 @@ const UNSUPPORTED_TOP_KEYS: &[(&str, &str)] = &[
 ];
 
 /// Parse, validate, and lower one Vega-Lite document.
+///
+/// Every failure carries the offending JSON path and, whenever the path exists
+/// in the authored source, its byte range in [`ChartError::span`]. Kernel-level
+/// failures without a frontend path fall back to the whole document range.
 pub fn lower(source: &str) -> Result<VegaChart, ChartError> {
-    let document: Json = serde_json::from_str(source).map_err(|error| ChartError::new(codes::INVALID_JSON, format!("at `$`: {error}")))?;
+    let spans = span::JsonSpans::scan(source);
+    lower_document(source).map_err(|error| attach_source_span(error, &spans))
+}
+
+fn attach_source_span(mut error: ChartError, spans: &span::JsonSpans) -> ChartError {
+    if error.span().is_none() {
+        let span = error.path().and_then(|path| spans.span(path)).unwrap_or_else(|| spans.document());
+        error = error.with_span(span);
+    }
+    error
+}
+
+fn lower_document(source: &str) -> Result<VegaChart, ChartError> {
+    let document: Json = serde_json::from_str(source).map_err(|error| {
+        let message = format!("at `$`: {error}");
+        let offset = offset_of_line_column(source, error.line(), error.column());
+        let span = if source.is_empty() { 0..0 } else { offset..(offset + 1).min(source.len()) };
+        ChartError::new(codes::INVALID_JSON, message).with_path("$").with_span(span)
+    })?;
     let Some(top) = document.as_object()
     else {
         return Err(fail(codes::INVALID_SPEC, "$", "the chart spec must be a JSON object"));
@@ -589,5 +613,19 @@ fn json_kind(value: &Json) -> &'static str {
 }
 
 fn fail(code: &str, path: &str, message: impl Into<String>) -> ChartError {
-    ChartError::new(code, format!("at `{path}`: {}", message.into()))
+    ChartError::new(code, format!("at `{path}`: {}", message.into())).with_path(path)
+}
+
+/// Translate a 1-based `serde_json` line/column pair into a byte offset.
+fn offset_of_line_column(source: &str, line: usize, column: usize) -> usize {
+    let mut offset = 0usize;
+    let mut current = 1usize;
+    for text in source.split_inclusive('\n') {
+        if current == line {
+            return (offset + column.saturating_sub(1)).min(source.len());
+        }
+        offset += text.len();
+        current += 1;
+    }
+    source.len()
 }

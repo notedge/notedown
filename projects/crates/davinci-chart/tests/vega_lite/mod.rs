@@ -3,6 +3,7 @@
 
 mod chrome_gate;
 mod matrix;
+mod spans;
 
 use davinci_chart::{Channel, Scale, codes, vega_lite};
 

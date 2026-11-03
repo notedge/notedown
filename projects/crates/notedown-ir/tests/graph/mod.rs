@@ -107,6 +107,28 @@ fn diagram_source_survives_wire_roundtrip() {
 }
 
 #[test]
+fn source_spans_travel_with_blocks_and_loss_markers() {
+    let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
+    let span = notedown_ir::SourceSpan::new(12, 40).expect("valid span");
+    let id = graph.push_block_at(Block::Diagram { language: "plantuml".into(), source: "class A".into() }, Some(span));
+    graph.push_loss_at(
+        LossMarker { code: "davinci.plantuml.unsupported".to_string(), message: "unsupported statement".to_string(), status: SemanticStatus::Unsupported },
+        Some(span),
+    );
+    graph.push_loss(LossMarker { code: "other.loss".to_string(), message: "no span".to_string(), status: SemanticStatus::Lossy });
+
+    assert_eq!(graph.block_span(id), Some(span));
+    assert_eq!(graph.loss_span(0), Some(span));
+    assert_eq!(graph.loss_span(1), None);
+
+    let json = serde_json::to_string(&graph).expect("serialize");
+    let restored: DocumentGraph = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(restored.block_span(id), Some(span));
+    assert_eq!(restored.loss_span(0), Some(span));
+    assert_eq!(restored.loss_span(1), None);
+}
+
+#[test]
 fn unordered_list_skips_number_on_wire() {
     use notedown_ir::ListItem;
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());

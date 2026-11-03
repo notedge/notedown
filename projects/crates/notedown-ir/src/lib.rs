@@ -30,7 +30,7 @@ pub use math::{
     MathFractionLine,
 };
 pub use relation::{Relation, RelationEndpoint, RelationKind};
-pub use source::{CoverageReport, SourceKind, SourceRef};
+pub use source::{CoverageReport, SourceKind, SourceRef, SourceSpan};
 pub use status::{LossMarker, SemanticStatus};
 pub use transform_errors::{Diagnostic, RewriteResult, TransformError, Traversal};
 pub use validate::{ValidationIssue, ValidationReport};

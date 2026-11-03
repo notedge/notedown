@@ -5,7 +5,7 @@ use crate::{
     block::{Block, BlockNode},
     id::{AssetId, DocumentId, LinkId, NodeId},
     relation::{Relation, RelationEndpoint, RelationKind},
-    source::{CoverageReport, SourceRef},
+    source::{CoverageReport, SourceRef, SourceSpan},
     status::LossMarker,
     transform_errors::TransformError,
 };
@@ -43,6 +43,12 @@ pub struct DocumentGraph {
     pub sources: Vec<SourceRef>,
     /// Import/export completeness summary.
     pub coverage: CoverageReport,
+    /// Source spans aligned with `blocks`, when an importer knew them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    block_spans: Vec<Option<SourceSpan>>,
+    /// Source spans aligned with `coverage.loss`, when an importer knew them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    loss_spans: Vec<Option<SourceSpan>>,
     /// Internal allocator for auto-assigned node ids.
     #[serde(default)]
     next_node: u64,
@@ -60,6 +66,8 @@ impl DocumentGraph {
             assets: Vec::new(),
             sources: Vec::new(),
             coverage: CoverageReport { complete: true, loss: Vec::new() },
+            block_spans: Vec::new(),
+            loss_spans: Vec::new(),
             next_node: 0,
         }
     }
@@ -77,25 +85,54 @@ impl DocumentGraph {
 
     /// Append a block and return its semantic node id.
     pub fn push_block(&mut self, block: Block) -> NodeId {
+        self.push_block_at(block, None)
+    }
+
+    /// Append a block together with its authored source span.
+    pub fn push_block_at(&mut self, block: Block, span: Option<SourceSpan>) -> NodeId {
         self.next_node += 1;
         let id = NodeId(self.next_node);
         self.blocks.push(BlockNode { id, block });
+        self.block_spans.push(span);
         id
+    }
+
+    /// The authored source span of one block, when the importer recorded it.
+    pub fn block_span(&self, id: NodeId) -> Option<SourceSpan> {
+        self.blocks.iter().position(|node| node.id == id).and_then(|index| self.block_spans.get(index).copied().flatten())
     }
 
     /// Append a block with an explicit id (import adapters with stable foreign
     /// ids).
     pub fn push_block_with_id(&mut self, id: NodeId, block: Block) {
+        self.push_block_with_id_at(id, block, None)
+    }
+
+    /// Append a block with an explicit id and authored source span.
+    pub fn push_block_with_id_at(&mut self, id: NodeId, block: Block, span: Option<SourceSpan>) {
         if id.0 > self.next_node {
             self.next_node = id.0;
         }
         self.blocks.push(BlockNode { id, block });
+        self.block_spans.push(span);
     }
 
     /// Record import/export loss without mutating content.
     pub fn push_loss(&mut self, marker: LossMarker) {
+        self.push_loss_at(marker, None)
+    }
+
+    /// Record import/export loss together with its authored source span.
+    pub fn push_loss_at(&mut self, marker: LossMarker, span: Option<SourceSpan>) {
         self.coverage.complete = false;
         self.coverage.loss.push(marker);
+        self.loss_spans.push(span);
+    }
+
+    /// The authored source span of one loss marker, by its index in
+    /// [`DocumentGraph::coverage`] loss order.
+    pub fn loss_span(&self, index: usize) -> Option<SourceSpan> {
+        self.loss_spans.get(index).copied().flatten()
     }
 
     /// Append a relation edge.

@@ -5,6 +5,27 @@ use crate::{
     status::{LossMarker, SemanticStatus},
 };
 
+/// Half-open byte range in the original source text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SourceSpan {
+    /// Inclusive byte start offset.
+    pub start: u32,
+    /// Exclusive byte end offset.
+    pub end: u32,
+}
+
+impl SourceSpan {
+    /// Create a span when `start` precedes `end`.
+    pub fn new(start: usize, end: usize) -> Option<Self> {
+        (start < end).then_some(Self { start: start as u32, end: end as u32 })
+    }
+
+    /// The span length in bytes.
+    pub fn len(self) -> u32 {
+        self.end - self.start
+    }
+}
+
 /// Provenance for a semantic node (zero, one, or many sources per node).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SourceKind {

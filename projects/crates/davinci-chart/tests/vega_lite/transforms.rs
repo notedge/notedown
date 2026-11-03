@@ -4,7 +4,7 @@
 //! the assertions here read the trained band/point scale and the axis labels
 //! produced from the derived buckets rather than any document syntax.
 
-use davinci_chart::{Channel, ChannelTransform, TimeUnit, Transforms, codes, vega_lite};
+use davinci_chart::{Channel, ChannelTransform, Scale, TimeUnit, Transforms, codes, vega_lite};
 
 fn tick_labels(document: &str, channel: Channel) -> Vec<String> {
     let chart = vega_lite::lower(document).expect("the document is inside the chart subset");
@@ -19,6 +19,33 @@ fn tick_labels(document: &str, channel: Channel) -> Vec<String> {
 
 fn bar(values: &str, encoding: &str) -> String {
     format!(r#"{{"data":{{"values":[{values}]}},"mark":"bar","encoding":{encoding}}}"#)
+}
+
+fn assert_close(actual: f64, expected: f64, what: &str) {
+    assert!((actual - expected).abs() < 1e-9, "{what}: expected {expected}, got {actual}");
+}
+
+/// The bar rectangles of a plan, in mark order.
+fn bar_rects(chart: &davinci_chart::vega_lite::VegaChart) -> Vec<(f64, f64, f64, f64)> {
+    chart
+        .plan
+        .marks
+        .iter()
+        .map(|mark| match &mark.geometry {
+            davinci_chart::MarkGeometry::Rect(rect) => (rect.x, rect.y, rect.width, rect.height),
+            other => panic!("a bar must compile to a rectangle, got {other:?}"),
+        })
+        .collect()
+}
+
+fn axis_positions(chart: &davinci_chart::vega_lite::VegaChart, channel: Channel) -> Vec<(String, f64, f64)> {
+    chart
+        .plan
+        .axes
+        .iter()
+        .find(|axis| axis.channel == channel)
+        .map(|axis| axis.ticks.iter().map(|tick| (tick.label.clone(), tick.position.x, tick.position.y)).collect())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -48,8 +75,27 @@ fn a_value_below_the_declared_extent_is_refused_instead_of_clamped() {
     let error = vega_lite::lower(&document).expect_err("a clamped bucket would misreport the datum");
     assert_eq!(error.code(), codes::INVALID_SPEC);
     assert!(error.message().contains("below the declared `bin` extent"), "{}", error.message());
-    assert!(error.span().is_some(), "the refusal keeps a range");
+    // The refusal is raised while projecting data rows in the language-neutral
+    // kernel, which carries no JSON path, so the documented fallback is the
+    // whole document range rather than the offending `-1` cell.
+    let span = error.span().expect("every chart refusal carries a byte range");
+    assert_eq!(span, 0..document.len(), "the extent refusal falls back to the whole document");
+    assert_eq!(&document[span], document.as_str());
 }
+
+#[test]
+fn declared_extent_keeps_the_lower_bound_and_its_float_neighbour_together() {
+    let document = bar(
+        r#"{"v":0},{"v":9.999},{"v":10}"#,
+        r#"{"x":{"field":"v","type":"quantitative","bin":{"step":10,"extent":[0,30]}},"y":{"field":"v","type":"quantitative"}}"#,
+    );
+    let chart = vega_lite::lower(&document).expect("the values are inside the declared extent");
+    let band = chart.plan.scale(Channel::X).and_then(Scale::band).expect("a `bin` channel trains a band scale");
+    assert_eq!(band.domain, ["0", "10"]);
+    let sources: Vec<&str> = chart.plan.marks.iter().map(|mark| mark.source.as_str()).collect();
+    assert_eq!(sources, ["0", "0", "10"], "`0` and `9.999` share the half-open `[0, 10)` bucket");
+}
+
 
 #[test]
 fn nice_aligns_the_extent_outward_to_whole_steps() {
@@ -58,6 +104,73 @@ fn nice_aligns_the_extent_outward_to_whole_steps() {
         r#"{"x":{"field":"v","type":"quantitative","bin":{"step":5,"nice":true}},"y":{"field":"v","type":"quantitative"}}"#,
     );
     assert_eq!(tick_labels(&document, Channel::X), ["0", "5", "15"]);
+}
+
+#[test]
+fn bin_bars_sit_on_their_buckets_with_heights_measured_from_zero() {
+    let document = bar(
+        r#"{"v":4,"w":4},{"v":15,"w":8}"#,
+        r#"{"x":{"field":"v","type":"quantitative","bin":{"step":10,"nice":true}},"y":{"field":"w","type":"quantitative"}}"#,
+    );
+    let chart = vega_lite::lower(&document).expect("the document is inside the chart subset");
+    let band = chart.plan.scale(Channel::X).and_then(Scale::band).expect("a `bin` channel trains a band scale");
+    assert_eq!(band.domain, ["0", "10"]);
+    assert_close(band.band_width, 226.28571428571428, "band width");
+    assert_close(band.step - band.band_width, 25.142857142857167, "inter-bar gap");
+
+    assert_eq!(chart.plan.plot.x, 56.0);
+    assert_eq!(chart.plan.plot.y, 56.0);
+    assert_eq!(chart.plan.plot.width, 528.0);
+    assert_eq!(chart.plan.plot.height, 288.0);
+
+    let rects = bar_rects(&chart);
+    assert_eq!(rects.len(), 2, "one bar per bucket that has a row");
+    assert_close(rects[0].0, 81.14285714285714, "first bucket left edge");
+    assert_close(rects[0].1, 200.0, "first bar top");
+    assert_close(rects[0].2, 226.28571428571428, "first bar width");
+    assert_close(rects[0].3, 144.0, "first bar height for value 4 of a `(0, 8)` domain");
+    assert_close(rects[1].0, 332.57142857142856, "second bucket left edge");
+    assert_close(rects[1].1, 56.0, "second bar top, flush with the plot top");
+    assert_close(rects[1].2, 226.28571428571428, "second bar width");
+    assert_close(rects[1].3, 288.0, "second bar height for value 8 of a `(0, 8)` domain");
+    assert_close(rects[0].3 + rects[0].1, 344.0, "both bars start at the zero baseline");
+    assert_close(rects[1].3 + rects[1].1, 344.0, "both bars start at the zero baseline");
+    assert_close(rects[1].3 / rects[0].3, 8.0 / 4.0, "bar heights keep the value ratio");
+
+    let ticks = axis_positions(&chart, Channel::X);
+    assert_eq!(ticks.len(), 2);
+    assert_eq!(ticks[0].0, "0");
+    assert_eq!(ticks[1].0, "10");
+    assert_close(ticks[0].1, 194.28571428571428, "first tick sits at the bucket centre");
+    assert_close(ticks[1].1, 445.7142857142857, "second tick sits at the bucket centre");
+    assert_eq!(ticks[0].2, 344.0);
+    assert_eq!(ticks[1].2, 344.0);
+}
+
+#[test]
+fn time_unit_bars_collapse_instants_of_one_calendar_unit_to_one_coordinate() {
+    let document = bar(
+        r#"{"t":1705276800000,"w":4},{"t":1706745600000,"w":6},{"t":1706918400000,"w":8}"#,
+        r#"{"x":{"field":"t","type":"temporal","timeUnit":"yearmonth"},"y":{"field":"w","type":"quantitative"}}"#,
+    );
+    let chart = vega_lite::lower(&document).expect("the document is inside the chart subset");
+    let band = chart.plan.scale(Channel::X).and_then(Scale::band).expect("a `timeUnit` channel trains a band scale");
+    assert_eq!(band.domain, ["2024-01", "2024-02"]);
+
+    let rects = bar_rects(&chart);
+    assert_eq!(rects.len(), 3, "every row keeps its own mark");
+    assert_close(rects[0].0, 81.14285714285714, "January bar left edge");
+    assert_close(rects[1].0, 332.57142857142856, "February bar left edge");
+    assert_close(rects[2].0, 332.57142857142856, "two February instants share one x coordinate");
+    assert_close(rects[0].2, 226.28571428571428, "bars keep the band width");
+    assert_close(rects[0].3, 144.0, "January bar height for value 4");
+    assert_close(rects[1].3, 216.0, "February bar height for value 6");
+    assert_close(rects[2].3, 288.0, "February bar height for value 8");
+
+    let ticks = axis_positions(&chart, Channel::X);
+    assert_eq!(ticks.iter().map(|tick| tick.0.as_str()).collect::<Vec<_>>(), ["2024-01", "2024-02"]);
+    assert_close(ticks[0].1, 194.28571428571428, "January tick at the band centre");
+    assert_close(ticks[1].1, 445.7142857142857, "February tick at the band centre");
 }
 
 #[test]

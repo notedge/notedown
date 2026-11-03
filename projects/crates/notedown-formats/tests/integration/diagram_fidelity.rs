@@ -115,7 +115,7 @@ fn diagram_block(graph: &DocumentGraph, expected_language: &str) -> String {
 
 #[test]
 fn markdown_diagram_sources_survive_markdown_and_html_round_trips() {
-    for (language, corpus) in DIAGRAM_CORPORA {
+    for &(language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -135,7 +135,7 @@ fn markdown_diagram_sources_survive_markdown_and_html_round_trips() {
 
 #[test]
 fn rendered_diagram_figures_round_trip_the_authored_source() {
-    for (language, corpus) in DIAGRAM_CORPORA {
+    for &(language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -162,7 +162,7 @@ fn rendered_diagram_figures_round_trip_the_authored_source() {
 
 #[test]
 fn docx_diagram_paragraphs_preserve_language_and_source() {
-    for (language, corpus) in DIAGRAM_CORPORA {
+    for &(language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);
@@ -175,7 +175,7 @@ fn docx_diagram_paragraphs_preserve_language_and_source() {
 
 #[test]
 fn pdf_diagram_export_keeps_every_source_line_intact() {
-    for (language, corpus) in DIAGRAM_CORPORA {
+    for &(language, corpus) in DIAGRAM_CORPORA {
         for (name, source) in corpus {
             let label = format!("{language}/{name}");
             let graph = import_diagram(language, source);

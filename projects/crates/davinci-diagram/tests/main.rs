@@ -3,3 +3,5 @@ mod layout;
 mod mermaid;
 mod render;
 mod spec;
+#[cfg(feature = "mermaid")]
+mod visual;

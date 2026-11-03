@@ -103,6 +103,10 @@ fn write_block(
             ensure_reopenable_language(language)?;
             write_fenced(out, Some(language), source);
         }
+        Block::Chart { language, source } => {
+            ensure_reopenable_chart_language(language)?;
+            write_fenced(out, Some(language), source);
+        }
         Block::Quote { content } => {
             let mut line = String::new();
             write_inlines(&mut line, content, image_urls)?;
@@ -421,8 +425,7 @@ fn write_fenced(out: &mut String, language: Option<&str>, content: &str) {
 }
 
 /// A diagram only round-trips through Markdown when the importer promotes the
-/// same fence back to `Block::Diagram`. Any other language would silently
-/// reopen as a plain code block, so it is reported instead.
+/// same fence back to `Block::Diagram`.
 fn ensure_reopenable_language(language: &str) -> Result<(), FormatError> {
     if language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") || language.eq_ignore_ascii_case("plantuml") {
         Ok(())
@@ -431,6 +434,20 @@ fn ensure_reopenable_language(language: &str) -> Result<(), FormatError> {
         Err(FormatError::unsupported(
             "markdown",
             format!("diagram language `{language}` has no Markdown reopen rule and would reopen as a code block"),
+        ))
+    }
+}
+
+/// A chart only round-trips through Markdown when the importer promotes the
+/// same fence back to `Block::Chart`.
+fn ensure_reopenable_chart_language(language: &str) -> Result<(), FormatError> {
+    if language.eq_ignore_ascii_case("vega") || language.eq_ignore_ascii_case("vega-lite") || language.eq_ignore_ascii_case("chart") {
+        Ok(())
+    }
+    else {
+        Err(FormatError::unsupported(
+            "markdown",
+            format!("chart language `{language}` has no Markdown reopen rule and would reopen as a code block"),
         ))
     }
 }

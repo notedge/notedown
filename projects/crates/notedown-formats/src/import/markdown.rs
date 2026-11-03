@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use notedown_ir::{
     Block, BreakKind, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, MathDisplay, NodeId, RelationEndpoint, SemanticStatus,
-    TableCell, TableRow,
+    SourceSpan, TableCell, TableRow,
 };
 use oak_core::{GreenNode, Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
 use oak_markdown::{MarkdownLanguage, MarkdownParser, parser::element_type::MarkdownElementType};
@@ -79,13 +79,15 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
             continue;
         }
         if node.element_type() == MarkdownElementType::CodeBlock {
-            let (language, content, consumed) = extract_code_block(node, source, children.get(index..).unwrap_or_default());
+            let (language, content, consumed, body_offset) = extract_code_block(node, source, children.get(index..).unwrap_or_default());
             index += consumed;
+            let span = Some(SourceSpan { start: body_offset as u32, end: (body_offset + content.len()) as u32 });
             let block = match language {
                 Some(language) if is_diagram_language(&language) => Block::Diagram { language, source: content },
+                Some(language) if is_chart_language(&language) => Block::Chart { language, source: content },
                 language => Block::Code { language, content },
             };
-            graph.push_block(block);
+            graph.push_block_at(block, span);
             pending_footnote = None;
             continue;
         }
@@ -630,6 +632,11 @@ fn is_diagram_language(language: &str) -> bool {
     language.eq_ignore_ascii_case("mermaid") || language.eq_ignore_ascii_case("dot") || language.eq_ignore_ascii_case("plantuml")
 }
 
+/// Chart fences are promoted to `Block::Chart`, never to `Block::Diagram`.
+fn is_chart_language(language: &str) -> bool {
+    language.eq_ignore_ascii_case("vega") || language.eq_ignore_ascii_case("vega-lite") || language.eq_ignore_ascii_case("chart")
+}
+
 /// Fenced code keeps the raw source slice between the two fences.
 ///
 /// `oak-markdown` re-lexes fence bodies with the inline lexer, which turns
@@ -647,7 +654,7 @@ fn extract_code_block(
     node: RedNode<MarkdownLanguage>,
     source: &SourceText,
     trailing: &[RedTree<MarkdownLanguage>],
-) -> (Option<String>, String, usize) {
+) -> (Option<String>, String, usize, usize) {
     let node_span = node.span();
     let mut language = None;
     let mut body_start = None;
@@ -681,13 +688,14 @@ fn extract_code_block(
             if let Some((close_start, close_end)) = find_closing_fence(source, node_span.end, opening) {
                 let raw = source.slice((start.min(close_start)..close_start).into());
                 let consumed = trailing.iter().take_while(|child| child.span().start < close_end).count();
-                return (language, strip_fence_line_remainder(&raw).to_string(), consumed);
+                let body_offset = start.min(close_start) + fence_body_offset(&raw);
+                return (language, strip_fence_line_remainder(&raw).to_string(), consumed, body_offset);
             }
         }
     }
     let start = body_start.unwrap_or(node_span.start).min(body_end);
     let raw = source.slice((start..body_end).into());
-    (language, strip_fence_line_remainder(&raw).to_string(), 0)
+    (language, strip_fence_line_remainder(&raw).to_string(), 0, start + fence_body_offset(&raw))
 }
 
 #[derive(Clone, Copy)]
@@ -755,6 +763,14 @@ fn strip_fence_line_remainder(text: &str) -> &str {
 
 fn strip_leading_line_break(text: &str) -> &str {
     text.strip_prefix("\r\n").or_else(|| text.strip_prefix('\n')).or_else(|| text.strip_prefix('\r')).unwrap_or(text)
+}
+
+/// Offset of the stripped fence body inside the raw slice.
+fn fence_body_offset(raw: &str) -> usize {
+    match raw.find(['\r', '\n']) {
+        Some(index) => index + (raw[index..].len() - strip_leading_line_break(&raw[index..]).len()),
+        None => 0,
+    }
 }
 
 fn strip_trailing_line_break(text: &str) -> &str {

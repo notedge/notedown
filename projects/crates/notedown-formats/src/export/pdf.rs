@@ -179,7 +179,7 @@ fn render_block(lines: &mut Vec<RenderLine>, graph: &DocumentGraph, block: &Bloc
             }
         }
         Block::Paragraph { content } | Block::Quote { content } => push_inline_lines(lines, graph, content)?,
-        Block::Code { content, .. } | Block::Diagram { source: content, .. } => {
+        Block::Code { content, .. } | Block::Diagram { source: content, .. } | Block::Chart { source: content, .. } => {
             lines.extend(content.lines().map(|line| RenderLine::Text(line.to_owned())))
         }
         Block::Math { formula } => lines.extend(formula.source.lines().map(|line| RenderLine::Text(line.to_owned()))),

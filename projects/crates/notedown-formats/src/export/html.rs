@@ -143,6 +143,26 @@ fn write_block(
                 out.push_str("</code></pre>");
             }
         },
+        Block::Chart { language, source } => match diagrams.get(&id) {
+            Some(rendered) => {
+                out.push_str(r#"<figure class="chart" data-chart-language=""#);
+                escape_attribute(out, language);
+                out.push_str(r#"" data-chart-source-hex=""#);
+                out.push_str(&encode_hex(source));
+                out.push_str(r#"">"#);
+                out.push_str(&rendered.svg);
+                out.push_str("</figure>");
+            }
+            None => {
+                out.push_str(r#"<pre class="chart" data-chart-language=""#);
+                escape_attribute(out, language);
+                out.push_str(r#"" data-chart-source-hex=""#);
+                out.push_str(&encode_hex(source));
+                out.push_str(r#""><code>"#);
+                escape_text(out, source);
+                out.push_str("</code></pre>");
+            }
+        },
         Block::Math { formula } => {
             out.push_str(r#"<div class="math""#);
             if let Some(language) = &formula.language {

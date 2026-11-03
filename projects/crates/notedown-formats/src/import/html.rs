@@ -299,7 +299,9 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
         "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph, source) }, span)],
         "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph, source) }, span)],
         "pre" => {
-            if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
+            if let Some((language, chart)) = explicit_chart_marker(element, source) {
+                vec![(Block::Chart { language, source: chart }, span)]
+            } else if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
                 vec![(Block::Diagram { language, source: diagram }, span)]
             } else {
                 match hosted_diagram_source(element, graph, source) {
@@ -384,12 +386,19 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
         // re-parses it into a shape model and never leaks its label text into
         // prose.
         "svg" => vec![(Block::RawHtml { html: raw_element_markup(element, source) }, span)],
-        "section" | "article" | "main" | "div" | "figure" | "nav" => match explicit_diagram_marker(element, source) {
-            Some((language, diagram)) => vec![(Block::Diagram { language, source: diagram }, span)],
-            None => match hosted_diagram_source(element, graph, source) {
-                HostedDiagram::Source(language, diagram) => vec![(Block::Diagram { language, source: diagram }, span)],
-                HostedDiagram::Empty | HostedDiagram::Absent => lower_children(&element.children, graph, source),
-            },
+        "section" | "article" | "main" | "div" | "figure" | "nav" => {
+            if let Some((language, chart)) = explicit_chart_marker(element, source) {
+                vec![(Block::Chart { language, source: chart }, span)]
+            }
+            else {
+                match explicit_diagram_marker(element, source) {
+                    Some((language, diagram)) => vec![(Block::Diagram { language, source: diagram }, span)],
+                    None => match hosted_diagram_source(element, graph, source) {
+                        HostedDiagram::Source(language, diagram) => vec![(Block::Diagram { language, source: diagram }, span)],
+                        HostedDiagram::Empty | HostedDiagram::Absent => lower_children(&element.children, graph, source),
+                    },
+                }
+            }
         },
         _ => Vec::new(),
     }
@@ -404,6 +413,14 @@ fn explicit_diagram_marker(element: &Element, source: &str) -> Option<(String, S
     let diagram =
         attribute(element, "data-diagram-source-hex").and_then(|hex| decode_hex(&hex)).unwrap_or_else(|| preformatted_source(element, source));
     Some((language, diagram))
+}
+
+/// Explicit chart round-trip marker written by the HTML exporter.
+fn explicit_chart_marker(element: &Element, source: &str) -> Option<(String, String)> {
+    let language = attribute(element, "data-chart-language").filter(|language| !language.trim().is_empty())?;
+    let chart =
+        attribute(element, "data-chart-source-hex").and_then(|hex| decode_hex(&hex)).unwrap_or_else(|| preformatted_source(element, source));
+    Some((language, chart))
 }
 
 /// Outcome of probing a hosted diagram container (`.mermaid` and friends).

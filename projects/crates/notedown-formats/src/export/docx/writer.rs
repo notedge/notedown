@@ -107,6 +107,13 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
             write_run_text(out, source)?;
             out.push_str("</w:p>");
         }
+        Block::Chart { language, source } => {
+            out.push_str("<w:p><w:pPr><w:pStyle w:val=\"Chart:");
+            write_xml_text(out, language)?;
+            out.push_str("\"/></w:pPr>");
+            write_run_text(out, source)?;
+            out.push_str("</w:p>");
+        }
         Block::Quote { content } => {
             out.push_str("<w:p><w:pPr><w:pStyle w:val=\"Quote\"/></w:pPr>");
             write_inlines(out, content, graph, rels)?;

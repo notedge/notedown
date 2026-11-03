@@ -65,6 +65,17 @@ pub enum Block {
         /// Raw diagram source exactly as authored inside the fence.
         source: String,
     },
+    /// Authored chart specification with a declared chart language.
+    ///
+    /// Charts are a separate pipeline from diagrams: the IR stores only the raw
+    /// specification, and a chart engine compiles it into its own scene. Chart
+    /// blocks must never be routed through the diagram subsystem.
+    Chart {
+        /// Chart language tag such as `vega-lite`.
+        language: String,
+        /// Raw chart specification exactly as authored inside the fence.
+        source: String,
+    },
     /// Format-specific payload retained without pretending full semantics.
     Opaque {
         /// Opaque payload kind identifier.

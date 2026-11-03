@@ -171,6 +171,11 @@ path = "tests/integration/diagram_fidelity.rs"
 required-features = ["markdown", "html", "docx", "pdf"]
 
 [[test]]
+name = "chart_block"
+path = "tests/integration/chart_block.rs"
+required-features = ["markdown", "html"]
+
+[[test]]
 name = "markdown_to_docx"
 path = "tests/integration/markdown_to_docx.rs"
 required-features = ["docx", "markdown"]

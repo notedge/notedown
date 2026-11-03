@@ -65,6 +65,7 @@ pub fn block_kind_name(block: &Block) -> &'static str {
         Block::Code { .. } => "code",
         Block::Math { .. } => "math",
         Block::Diagram { .. } => "diagram",
+        Block::Chart { .. } => "chart",
         Block::Opaque { .. } => "opaque",
         Block::RawHtml { .. } => "raw-html",
     }

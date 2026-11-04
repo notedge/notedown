@@ -164,6 +164,17 @@ fn layout_and_interaction_attributes_are_rejected_with_their_spans() {
 }
 
 #[test]
+fn color_attributes_are_rejected_instead_of_silently_ignored() {
+    for key in ["fillcolor", "color", "fontcolor", "labelfontcolor"] {
+        let source = format!("digraph {{\n  A [{key}=\"#ff0000\"];\n}}");
+        let error = dot_to_spec(&source).expect_err("a color attribute has no paint path on the theme-owned scene surface");
+        assert_eq!(error.code(), codes::UNSUPPORTED, "`{key}` must be refused, got {}", error.message());
+        let slice = span_of(&source, &error);
+        assert!(slice.contains(key), "the span must name `{key}`, got `{slice}`");
+    }
+}
+
+#[test]
 fn multiple_graphs_are_rejected_at_the_second_graph() {
     let source = "digraph { A }\ndigraph { B }\n";
     let error = dot_to_spec(source).expect_err("a fence carries exactly one graph");

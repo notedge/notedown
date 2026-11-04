@@ -42,7 +42,7 @@ const COMPASSES: &[(&str, Compass)] = &[
 ];
 
 /// Attribute keys that may appear on nodes and edges.
-const ALLOWED_ELEMENT_KEYS: &[&str] = &["label", "shape", "style", "fillcolor", "color", "fontcolor", "labelfontcolor"];
+const ALLOWED_ELEMENT_KEYS: &[&str] = &["label", "shape", "style"];
 
 /// Attribute keys that may appear at graph level.
 const ALLOWED_GRAPH_KEYS: &[&str] = &["rankdir", "label"];
@@ -71,12 +71,6 @@ const FORBIDDEN_KEYS: &[&str] = &[
     "href",
     "tooltip",
     "target",
-];
-
-/// X11 color names accepted in addition to hexadecimal colors.
-const NAMED_COLORS: &[&str] = &[
-    "aqua", "black", "blue", "brown", "cyan", "fuchsia", "gray", "green", "grey", "lime", "magenta", "maroon", "navy", "olive", "orange",
-    "pink", "purple", "red", "silver", "teal", "white", "yellow",
 ];
 
 /// Parse DOT source through the `oak-dot` frontend.
@@ -426,11 +420,6 @@ fn check_attribute(attribute: &Attribute, diagnostics: &mut Vec<Diagnostic>) -> 
             }
             Ok(())
         }
-        "fillcolor" | "color" | "fontcolor" | "labelfontcolor" => {
-            check_color(value, span.clone())?;
-            diagnostics.push(approximated_at(format!("`{key}` is validated but the scene surface keeps its default palette"), span));
-            Ok(())
-        }
         "style" => check_style(value, span, diagnostics),
         _ => Ok(()),
     }
@@ -442,22 +431,6 @@ fn reject_html_label(value: &str, span: Range<usize>) -> Result<(), DiagramError
         return Err(unsupported_at("HTML-like labels are outside the DOT subset", span));
     }
     Ok(())
-}
-
-fn check_color(value: &str, span: Range<usize>) -> Result<(), DiagramError> {
-    let value = value.trim();
-    if let Some(hex) = value.strip_prefix('#') {
-        let valid = matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|digit| digit.is_ascii_hexdigit());
-        if valid {
-            return Ok(());
-        }
-        return Err(unsupported_at(format!("`{value}` is not a hexadecimal color"), span));
-    }
-    let normalized = value.to_ascii_lowercase();
-    if NAMED_COLORS.contains(&normalized.as_str()) {
-        return Ok(());
-    }
-    Err(unsupported_at(format!("color `{value}` is outside the X11 name whitelist"), span))
 }
 
 fn check_style(value: &str, span: Range<usize>, diagnostics: &mut Vec<Diagnostic>) -> Result<(), DiagramError> {

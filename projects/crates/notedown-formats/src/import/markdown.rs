@@ -125,7 +125,12 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
             // exported as an inline HTML table. Reopening it as an opaque raw
             // block would quietly turn the table back into markup, so a
             // standalone `<table>` element is lowered into the IR table.
+            #[cfg(feature = "html")]
             let block = lower_html_table_block(&html).unwrap_or(Block::RawHtml { html });
+            // Without the HTML importer the table shape cannot be read back,
+            // so the authored block stays verbatim rather than being guessed.
+            #[cfg(not(feature = "html"))]
+            let block = Block::RawHtml { html };
             graph.push_block(block);
             pending_footnote = None;
             continue;
@@ -1030,6 +1035,7 @@ fn definition_description_inlines(node: RedNode<MarkdownLanguage>, source: &Sour
 /// Only a block that is exactly one `<table>` element is lowered. Anything
 /// else stays verbatim raw HTML, so authored markup is never re-read
 /// opportunistically.
+#[cfg(feature = "html")]
 fn lower_html_table_block(html: &str) -> Option<Block> {
     let trimmed = html.trim();
     if !trimmed.starts_with("<table") || !trimmed.ends_with("</table>") {

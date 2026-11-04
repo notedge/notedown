@@ -1,5 +1,5 @@
 use notedown_formats::{export::html::export_html, export::markdown::export_markdown, import::markdown::import_markdown_bytes};
-use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, RelationEndpoint, RelationKind, SemanticStatus};
+use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, MathExpression, RelationEndpoint, RelationKind, SemanticStatus};
 
 #[test]
 fn markdown_stray_angle_bracket_stays_text_and_is_escaped_on_export() {
@@ -504,6 +504,45 @@ fn markdown_math_reopen_preserves_semantics_and_following_text() {
         Block::Math { formula } => formula.source == "E = mc^2" && formula.language.as_deref() == Some("latex"),
         _ => false,
     }));
+}
+
+/// `\text` keeps every space it was authored with. The HTML and Markdown
+/// writers must pass the phrase through untouched, so the round trip cannot
+/// silently trim either side of the content.
+#[cfg(feature = "html")]
+#[test]
+fn math_text_spaces_survive_the_html_and_markdown_roundtrip() {
+    use notedown_formats::import::html::import_html_text;
+
+    let source = "$$\nx + \\text{ text } + y\n$$\n";
+    let graph = import_markdown_bytes("math-text.md", source).expect("import");
+    let formula = graph
+        .blocks
+        .iter()
+        .find_map(|node| match &node.block {
+            Block::Math { formula } => Some(formula),
+            _ => None,
+        })
+        .expect("display math block");
+    let MathExpression::Sequence(items) = &formula.expression
+    else {
+        panic!("expected a sequence, got {:#?}", formula.expression)
+    };
+    let text = items
+        .iter()
+        .find_map(|item| match item {
+            MathExpression::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .expect("the `\\text` node");
+    assert_eq!(text.chars().collect::<Vec<_>>(), vec![' ', 't', 'e', 'x', 't', ' '], "the parser must keep both spaces");
+
+    let html = export_html(&graph).expect("export html");
+    assert!(html.contains("x + \\text{ text } + y"), "the HTML math node must keep the authored spaces: {html}");
+
+    let reopened = import_html_text("math-text.html", &html).expect("import html");
+    let markdown = export_markdown(&reopened).expect("export markdown");
+    assert!(markdown.contains(" text "), "the text must not be trimmed on the way back: {markdown}");
 }
 
 #[test]

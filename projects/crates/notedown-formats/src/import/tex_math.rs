@@ -290,14 +290,14 @@ fn lower_command(command: &TexCommand, source: &str, base: usize) -> MathExpress
             middles: Vec::new(),
         },
         "sqrt" => lower_radical(command, source, base),
-        "text" | "textrm" | "mbox" | "operatorname" => match command.arguments.iter().find_map(argument_text) {
+        "text" | "textrm" | "mbox" | "operatorname" => match command.arguments.iter().find_map(|argument| text_argument_source(argument, source)) {
             Some(text) => MathExpression::Text { text, span: command_span },
             None => unsupported(command.span.start, command.span.end, source, "text", base),
         },
         "textit" => MathExpression::Styled {
             style: MathStyle::Italic,
             body: Box::new(MathExpression::Text {
-                text: command.arguments.iter().find_map(argument_text).unwrap_or_default(),
+                text: command.arguments.iter().find_map(|argument| text_argument_source(argument, source)).unwrap_or_default(),
                 span: command_span,
             }),
         },
@@ -442,6 +442,26 @@ fn argument_source(argument: &TexArgument, source: &str) -> Option<String> {
             (!body.is_empty()).then(|| body.to_string())
         }
     }
+}
+
+/// The authored text of a text-mode argument, kept verbatim.
+///
+/// `\text` and its relatives switch to text mode, where spaces are significant.
+/// The math AST carries no whitespace token, so rebuilding the body from
+/// `TexItem` tokens dropped both the spaces around the content and the ones
+/// between words (`\text{hello world}` became `helloworld`). The body is the
+/// source slice with only its outer braces removed: leading, trailing and
+/// internal spaces all survive.
+fn text_argument_source(argument: &TexArgument, source: &str) -> Option<String> {
+    let root = match argument {
+        TexArgument::Optional(root) | TexArgument::Required(root) => root,
+    };
+    let text = slice(source, root.span.start, root.span.end);
+    let body = match (text.find('{'), text.rfind('}')) {
+        (Some(open), Some(close)) if close > open => text[open + 1..close].to_string(),
+        _ => text,
+    };
+    (!body.is_empty()).then_some(body)
 }
 
 fn item_text(item: &TexItem) -> Option<String> {
@@ -860,6 +880,44 @@ mod tests {
 
     fn lower(source: &str) -> MathExpression {
         lower_tex_formula(&parse(source), source, MathDisplay::Inline, Some("latex")).expression
+    }
+
+    /// `\text` switches to text mode, where spaces are significant. Rebuilding
+    /// the body from math tokens dropped every space, so `\text{hello world}`
+    /// became `helloworld` and the rendered phrase came out narrower than TeX.
+    #[test]
+    fn text_commands_keep_their_source_spaces_verbatim() {
+        let formula = lower_formula(r"x + \text{ text } + y");
+        let MathExpression::Sequence(items) = &formula.expression
+        else {
+            panic!("expected a sequence")
+        };
+        let text = items
+            .iter()
+            .find_map(|item| match item {
+                MathExpression::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .expect("the `\\text` node");
+        assert_eq!(text.chars().collect::<Vec<_>>(), vec![' ', 't', 'e', 'x', 't', ' ']);
+
+        let formula = lower_formula(r"\text{hello world}");
+        let MathExpression::Text { text, .. } = &formula.expression
+        else {
+            panic!("expected a text node")
+        };
+        assert_eq!(text.chars().collect::<Vec<_>>(), "hello world".chars().collect::<Vec<_>>());
+
+        let formula = lower_formula(r"\textit{ padded }");
+        let MathExpression::Styled { body, .. } = &formula.expression
+        else {
+            panic!("expected a styled text node")
+        };
+        let MathExpression::Text { text, .. } = &**body
+        else {
+            panic!("expected the styled body to be text")
+        };
+        assert_eq!(text.chars().collect::<Vec<_>>(), vec![' ', 'p', 'a', 'd', 'd', 'e', 'd', ' ']);
     }
 
     #[test]

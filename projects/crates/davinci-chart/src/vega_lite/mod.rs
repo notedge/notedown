@@ -29,7 +29,8 @@ use crate::{
 /// A lowered Vega-Lite document ready for rendering.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VegaChart {
-    /// The authored chart title, when the document declares one.
+    /// The authored chart title, when the document declares a non-blank one. It
+    /// is drawn as a themed text node above the plot and reserves layout height.
     pub title: Option<String>,
     /// Chart semantics built from the document.
     pub spec: ChartSpec,
@@ -210,6 +211,7 @@ fn lower_document(source: &str) -> Result<VegaChart, ChartError> {
     if let Some(height) = height {
         options.height = positive(height, "$.height")?;
     }
+    spec.title = title.clone();
 
     let data = DataSnapshot::new(columns);
     for diagnostic in data.validate().into_iter().chain(spec.validate()) {

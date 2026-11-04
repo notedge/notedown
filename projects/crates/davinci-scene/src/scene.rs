@@ -31,6 +31,8 @@ pub enum SemanticRole {
     Tick,
     /// A chart legend region.
     Legend,
+    /// A chart title drawn above the plot.
+    Title,
     /// A chart data mark.
     Mark,
     /// A text label for another semantic object.
@@ -53,6 +55,7 @@ impl SemanticRole {
             Self::Axis => "axis",
             Self::Tick => "tick",
             Self::Legend => "legend",
+            Self::Title => "title",
             Self::Mark => "mark",
             Self::Label => "label",
             Self::Decoration => "decoration",

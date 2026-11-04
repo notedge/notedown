@@ -11,15 +11,17 @@ use davinci_scene::{
 use crate::plan::{AxisPlan, ChartCompilePlan, MarkGeometry, MarkInstance, MarkStyle};
 
 const AXIS_COLOR: Color = Color::rgb(0x6b, 0x74, 0x85);
+const TITLE_COLOR: Color = Color::rgb(0x2d, 0x37, 0x48);
 const TICK_LENGTH: f64 = 4.0;
 const TEXT_BASELINE_SHIFT: f64 = 0.35;
 
 /// Render a compile plan into a deterministic semantic scene.
 ///
-/// Every mark instance becomes one node carrying [`SemanticRole::Mark`] (or
-/// [`SemanticRole::Label`] for text marks) with its stable id and a
-/// [`SourceRef`] built from the plan source descriptor. Axes become
-/// [`SemanticRole::Axis`] lines and [`SemanticRole::Tick`] marks.
+/// A declared title becomes one [`SemanticRole::Title`] text node centered
+/// above the plot. Every mark instance becomes one node carrying
+/// [`SemanticRole::Mark`] (or [`SemanticRole::Label`] for text marks) with its
+/// stable id and a [`SourceRef`] built from the plan source descriptor. Axes
+/// become [`SemanticRole::Axis`] lines and [`SemanticRole::Tick`] marks.
 ///
 /// The returned scene is semantic only: it carries no SVG string, field
 /// binding, statistic, or scale. [`SemanticScene::resolve`] produces the
@@ -27,6 +29,17 @@ const TEXT_BASELINE_SHIFT: f64 = 0.35;
 /// [`davinci_scene::DisplayScene::to_svg`].
 pub fn render(plan: &ChartCompilePlan) -> SemanticScene {
     let mut scene = SemanticScene::new(plan.canvas);
+    if let Some(title) = &plan.title {
+        scene.push(
+            SemanticNode::new(SemanticKind::Text {
+                position: title.position,
+                text: title.text.clone(),
+                style: text_style(TITLE_COLOR, title.font_size, TextAnchor::Middle),
+            })
+            .with_id("chart-title")
+            .with_role(SemanticRole::Title),
+        );
+    }
     for axis in &plan.axes {
         push_axis(&mut scene, axis, plan.font_size);
     }

@@ -397,6 +397,9 @@ pub struct ChartSpec {
     /// Constant opacity applied when no `opacity` channel is bound, or
     /// `None` for fully opaque.
     pub mark_opacity: Option<f64>,
+    /// Authored chart title. It is drawn as a themed text node above the plot
+    /// and reserves vertical space, or stays absent when the author omits it.
+    pub title: Option<String>,
 }
 
 impl ChartSpec {
@@ -413,6 +416,7 @@ impl ChartSpec {
             guides: vec![Guide::axis(Channel::X), Guide::axis(Channel::Y)],
             mark_color: None,
             mark_opacity: None,
+            title: None,
         }
     }
 

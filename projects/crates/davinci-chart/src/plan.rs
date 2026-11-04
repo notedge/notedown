@@ -120,6 +120,17 @@ pub struct AxisPlan {
     pub ticks: Vec<AxisTick>,
 }
 
+/// One chart title drawn above the plot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TitlePlan {
+    /// Title text after trimming authored whitespace.
+    pub text: String,
+    /// Baseline position of the title text.
+    pub position: Point,
+    /// Title font size in scene units.
+    pub font_size: f64,
+}
+
 /// A deterministic compile result for one chart.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChartCompilePlan {
@@ -127,6 +138,8 @@ pub struct ChartCompilePlan {
     pub canvas: Size,
     /// Plot rectangle that all mark geometry stays inside.
     pub plot: Rect,
+    /// Chart title, when the author declared a non-empty one.
+    pub title: Option<TitlePlan>,
     /// Font size used for axis label positions.
     pub font_size: f64,
     /// Trained scales in channel declaration order.

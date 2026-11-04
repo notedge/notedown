@@ -505,6 +505,7 @@ fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens, palette: 
         let _ = write!(out, ".{prefix} line.{prefix}-axis {{ stroke: {edge_stroke} }}");
         let _ = write!(out, ".{prefix} line.{prefix}-tick {{ stroke: {edge_stroke} }}");
         let _ = write!(out, ".{prefix} text.{prefix}-tick {{ fill: {node_text} }}");
+        let _ = write!(out, ".{prefix} text.{prefix}-title {{ fill: {node_text} }}");
         let _ = write!(out, "{diagram}-mark {{ fill: none; stroke: none }}");
         let _ = write!(out, "{diagram}-legend {{ stroke: {edge_stroke} }}");
     }

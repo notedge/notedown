@@ -13,7 +13,7 @@ use davinci_types::{Diagnostic, DiagnosticSeverity};
 use crate::{
     data::{DataSnapshot, FieldKind, Value, format_number},
     error::{ChartError, chart_warning, codes},
-    plan::{AxisPlan, AxisTick, ChartCompilePlan, ChartScale, MarkGeometry, MarkInstance, MarkStyle},
+    plan::{AxisPlan, AxisTick, ChartCompilePlan, ChartScale, MarkGeometry, MarkInstance, MarkStyle, TitlePlan},
     scale::{Scale, Transfer, TransformedScale, inferred_domain, linear_ticks, log_ticks, nice_domain, train_band, train_linear, train_nominal, train_point},
     spec::{Channel, ChartSpec, Guide, Mark, ScaleSpec},
     statistic::{Observation, aggregate},
@@ -27,6 +27,8 @@ const TICK_MARK_LENGTH: f64 = 6.0;
 const OPACITY_MIN: f64 = 0.05;
 const AXIS_LABEL_GAP: f64 = 4.0;
 const AXIS_LABEL_INSET: f64 = 6.0;
+const TITLE_FONT_SCALE: f64 = 1.6;
+const TITLE_BAND_SCALE: f64 = 1.5;
 
 /// Constant paint defaults resolved once from the spec.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,7 +104,13 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
         return Err(ChartError::new(codes::EMPTY_DOMAIN, "the chart has no usable rows after projection and aggregation"));
     }
 
-    let plot = plot_rect(options);
+    let title_text = spec.title.as_deref().map(str::trim).filter(|text| !text.is_empty());
+    if title_text.is_none() && spec.title.is_some() {
+        diagnostics.push(chart_warning(codes::APPROXIMATED, "an authored chart title is blank, so no title text node is drawn"));
+    }
+    let title_font_size = options.font_size * TITLE_FONT_SCALE;
+
+    let plot = plot_rect(options, title_text.is_some());
     let mut scales = Vec::new();
     for channel in Channel::ALL {
         let Some(encoding) = spec.encoding.channel(channel)
@@ -169,6 +177,11 @@ pub fn compile(spec: &ChartSpec, data: &DataSnapshot, options: &ChartOptions) ->
     Ok(ChartCompilePlan {
         canvas: Size::new(options.width, options.height),
         plot,
+        title: title_text.map(|text| TitlePlan {
+            text: text.to_string(),
+            position: Point::new(options.width * 0.5, options.margin.max(0.0) + title_font_size),
+            font_size: title_font_size,
+        }),
         font_size: options.font_size,
         scales,
         marks,
@@ -555,9 +568,10 @@ fn empty_domain(channel: Channel) -> ChartError {
     ChartError::new(codes::EMPTY_DOMAIN, format!("the `{}` channel has no values to train its scale", channel.as_str()))
 }
 
-fn plot_rect(options: &ChartOptions) -> Rect {
+fn plot_rect(options: &ChartOptions, reserve_title: bool) -> Rect {
     let margin = options.margin.max(0.0);
-    Rect::new(margin, margin, (options.width - margin * 2.0).max(1.0), (options.height - margin * 2.0).max(1.0))
+    let band = if reserve_title { options.font_size * TITLE_FONT_SCALE * TITLE_BAND_SCALE } else { 0.0 };
+    Rect::new(margin, margin + band, (options.width - margin * 2.0).max(1.0), (options.height - margin * 2.0 - band).max(1.0))
 }
 
 fn find_scale(scales: &[ChartScale], channel: Channel) -> Option<&Scale> {

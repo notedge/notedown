@@ -189,6 +189,38 @@ fn page_hooks_namespace_every_chart_id_and_keep_mark_colors() {
     assert!(left.contains(".chart .chart-mark { fill: none; stroke: none }"), "the palette must declare a neutral mark default");
 }
 
+#[test]
+fn an_authored_title_is_drawn_as_a_themed_text_node_above_the_plot() {
+    let titled = vega_lite::lower(BAR_DOCUMENT).expect("the titled document must lower");
+    let untitled_document = BAR_DOCUMENT.replace("  \"title\": \"Revenue\",\n", "");
+    let untitled = vega_lite::lower(&untitled_document).expect("the untitled document must lower");
+
+    let title = titled.plan.title.as_ref().expect("the plan must keep the authored title");
+    assert_eq!(title.text, "Revenue");
+    assert_close(title.position.x, 240.0, "the title is centered on the canvas");
+    assert_close(title.font_size, 19.2, "the title uses the scaled theme font size");
+
+    assert_close(untitled.plan.plot.y, 56.0, "an untitled chart keeps the original plot origin");
+    assert_close(untitled.plan.plot.height, 188.0, "an untitled chart keeps the original plot height");
+    assert_close(titled.plan.plot.x, untitled.plan.plot.x, "a title never narrows the plot");
+    assert_close(titled.plan.plot.width, untitled.plan.plot.width, "a title never narrows the plot");
+    assert_close(titled.plan.plot.y, 84.8, "a title reserves a band above the plot");
+    assert_close(titled.plan.plot.height, 159.2, "the plot height shrinks by exactly the title band");
+
+    let svg = titled.to_svg_with_hooks("chart-0", "chart").expect("the titled scene must serialize");
+    assert!(svg.contains("data-role=\"title\""), "the title node must carry its role: {svg}");
+    assert!(svg.contains("class=\"chart-title\""), "the title node must carry its role class: {svg}");
+    assert!(svg.contains(">Revenue</text>"), "the title text must be drawn: {svg}");
+    assert!(svg.contains(".chart text.chart-title { fill:"), "the title color must come from the theme: {svg}");
+
+    let plain = untitled.to_svg_with_hooks("chart-0", "chart").expect("the untitled scene must serialize");
+    assert!(!plain.contains("data-role=\"title\""), "an untitled chart emits no title node: {plain}");
+}
+
+fn assert_close(actual: f64, expected: f64, what: &str) {
+    assert!((actual - expected).abs() < 1e-9, "{what}: expected {expected}, got {actual}");
+}
+
 fn element_ids(svg: &str) -> Vec<String> {
     svg.match_indices("id=\"")
         .map(|(index, _)| {

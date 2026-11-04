@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus};
+use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, ListItem, LossMarker, RelationEndpoint, SemanticStatus, SourceSpan};
 use oak_core::{Builder, SourceText, parser::session::ParseSession};
 use oak_typst::{
     TypstBuilder, TypstLanguage,
@@ -106,9 +106,18 @@ impl<'a> TypstLowerer<'a> {
         self.graph.push_loss(LossMarker { code: code.into(), message: message.into(), status });
     }
 
+    fn loss_at(&mut self, code: &str, message: impl Into<String>, status: SemanticStatus, span: Option<SourceSpan>) {
+        self.graph.push_loss_at(LossMarker { code: code.into(), message: message.into(), status }, span);
+    }
+
     fn push_block(&mut self, sink: &mut Sink, block: Block) {
         sink.flush(&mut self.graph);
         self.graph.push_block(block);
+    }
+
+    fn push_block_at(&mut self, sink: &mut Sink, block: Block, span: Option<SourceSpan>) {
+        sink.flush(&mut self.graph);
+        self.graph.push_block_at(block, span);
     }
 
     fn lower_root(&mut self, items: &[TypstItem], region_end: usize, sink: &mut Sink) {
@@ -155,7 +164,7 @@ impl<'a> TypstLowerer<'a> {
                     }
                 }
                 TypstItem::Quote(quote) => {
-                    if self.lower_expression(quote, sink) {
+                    if self.lower_expression(quote, region_end, sink) {
                         return;
                     }
                     index += 1;
@@ -312,8 +321,14 @@ impl<'a> TypstLowerer<'a> {
         false
     }
 
-    fn lower_expression(&mut self, quote: &TypstRoot, sink: &mut Sink) -> bool {
+    fn lower_expression(&mut self, quote: &TypstRoot, region_end: usize, sink: &mut Sink) -> bool {
         let span = quote.span;
+        let limit = region_end.min(self.source.len());
+        match scan_dynamic_group(self.source, span.start, limit) {
+            DynamicGroup::Closed { end } if end > span.end => return self.lower_dynamic_group(span.start, end, limit, sink),
+            DynamicGroup::Unclosed { end } => return self.lower_unclosed_group(span.start, end, sink),
+            _ => {}
+        }
         let raw = self.raw(span.start, span.end);
         let line_end = raw.find('\n').unwrap_or(raw.len());
         let line = raw[..line_end].trim();
@@ -328,6 +343,55 @@ impl<'a> TypstLowerer<'a> {
         }
         self.cursor = span.end;
         false
+    }
+
+    /// Keep a balanced dynamic group that continues past the line the parser
+    /// captured as exactly one opaque block.
+    ///
+    /// The Typst parser stops a `#` expression at the first line break unless it
+    /// opens a content bracket on the same line, so the argument list of a
+    /// multi-line `#figure(...)` is authored as separate root items. Lowering
+    /// each of them would print the construct body as body text. Instead the
+    /// whole balanced group is retained once and the source after the group is
+    /// lowered again from its closing bracket.
+    fn lower_dynamic_group(&mut self, start: usize, end: usize, limit: usize, sink: &mut Sink) -> bool {
+        let payload = self.raw(start, end).trim().to_string();
+        let head = payload.lines().next().unwrap_or_default().trim().to_string();
+        let kind = expression_kind(&head);
+        let lines = payload.lines().count();
+        let span = SourceSpan::new(start, end);
+        self.loss_at(
+            "import.typst.dynamic_content",
+            format!("Typst dynamic group kept opaque across {lines} lines: {head}"),
+            SemanticStatus::Unsupported,
+            span,
+        );
+        self.push_block_at(sink, Block::Opaque { kind, payload_hint: payload, status: SemanticStatus::Partial }, span);
+        self.line_breaks = 0;
+        self.cursor = end;
+        if end < limit {
+            self.lower_tail(end, limit, sink);
+        }
+        true
+    }
+
+    /// Record a structured diagnostic for a dynamic group whose brackets never
+    /// balance before the region ends.
+    fn lower_unclosed_group(&mut self, start: usize, end: usize, sink: &mut Sink) -> bool {
+        let rest = self.raw(start, end).trim().to_string();
+        let head = rest.lines().next().unwrap_or_default().trim().to_string();
+        let kind = expression_kind(&head);
+        let span = SourceSpan::new(start, end);
+        self.loss_at(
+            "import.typst.unterminated_dynamic_group",
+            format!("Typst dynamic group is not balanced before the region ends: {head}"),
+            SemanticStatus::Unsupported,
+            span,
+        );
+        self.push_block_at(sink, Block::Opaque { kind, payload_hint: rest, status: SemanticStatus::Partial }, span);
+        self.line_breaks = 0;
+        self.cursor = end;
+        true
     }
 
     fn lower_list_items(&mut self, lines: Vec<ListLine>, ordered: bool, sink: &mut Sink) {
@@ -587,6 +651,111 @@ fn expression_kind(line: &str) -> String {
     let rest = line.strip_prefix('#').unwrap_or(line);
     let keyword: String = rest.chars().take_while(|character| character.is_ascii_alphabetic()).collect();
     if keyword.is_empty() { "typst.expression".into() } else { format!("typst.expression.{keyword}") }
+}
+
+/// Bracket structure found after a `#` dynamic expression head.
+enum DynamicGroup {
+    /// The head is not followed by a bracket group on its own line.
+    Absent,
+    /// The group opened and closed, with the exclusive end offset it closed at.
+    Closed { end: usize },
+    /// The group opened and never balanced before the search limit.
+    Unclosed { end: usize },
+}
+
+/// Scan the bracket group of a `#`-prefixed Typst expression.
+///
+/// Only a group that starts on the same line as the expression head counts.
+/// Parentheses, brackets and braces nest. String literals and both comment
+/// forms are skipped so their brackets cannot close the group early.
+fn scan_dynamic_group(source: &str, start: usize, limit: usize) -> DynamicGroup {
+    let limit = limit.min(source.len());
+    if start >= limit {
+        return DynamicGroup::Absent;
+    }
+    let bytes = source.as_bytes();
+    let mut index = if bytes[start] == b'#' { start + 1 } else { start };
+    while index < limit && matches!(bytes[index], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-') {
+        index += 1;
+    }
+    if index >= limit || !matches!(bytes[index], b'(' | b'[' | b'{') {
+        return DynamicGroup::Absent;
+    }
+    let mut expected: Vec<u8> = Vec::new();
+    while index < limit {
+        match bytes[index] {
+            b'"' => index = skip_string_literal(bytes, index, limit),
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index += 2;
+                while index < limit && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => index = skip_block_comment(bytes, index, limit),
+            open @ (b'(' | b'[' | b'{') => {
+                expected.push(closing_bracket(open));
+                index += 1;
+            }
+            close @ (b')' | b']' | b'}') => {
+                if expected.last() != Some(&close) {
+                    return DynamicGroup::Unclosed { end: limit };
+                }
+                expected.pop();
+                index += 1;
+                if expected.is_empty() {
+                    return DynamicGroup::Closed { end: index };
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    DynamicGroup::Unclosed { end: limit }
+}
+
+fn closing_bracket(open: u8) -> u8 {
+    match open {
+        b'(' => b')',
+        b'[' => b']',
+        b'{' => b'}',
+        _ => open,
+    }
+}
+
+/// Skip a Typst string literal and return the offset just past it.
+fn skip_string_literal(bytes: &[u8], start: usize, limit: usize) -> usize {
+    let mut index = start + 1;
+    while index < limit {
+        match bytes[index] {
+            b'\\' => index = (index + 2).min(limit),
+            b'"' => return index + 1,
+            b'\n' => return index,
+            _ => index += 1,
+        }
+    }
+    limit
+}
+
+/// Skip a possibly nested Typst block comment and return the offset just past it.
+fn skip_block_comment(bytes: &[u8], start: usize, limit: usize) -> usize {
+    let mut index = start + 2;
+    let mut nesting = 1usize;
+    while index < limit {
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            nesting += 1;
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+            nesting -= 1;
+            index += 2;
+            if nesting == 0 {
+                return index;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    limit
 }
 
 fn is_comment(text: &str) -> bool {

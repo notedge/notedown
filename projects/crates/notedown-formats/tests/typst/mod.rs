@@ -150,3 +150,110 @@ fn empty_document_records_explicit_loss() {
     assert!(graph.blocks.is_empty());
     assert!(graph.coverage.loss.iter().any(|loss| loss.code == "import.typst.empty_document"));
 }
+
+/// The single opaque block of a document, together with its authored span.
+fn only_opaque(graph: &DocumentGraph) -> (&str, &str, notedown_ir::SourceSpan) {
+    let opaques: Vec<_> = blocks(graph)
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Opaque { kind, payload_hint, .. } => Some((kind.as_str(), payload_hint.as_str(), node.id)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opaques.len(), 1, "expected exactly one opaque block, got {opaques:?}");
+    let (kind, payload, id) = opaques[0];
+    let span = graph.block_span(id).expect("opaque block carries its authored span");
+    (kind, payload, span)
+}
+
+fn loss_index(graph: &DocumentGraph, code: &str) -> usize {
+    graph
+        .coverage
+        .loss
+        .iter()
+        .position(|loss| loss.code == code)
+        .unwrap_or_else(|| panic!("missing loss `{code}`"))
+}
+
+#[test]
+fn cross_line_figure_group_becomes_one_opaque_block() {
+    let group = "#figure(\n  image(\"a.png\"),\n  caption: [A box],\n)";
+    let text = format!("{group}\n\nafter\n");
+    let graph = import_typst_bytes("figure.typ", &text).unwrap();
+
+    let (kind, payload, span) = only_opaque(&graph);
+    assert_eq!(kind, "typst.expression.figure");
+    assert!(payload.contains("caption: [A box]"), "payload kept the whole group: {payload}");
+    let covered = &text[span.start as usize..span.end as usize];
+    assert_eq!(covered, group, "span must cover the construct from `#` through its closing bracket");
+
+    assert_eq!(paragraph_text(&graph), vec!["after".to_string()], "construct body must never surface as body text");
+
+    let index = loss_index(&graph, "import.typst.dynamic_content");
+    assert_eq!(graph.coverage.loss[index].status, notedown_ir::SemanticStatus::Unsupported);
+    assert_eq!(graph.loss_span(index), Some(span), "loss marker carries the same span as the opaque block");
+}
+
+#[test]
+fn cross_line_rect_group_keeps_arguments_out_of_the_body() {
+    let group = "#rect(\n  width: 2cm\n)";
+    let text = format!("{group}\n\nafter\n");
+    let graph = import_typst_bytes("rect.typ", &text).unwrap();
+
+    let (kind, payload, span) = only_opaque(&graph);
+    assert_eq!(kind, "typst.expression.rect");
+    assert!(payload.contains("width: 2cm"), "payload kept the continuation line: {payload}");
+    assert_eq!(&text[span.start as usize..span.end as usize], group);
+    assert_eq!(paragraph_text(&graph), vec!["after".to_string()]);
+}
+
+#[test]
+fn group_string_literal_parenthesis_does_not_close_the_group() {
+    let group = "#text(\n  \"a ) b\",\n)";
+    let text = format!("{group}\n\nafter\n");
+    let graph = import_typst_bytes("string.typ", &text).unwrap();
+
+    let (_, payload, span) = only_opaque(&graph);
+    assert!(payload.contains("a ) b"));
+    assert_eq!(
+        &text[span.start as usize..span.end as usize],
+        group,
+        "the `)` inside the string literal must not end the group"
+    );
+    assert_eq!(paragraph_text(&graph), vec!["after".to_string()]);
+}
+
+#[test]
+fn group_comment_parenthesis_does_not_close_the_group() {
+    let line_group = "#figure(\n  // ) not the closing bracket\n  image(\"a.png\"),\n)";
+    let block_group = "#rect(\n  /* ) still inside the comment */\n  width: 2cm\n)";
+    let text = format!("{line_group}\n\n{block_group}\n\nafter\n");
+    let graph = import_typst_bytes("comment.typ", &text).unwrap();
+
+    let opaques: Vec<&str> = blocks(&graph)
+        .iter()
+        .filter_map(|node| match &node.block {
+            Block::Opaque { payload_hint, .. } => Some(payload_hint.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opaques.len(), 2, "each construct stays one opaque block, got {opaques:?}");
+    assert_eq!(&text[0..line_group.len()], line_group);
+    assert_eq!(&text[line_group.len() + 2..line_group.len() + 2 + block_group.len()], block_group);
+    assert_eq!(paragraph_text(&graph), vec!["after".to_string()]);
+}
+
+#[test]
+fn unterminated_group_is_diagnosed_instead_of_swallowed() {
+    let text = "#figure(\n  image(\"a.png\"),\n";
+    let graph = import_typst_bytes("unterminated.typ", text).unwrap();
+
+    let (_, payload, span) = only_opaque(&graph);
+    assert!(payload.contains("image(\"a.png\")"));
+    assert_eq!(&text[span.start as usize..span.end as usize], text, "span covers the unclosed group to the end of the region");
+
+    let index = loss_index(&graph, "import.typst.unterminated_dynamic_group");
+    assert_eq!(graph.coverage.loss[index].status, notedown_ir::SemanticStatus::Unsupported);
+    assert_eq!(graph.loss_span(index), Some(span));
+    assert!(paragraph_text(&graph).is_empty(), "no construct fragment may leak into the body");
+}

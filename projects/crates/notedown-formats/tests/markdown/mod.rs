@@ -1,5 +1,23 @@
-use notedown_formats::{export::markdown::export_markdown, import::markdown::import_markdown_bytes};
+use notedown_formats::{export::html::export_html, export::markdown::export_markdown, import::markdown::import_markdown_bytes};
 use notedown_ir::{Block, DocumentGraph, DocumentId, Inline, RelationEndpoint, RelationKind, SemanticStatus};
+
+#[test]
+fn markdown_stray_angle_bracket_stays_text_and_is_escaped_on_export() {
+    let graph = import_markdown_bytes("angle.md", "Para with 1 < 2.\n").expect("import markdown");
+    let Block::Paragraph { content } = &graph.blocks[0].block
+    else {
+        panic!("paragraph expected: {:#?}", graph.blocks)
+    };
+    assert!(matches!(content.first(), Some(Inline::Text { text }) if text == "Para with 1 < 2."), "{content:?}");
+    assert_eq!(export_markdown(&graph).expect("export markdown"), "Para with 1 \\< 2.\n\n");
+    assert!(export_html(&graph).expect("export html").contains("1 &lt; 2"));
+    let reopened = import_markdown_bytes("angle-roundtrip.md", "Para with 1 \\< 2.\n").expect("reopen markdown");
+    let Block::Paragraph { content } = &reopened.blocks[0].block
+    else {
+        panic!("paragraph expected: {:#?}", reopened.blocks)
+    };
+    assert!(matches!(content.first(), Some(Inline::Text { text }) if text == "Para with 1 < 2."), "{content:?}");
+}
 
 #[test]
 fn markdown_lists_lower_to_list_blocks() {

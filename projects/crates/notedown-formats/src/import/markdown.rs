@@ -412,7 +412,9 @@ fn collect_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context
                 let text = leaf.text(source);
                 if !text.is_empty() && !is_markdown_marker(text.as_ref()) {
                     let inline = match leaf.kind() {
-                        MarkdownTokenType::HtmlTag | MarkdownTokenType::HtmlComment => Inline::RawHtml { html: text.into_owned() },
+                        MarkdownTokenType::HtmlTag | MarkdownTokenType::HtmlComment if is_authored_html_tag(text.as_ref()) => {
+                            Inline::RawHtml { html: text.into_owned() }
+                        }
                         _ => Inline::Text { text: decode_escaped_text(text.as_ref()) },
                     };
                     push_inline(&mut inlines, inline);
@@ -984,6 +986,26 @@ fn extract_html_block(node: RedNode<MarkdownLanguage>, trailing: &[RedTree<Markd
         consumed += 1;
     }
     (source.slice((node.span().start..end).into()).into_owned(), consumed)
+}
+
+/// Whether a lexed HTML token is an authored tag rather than a stray `<`.
+///
+/// `oak-markdown` lexes a bare `<` such as `1 < 2` as an HTML tag and lets the
+/// run swallow the rest of the document. Only tokens that start like a tag are
+/// kept verbatim, so a comparison operator stays text and is escaped on export.
+fn is_authored_html_tag(text: &str) -> bool {
+    if text.contains('\n') {
+        return false;
+    }
+    let Some(rest) = text.strip_prefix('<') else {
+        return false;
+    };
+    match rest.chars().next() {
+        Some(first) if first.is_ascii_alphabetic() => true,
+        Some('!') | Some('?') => true,
+        Some('/') => matches!(rest[1..].chars().next(), Some(first) if first.is_ascii_alphabetic()),
+        _ => false,
+    }
 }
 
 /// Lower a definition description into paragraph inlines.

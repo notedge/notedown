@@ -48,6 +48,7 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
     let assets = plan_assets(graph);
     let source_map = asset_source_map(&assets);
     let mut emitted = std::collections::HashSet::new();
+    let mut footnotes: Vec<&str> = Vec::new();
     for node_id in &plan.blocks {
         if emitted.contains(node_id) {
             continue;
@@ -57,7 +58,16 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
         else {
             return Err(FormatError::invalid_input(format!("chapter block `{node_id:?}` is missing from the graph")));
         };
+        if let Block::Opaque { kind, payload_hint, .. } = &node.block {
+            if kind == "footnote_definition" {
+                footnotes.push(payload_hint.as_str());
+                continue;
+            }
+        }
         write_node(&mut out, graph, &node.block, Some(&source_map))?;
+    }
+    if !footnotes.is_empty() {
+        write_footnote_section(&mut out, &footnotes);
     }
 
     out.push_str(
@@ -66,6 +76,47 @@ pub fn chapter_xhtml(graph: &DocumentGraph, plan: &ChapterPlan) -> Result<String
 "#,
     );
     Ok(out)
+}
+
+/// Footnote definitions are collected into one endnotes section per chapter.
+/// Each item keeps the authored GFM payload in `data-footnote-source-hex` so
+/// the definition can be restored instead of re-serialized from display text.
+fn write_footnote_section(out: &mut String, definitions: &[&str]) {
+    out.push_str(r#"<section class="footnotes" role="doc-endnotes"><ol>"#);
+    for payload in definitions {
+        let Some((label, body)) = split_footnote_definition(payload)
+        else {
+            continue;
+        };
+        out.push_str(r#"<li id="fn-"#);
+        escape_attribute(out, &label);
+        out.push_str(r#"" data-footnote-source-hex=""#);
+        escape_attribute(out, &encode_hex(payload));
+        out.push_str(r#""><p>"#);
+        escape_text(out, &body);
+        out.push_str(r##"</p><a href="#fnref-"##);
+        escape_attribute(out, &label);
+        out.push_str(r#"">↩</a></li>"#);
+    }
+    out.push_str("</ol></section>\n");
+}
+
+fn split_footnote_definition(payload: &str) -> Option<(String, String)> {
+    let rest = payload.strip_prefix("[^")?;
+    let (label, body) = rest.split_once("]:")?;
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    Some((label.to_string(), body.trim_start_matches([' ', '\t', '\n', '\r']).trim_end().to_string()))
+}
+
+fn encode_hex(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }
 
 fn nested_block_ids(graph: &DocumentGraph, node_id: NodeId) -> Vec<NodeId> {
@@ -341,7 +392,9 @@ fn write_inlines(
                 out.push_str("</span>");
             }
             Inline::Note { label, display } => {
-                out.push_str("<sup class=\"footnote-reference\"><a href=\"#fn-");
+                out.push_str(r#"<sup class="footnote-reference" data-footnote-label=""#);
+                escape_attribute(out, label);
+                out.push_str(r##""><a href="#fn-"##);
                 escape_attribute(out, label);
                 out.push_str("\">");
                 match display {

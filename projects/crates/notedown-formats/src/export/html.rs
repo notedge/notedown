@@ -44,14 +44,63 @@ pub fn export_html_with_diagrams(graph: &DocumentGraph, diagrams: &HashMap<NodeI
         out.push_str("</h1></header>");
     }
     let nested = nested_block_ids(graph);
+    let mut footnotes: Vec<&str> = Vec::new();
     for node in &graph.blocks {
         if nested.contains(&node.id) {
             continue;
         }
+        if let Block::Opaque { kind, payload_hint, .. } = &node.block {
+            if kind == "footnote_definition" {
+                footnotes.push(payload_hint.as_str());
+                continue;
+            }
+        }
         write_node(&mut out, graph, node.id, &node.block, diagrams)?;
+    }
+    if !footnotes.is_empty() {
+        write_footnote_section(&mut out, &footnotes);
     }
     out.push_str("</article>");
     Ok(out)
+}
+
+/// Footnote definitions have no block form in HTML: they are collected into
+/// one endnotes section so the reference links resolve. Every entry keeps the
+/// authored GFM payload in `data-footnote-source-hex` so the HTML importer can
+/// restore the exact definition instead of re-serializing it from display text.
+fn write_footnote_section(out: &mut String, definitions: &[&str]) {
+    out.push_str(r#"<section class="footnotes" role="doc-endnotes"><ol>"#);
+    for payload in definitions {
+        let Some((label, body)) = split_footnote_definition(payload)
+        else {
+            continue;
+        };
+        out.push_str(r#"<li id="fn-"#);
+        escape_attribute(out, &label);
+        out.push_str(r#"" data-footnote-source-hex=""#);
+        escape_attribute(out, &encode_hex(payload));
+        out.push_str(r#""><p>"#);
+        escape_text(out, &body);
+        out.push_str(r##"</p><a href="#fnref-"##);
+        escape_attribute(out, &label);
+        out.push_str(r#"">↩</a>"#);
+        // The backlink lives outside the paragraph so the imported body stays
+        // byte-identical to the authored definition.
+        out.push_str(r#"</li>"#);
+    }
+    out.push_str("</ol></section>");
+}
+
+/// Split a GFM footnote definition payload (`[^label]: body`) into its label
+/// and body. Continuation lines stay in the body verbatim.
+fn split_footnote_definition(payload: &str) -> Option<(String, String)> {
+    let rest = payload.strip_prefix("[^")?;
+    let (label, body) = rest.split_once("]:")?;
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    Some((label.to_string(), body.trim_start_matches([' ', '\t', '\n', '\r']).trim_end().to_string()))
 }
 
 fn write_node(
@@ -338,7 +387,9 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) -> Result<(), FormatError
                 out.push_str("</span>");
             }
             Inline::Note { label, display } => {
-                out.push_str("<sup class=\"footnote-reference\"><a href=\"#fn-");
+                out.push_str(r#"<sup class="footnote-reference" data-footnote-label=""#);
+                escape_attribute(out, label);
+                out.push_str(r##""><a href="#fn-"##);
                 escape_attribute(out, label);
                 out.push_str("\">");
                 match display {

@@ -294,34 +294,37 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
     let span: std::ops::Range<usize> = element.span.clone().into();
     match tag.as_str() {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            vec![(Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph, source), children: Vec::new() }, span)]
+            vec![(
+                Block::Section { level: tag[1..].parse().unwrap_or(1), title: lower_inlines(element, graph, source), children: Vec::new() },
+                span,
+            )]
         }
         "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph, source) }, span)],
         "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph, source) }, span)],
         "pre" => {
             if let Some((language, chart)) = explicit_chart_marker(element, source) {
                 vec![(Block::Chart { language, source: chart }, span)]
-            } else if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
+            }
+            else if let Some((language, diagram)) = explicit_diagram_marker(element, source) {
                 vec![(Block::Diagram { language, source: diagram }, span)]
-            } else {
+            }
+            else {
                 match hosted_diagram_source(element, graph, source) {
                     HostedDiagram::Source(language, diagram) => vec![(Block::Diagram { language, source: diagram }, span)],
                     HostedDiagram::Empty => lower_children(&element.children, graph, source),
                     HostedDiagram::Absent => {
-                        vec![
-                            (
-                                Block::Code {
-                                    language: element
-                                        .children
-                                        .iter()
-                                        .filter_map(as_element)
-                                        .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
-                                        .and_then(|child| attribute(child, "class")),
-                                    content: preformatted_source(element, source),
-                                },
-                                span,
-                            ),
-                        ]
+                        vec![(
+                            Block::Code {
+                                language: element
+                                    .children
+                                    .iter()
+                                    .filter_map(as_element)
+                                    .find(|child| child.tag_name.eq_ignore_ascii_case("code"))
+                                    .and_then(|child| attribute(child, "class")),
+                                content: preformatted_source(element, source),
+                            },
+                            span,
+                        )]
                     }
                 }
             }
@@ -331,10 +334,8 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
             // Ordered items must carry their number: the markdown writer
             // refuses lists whose items lack one. `<ol start="n">` shifts the
             // sequence; unordered items stay unnumbered.
-            let start = attribute(element, "start")
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|value| ordered && *value > 0)
-                .unwrap_or(1);
+            let start =
+                attribute(element, "start").and_then(|value| value.parse::<u32>().ok()).filter(|value| ordered && *value > 0).unwrap_or(1);
             let mut number = start;
             let items = element
                 .children
@@ -355,11 +356,21 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
                 .iter()
                 .filter_map(as_element)
                 .find(|child| child.tag_name.eq_ignore_ascii_case("caption"))
-                .map(|cap| lower_inlines(cap, graph, source).into_iter().filter_map(|inline| match inline {
-                    notedown_ir::Inline::Text { text } => Some(text),
-                    _ => None,
-                }).collect::<String>())
+                .map(|cap| {
+                    lower_inlines(cap, graph, source)
+                        .into_iter()
+                        .filter_map(|inline| match inline {
+                            notedown_ir::Inline::Text { text } => Some(text),
+                            _ => None,
+                        })
+                        .collect::<String>()
+                })
                 .and_then(|cap| if cap.is_empty() { None } else { Some(cap) });
+            // A cell holds a block layout in HTML (`<td><p>one</p><p>two</p></td>`),
+            // but the IR table cell only carries inline content. The authored text
+            // survives as a flattened inline run, so this is a recorded partial
+            // loss rather than a silent downgrade.
+            let mut flattened_cell_blocks = false;
             let rows = descendants(element, "tr")
                 .into_iter()
                 .map(|row| {
@@ -373,12 +384,22 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
                             if cell.tag_name.eq_ignore_ascii_case("th") {
                                 is_header = true;
                             }
+                            if cell.children.iter().filter_map(as_element).any(is_block_element) {
+                                flattened_cell_blocks = true;
+                            }
                             notedown_ir::TableCell { content: lower_inlines(cell, graph, source), colspan: 1, rowspan: 1 }
                         })
                         .collect();
                     notedown_ir::TableRow { is_header, cells }
                 })
                 .collect();
+            if flattened_cell_blocks {
+                graph.push_loss(LossMarker {
+                    code: "import.html.table_cell_blocks".into(),
+                    message: "table cells authored as block layout are flattened into one inline run".into(),
+                    status: SemanticStatus::Partial,
+                });
+            }
             vec![(Block::Table { caption, rows }, span)]
         }
         "hr" => vec![(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }, span)],
@@ -387,7 +408,10 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
         // prose.
         "svg" => vec![(Block::RawHtml { html: raw_element_markup(element, source) }, span)],
         "section" | "article" | "main" | "div" | "figure" | "nav" => {
-            if let Some((language, chart)) = explicit_chart_marker(element, source) {
+            if let Some(definitions) = lower_footnote_section(element) {
+                definitions
+            }
+            else if let Some((language, chart)) = explicit_chart_marker(element, source) {
                 vec![(Block::Chart { language, source: chart }, span)]
             }
             else {
@@ -399,7 +423,7 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
                     },
                 }
             }
-        },
+        }
         _ => Vec::new(),
     }
 }
@@ -423,6 +447,83 @@ fn explicit_chart_marker(element: &Element, source: &str) -> Option<(String, Str
     Some((language, chart))
 }
 
+/// Lower an endnotes container into opaque `footnote_definition` blocks.
+///
+/// The IR models footnote bodies as opaque authored payloads, so a container
+/// must not leak its list structure into the document.
+/// `data-footnote-source-hex` restores the exact GFM definition, while the
+/// visible `<li>` text is only a fallback for HTML produced elsewhere.
+fn lower_footnote_section(element: &Element) -> Option<Vec<(Block, std::ops::Range<usize>)>> {
+    let class = attribute(element, "class").unwrap_or_default();
+    let has_class = class.split_whitespace().any(|token| token.eq_ignore_ascii_case("footnotes"));
+    let has_role = attribute(element, "role").is_some_and(|role| role.eq_ignore_ascii_case("doc-endnotes"));
+    if !has_class && !has_role {
+        return None;
+    }
+    let mut definitions = Vec::new();
+    for item in descendants(element, "li") {
+        let label = attribute(item, "data-footnote-label")
+            .or_else(|| attribute(item, "id").and_then(|id| id.strip_prefix("fn").map(|rest| rest.trim_start_matches('-').to_string())));
+        let Some(label) = label.map(|label| label.trim().to_string()).filter(|label| !label.is_empty())
+        else {
+            continue;
+        };
+        let payload = attribute(item, "data-footnote-source-hex").and_then(|hex| decode_hex(&hex)).unwrap_or_else(|| {
+            let body = text_content(item).trim().to_string();
+            format!("[^{label}]: {body}")
+        });
+        definitions.push((
+            Block::Opaque { kind: "footnote_definition".into(), payload_hint: payload, status: SemanticStatus::Resolved },
+            item.span.clone().into(),
+        ));
+    }
+    if definitions.is_empty() {
+        return None;
+    }
+    Some(definitions)
+}
+
+/// Recognize a footnote reference element and collapse it to `Inline::Note`.
+///
+/// Only explicit markers qualify: the exporter's `data-footnote-label`, an
+/// anchor class of `footnote-ref`, or `role="doc-noteref"`. A plain intra-page
+/// anchor stays a link, and Pandoc-style `a.footnote-ref > sup` is accepted.
+fn footnote_reference_inline(element: &Element) -> Option<Inline> {
+    let link = if element.tag_name.eq_ignore_ascii_case("a") {
+        element
+    }
+    else {
+        element.children.iter().filter_map(as_element).find(|child| child.tag_name.eq_ignore_ascii_case("a"))?
+    };
+    if !has_footnote_marker(element) && !has_footnote_marker(link) {
+        return None;
+    }
+    let href = attribute(link, "href").unwrap_or_default();
+    let from_href = href.trim().strip_prefix("#fn").map(|rest| rest.trim_start_matches('-').to_string()).filter(|label| !label.is_empty());
+    let label = attribute(element, "data-footnote-label").or_else(|| attribute(link, "data-footnote-label")).or(from_href)?.trim().to_string();
+    if label.is_empty() {
+        return None;
+    }
+    let text = text_content(link).trim().to_string();
+    // GFM footnote references have no custom display: the marker text is the
+    // label. Keep `display` only when the authored text differs, so the
+    // Markdown writer can tell an authored display apart from the default.
+    let display = (!text.is_empty() && text != label).then(|| vec![Inline::Text { text }]);
+    Some(Inline::Note { label, display })
+}
+
+fn has_footnote_marker(element: &Element) -> bool {
+    if attribute(element, "data-footnote-label").is_some() {
+        return true;
+    }
+    if attribute(element, "role").is_some_and(|role| role.eq_ignore_ascii_case("doc-noteref")) {
+        return true;
+    }
+    attribute(element, "class").is_some_and(|class| {
+        class.split_whitespace().any(|token| token.eq_ignore_ascii_case("footnote-ref") || token.eq_ignore_ascii_case("footnote-reference"))
+    })
+}
+
 /// Outcome of probing a hosted diagram container (`.mermaid` and friends).
 enum HostedDiagram {
     /// No hosted diagram marker on the container.
@@ -440,7 +541,8 @@ enum HostedDiagram {
 /// otherwise textless container records an explicit loss instead of being
 /// swallowed as an empty `Block::Diagram`.
 fn hosted_diagram_source(element: &Element, graph: &mut DocumentGraph, source: &str) -> HostedDiagram {
-    let Some(language) = hosted_diagram_language(element) else {
+    let Some(language) = hosted_diagram_language(element)
+    else {
         return HostedDiagram::Absent;
     };
     let diagram = diagram_source(element, source);
@@ -535,7 +637,8 @@ fn decode_character_references(raw: &str) -> String {
     while let Some(start) = rest.find('&') {
         out.push_str(&rest[..start]);
         let candidate = &rest[start..];
-        let Some(end) = candidate.find(';') else {
+        let Some(end) = candidate.find(';')
+        else {
             out.push_str(candidate);
             return out;
         };
@@ -674,6 +777,15 @@ fn lower_inline_element(element: &Element, graph: &mut DocumentGraph, source: &s
         return vec![Inline::RawHtml { html: raw_element_markup(element, source) }];
     }
     let nested = lower_inlines(element, graph, source);
+    // Footnote references are semantic notes, not superscript text. Both the
+    // exporter marker (`sup.footnote-reference[data-footnote-label]`) and the
+    // common Markdown HTML shape (`a.footnote-ref[role=doc-noteref]` wrapping a
+    // `<sup>`) collapse back to `Inline::Note`.
+    if matches!(tag.as_str(), "sup" | "a") {
+        if let Some(note) = footnote_reference_inline(element) {
+            return vec![note];
+        }
+    }
     let inlines = match tag.as_str() {
         "strong" | "b" => vec![Inline::Styled { style: "bold".into(), children: nested }],
         "em" | "i" => vec![Inline::Styled { style: "italic".into(), children: nested }],

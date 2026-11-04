@@ -131,7 +131,6 @@ fn plan_by_top_level_sections(graph: &DocumentGraph) -> Option<Vec<ChapterPlan>>
             label,
             blocks,
             synthetic: true,
-            Block::Quote { children, .. } => ids.extend(children.iter().copied()),
         });
     }
     if plans.is_empty() { None } else { Some(plans) }
@@ -162,6 +161,7 @@ fn nested_block_ids(graph: &DocumentGraph) -> HashSet<NodeId> {
     for node in &graph.blocks {
         match &node.block {
             Block::Section { children, .. } => ids.extend(children.iter().copied()),
+            Block::Quote { children, .. } => ids.extend(children.iter().copied()),
             Block::List { items, .. } => {
                 for item in items {
                     ids.extend(item.children.iter().copied());

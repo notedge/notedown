@@ -531,6 +531,26 @@ fn html_import_refuses_invalid_cell_span_instead_of_collapsing_it() {
 }
 
 #[test]
+fn html_import_lowers_definition_list_to_paragraphs_with_a_loss_code() {
+    let graph = import_html_text("definition-list.html", "<body><dl><dt>Term</dt><dd>Definition</dd></dl></body>").expect("import html");
+    let texts = graph
+        .blocks
+        .iter()
+        .map(|node| match &node.block {
+            Block::Paragraph { content } => content.iter().map(Inline::plain_text).collect::<String>(),
+            other => panic!("paragraph expected, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(texts, vec!["Term".to_string(), "Definition".to_string()]);
+    assert!(
+        graph.coverage.loss.iter().any(|loss| loss.code == "import.html.definition_list" && loss.status == SemanticStatus::Partial),
+        "{:?}",
+        graph.coverage.loss
+    );
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
 fn html_import_records_flattened_table_cell_blocks() {
     let graph =
         import_html_text("cell-blocks.html", "<body><table><tr><th>Head</th></tr><tr><td><p>one</p><p>two</p></td></tr></table></body>")

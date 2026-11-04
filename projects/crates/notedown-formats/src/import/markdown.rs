@@ -37,6 +37,7 @@ fn markdown_import_language() -> MarkdownLanguage {
     language.allow_footnotes = true;
     language.allow_strikethrough = true;
     language.allow_lists = true;
+    language.allow_definition_lists = true;
     language.allow_blockquotes = true;
     language.allow_fenced_code_blocks = true;
     language.allow_tables = true;
@@ -126,6 +127,23 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
             // standalone `<table>` element is lowered into the IR table.
             let block = lower_html_table_block(&html).unwrap_or(Block::RawHtml { html });
             graph.push_block(block);
+            pending_footnote = None;
+            continue;
+        }
+        if node.element_type() == MarkdownElementType::DefinitionList {
+            // The IR has no definition list node. The term stays a paragraph and
+            // each description becomes a paragraph of its own, and the downgrade
+            // is recorded so it is never mistaken for a faithful definition list.
+            graph.push_loss(LossMarker {
+                code: "import.markdown.definition_list".into(),
+                message: "definition list is lowered to term and description paragraphs because the IR has no definition list node"
+                    .into(),
+                status: SemanticStatus::Partial,
+            });
+            let content = definition_description_inlines(node, source, &mut context);
+            if !content.is_empty() {
+                graph.push_block(Block::Paragraph { content });
+            }
             pending_footnote = None;
             continue;
         }
@@ -966,6 +984,23 @@ fn extract_html_block(node: RedNode<MarkdownLanguage>, trailing: &[RedTree<Markd
         consumed += 1;
     }
     (source.slice((node.span().start..end).into()).into_owned(), consumed)
+}
+
+/// Lower a definition description into paragraph inlines.
+///
+/// `oak-markdown` keeps the `:` marker in the node, so it is removed here while
+/// the authored description text keeps its inline formatting.
+fn definition_description_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Vec<Inline> {
+    let mut content = collect_inlines(node, source, context);
+    trim_trailing_line_break(&mut content);
+    if let Some(Inline::Text { text }) = content.first_mut() {
+        let stripped = text.strip_prefix(':').map(|rest| rest.trim_start_matches([' ', '\t'])).unwrap_or(text.as_str());
+        *text = stripped.to_string();
+    }
+    if matches!(content.first(), Some(Inline::Text { text }) if text.is_empty()) {
+        content.remove(0);
+    }
+    content
 }
 
 /// Lower a standalone HTML table block into the IR table.

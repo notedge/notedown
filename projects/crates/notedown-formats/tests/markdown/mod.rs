@@ -252,6 +252,32 @@ fn markdown_spanning_table_round_trips_through_an_html_table() {
 }
 
 #[test]
+fn markdown_definition_list_lowers_to_paragraphs_with_a_loss_code() {
+    let source = "Term\n: definition\n: second\n";
+    let graph = import_markdown_bytes("definition-list.md", source).expect("import markdown");
+    let texts = graph
+        .blocks
+        .iter()
+        .map(|node| match &node.block {
+            Block::Paragraph { content } => content.iter().map(Inline::plain_text).collect::<String>(),
+            other => panic!("paragraph expected, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(texts, vec!["Term".to_string(), "definition".to_string(), "second".to_string()]);
+    assert!(
+        graph.coverage.loss.iter().any(|loss| loss.code == "import.markdown.definition_list" && loss.status == SemanticStatus::Partial),
+        "{:?}",
+        graph.coverage.loss
+    );
+    assert!(graph.validate().is_valid());
+
+    let markdown = export_markdown(&graph).expect("export definition list");
+    assert_eq!(markdown, "Term\n\ndefinition\n\nsecond\n\n");
+    let reopened = import_markdown_bytes("definition-list-roundtrip.md", &markdown).expect("reopen definition list");
+    assert!(!reopened.coverage.loss.iter().any(|loss| loss.code == "import.markdown.definition_list"), "{:?}", reopened.coverage.loss);
+}
+
+#[test]
 fn markdown_inline_code_strips_backticks() {
     let source = "Use `code` here.\n";
     let graph = import_markdown_bytes("inline-code.md", source).expect("import markdown");

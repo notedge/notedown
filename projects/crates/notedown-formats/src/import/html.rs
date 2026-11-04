@@ -444,6 +444,23 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
             vec![(Block::Table { caption, rows }, span)]
         }
         "hr" => vec![(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial }, span)],
+        "dl" => {
+            // The IR has no definition list node. Terms and definitions become
+            // paragraphs of their own and the downgrade is recorded.
+            graph.push_loss(LossMarker {
+                code: "import.html.definition_list".into(),
+                message: "definition list is lowered to term and definition paragraphs because the IR has no definition list node"
+                    .into(),
+                status: SemanticStatus::Partial,
+            });
+            element
+                .children
+                .iter()
+                .filter_map(as_element)
+                .filter(|child| matches!(child.tag_name.to_ascii_lowercase().as_str(), "dt" | "dd"))
+                .map(|child| (Block::Paragraph { content: lower_inlines(child, graph, source) }, child.span.clone().into()))
+                .collect()
+        }
         // Inline SVG is captured verbatim as raw markup: the importer never
         // re-parses it into a shape model and never leaks its label text into
         // prose.
@@ -741,6 +758,7 @@ fn is_block_element(element: &Element) -> bool {
             | "h5"
             | "h6"
             | "hr"
+            | "dl"
             | "svg"
             | "section"
             | "article"

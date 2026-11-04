@@ -2,6 +2,7 @@
 //! structured refusals with JSON paths.
 
 mod catalog;
+mod golden;
 mod playwright_gate;
 mod matrix;
 mod spans;

@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "bar-zero-default",
+      "note": "A quantitative position scale defaults to zero, so the axis starts at 0 even though the data spans 3 to 7."
+    },
+    {
+      "id": "bar-zero-off",
+      "note": "`zero: false` fits the domain to the data extent, so the axis starts at 3 and the baseline moves."
+    },
+    {
+      "id": "bar-nice-on",
+      "note": "`nice: true` rounds the authored 0 to 17 domain outward to whole ticks, so the axis end exceeds the data maximum."
+    },
+    {
+      "id": "bar-nice-off",
+      "note": "`nice: false` keeps the authored 0 to 17 domain verbatim, so the axis end is a fractional tick position."
+    },
+    {
+      "id": "bar-zero-off-nice-on",
+      "note": "Disabling zero and enabling nice act independently: the domain fits the data and is then rounded outward."
+    },
+    {
+      "id": "point-log",
+      "note": "A log scale places decades evenly and does not accept a zero anchor, so the axis starts at the first decade above 3."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <line id="chart-axis-x" data-role="axis" x1="56" y1="144" x2="264" y2="144" stroke="#6b7485" stroke-width="1"/>
+  <line id="chart-x-tick-0-mark" data-role="tick" x1="110.47619" y1="144" x2="110.47619" y2="148" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-x-tick-0" data-role="tick" x="110.47619" y="160" font-family="sans-serif" font-size="12" text-anchor="middle" fill="#6b7485">A</text>
+  <line id="chart-x-tick-1-mark" data-role="tick" x1="209.52381" y1="144" x2="209.52381" y2="148" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-x-tick-1" data-role="tick" x="209.52381" y="160" font-family="sans-serif" font-size="12" text-anchor="middle" fill="#6b7485">B</text>
+  <line id="chart-axis-y" data-role="axis" x1="56" y1="144" x2="56" y2="56" stroke="#6b7485" stroke-width="1"/>
+  <line id="chart-y-tick-0-mark" data-role="tick" x1="56" y1="144" x2="52" y2="144" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-y-tick-0" data-role="tick" x="50" y="148.2" font-family="sans-serif" font-size="12" text-anchor="end" fill="#6b7485">0</text>
+  <line id="chart-y-tick-1-mark" data-role="tick" x1="56" y1="118.857143" x2="52" y2="118.857143" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-y-tick-1" data-role="tick" x="50" y="123.057143" font-family="sans-serif" font-size="12" text-anchor="end" fill="#6b7485">2</text>
+  <line id="chart-y-tick-2-mark" data-role="tick" x1="56" y1="93.714286" x2="52" y2="93.714286" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-y-tick-2" data-role="tick" x="50" y="97.914286" font-family="sans-serif" font-size="12" text-anchor="end" fill="#6b7485">4</text>
+  <line id="chart-y-tick-3-mark" data-role="tick" x1="56" y1="68.571429" x2="52" y2="68.571429" stroke="#6b7485" stroke-width="1"/>
+  <text id="chart-y-tick-3" data-role="tick" x="50" y="72.771429" font-family="sans-serif" font-size="12" text-anchor="end" fill="#6b7485">6</text>
+  <rect id="chart-bar-0" data-role="mark" data-source="A" x="65.904762" y="106.285714" width="89.142857" height="37.714286" fill="#4a7fbf"/>
+  <rect id="chart-bar-1" data-role="mark" data-source="B" x="164.952381" y="56" width="89.142857" height="88" fill="#4a7fbf"/>
+</svg>

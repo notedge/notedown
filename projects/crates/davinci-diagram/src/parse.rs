@@ -4,6 +4,11 @@
 //! `oak-mermaid` AST onto [`crate::spec::DiagramSpec`] and leaves geometry to
 //! [`crate::compile::compile`] or [`crate::compile::compile_sequence`] and
 //! [`crate::render::render`] or [`crate::render::render_sequence`].
+//!
+//! Layout diagnostics run without a [`crate::SourceMap`]: the `oak-mermaid`
+//! AST exposes only the whole-diagram range, so no node, edge, or participant
+//! token is available. A Mermaid diagnostic therefore carries no primary
+//! label, while the DOT and PlantUML frontends do locate their tokens.
 
 use std::collections::{BTreeMap, BTreeSet};
 

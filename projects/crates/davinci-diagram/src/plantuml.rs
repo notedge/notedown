@@ -25,9 +25,10 @@ use oak_plantuml::{
 
 use crate::{
     LoweredDiagram,
-    compile::{LayoutOptions, compile},
+    compile::{LayoutOptions, compile_with_source},
     error::DiagramError,
     render::render,
+    source::SourceMap,
     spec::{Activation, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, SequenceLayout},
 };
 
@@ -128,7 +129,7 @@ fn spanned_parse_error(source: &str, error: &OakError) -> DiagramError {
 /// Lower PlantUML source into a source-independent diagram spec.
 pub fn plantuml_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_plantuml(source)?;
-    plantuml_root_to_spec(&root).map(|(spec, _)| spec)
+    plantuml_root_to_spec(&root).map(|(spec, _, _)| spec)
 }
 
 /// Lower PlantUML source to a layout plan and resolved display scene.
@@ -138,8 +139,8 @@ pub fn plantuml_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
 /// spans reach the shared sequence compiler instead of being dropped.
 pub fn plantuml_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let root = parse_plantuml(source)?;
-    let (spec, mut diagnostics) = plantuml_root_to_spec(&root)?;
-    let plan = compile(&spec, &LayoutOptions::default());
+    let (spec, mut diagnostics, sources) = plantuml_root_to_spec(&root)?;
+    let plan = compile_with_source(&spec, &LayoutOptions::default(), &sources);
     diagnostics.extend(plan.diagnostics.iter().cloned());
     let semantic = render(&plan);
     let scene = semantic.resolve(&SceneResolver::default());
@@ -156,10 +157,10 @@ fn single_diagram(root: &PlantUmlRoot) -> Result<&PlantUmlDiagram, DiagramError>
     root.diagrams.first().ok_or_else(|| DiagramError::ast_unavailable("PlantUML source produced no diagrams"))
 }
 
-fn plantuml_root_to_spec(root: &PlantUmlRoot) -> Result<(DiagramSpec, Vec<Diagnostic>), DiagramError> {
+fn plantuml_root_to_spec(root: &PlantUmlRoot) -> Result<(DiagramSpec, Vec<Diagnostic>, SourceMap), DiagramError> {
     match single_diagram(root)? {
         PlantUmlDiagram::Class(class) => class_spec(class),
-        PlantUmlDiagram::Sequence(sequence) => sequence_spec(sequence).map(|spec| (spec, Vec::new())),
+        PlantUmlDiagram::Sequence(sequence) => sequence_spec(sequence).map(|(spec, sources)| (spec, Vec::new(), sources)),
     }
 }
 
@@ -173,9 +174,10 @@ fn plantuml_root_to_spec(root: &PlantUmlRoot) -> Result<(DiagramSpec, Vec<Diagno
 /// The AST already reports which operand carries the UML end marker, so
 /// `A <|-- B` and `A --|> B` point at the same superclass without a second
 /// scan of the source text.
-fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>), DiagramError> {
+fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>, SourceMap), DiagramError> {
     let mut spec = DiagramSpec::new(Direction::BottomUp);
     let mut diagnostics = Vec::new();
+    let mut sources = SourceMap::new(SOURCE);
     let mut known: BTreeSet<String> = BTreeSet::new();
 
     for class in &diagram.classes {
@@ -190,6 +192,7 @@ fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>), 
             ports: Vec::new(),
             cluster: None,
         });
+        sources.push_node(Some(class.span.clone().into()));
         known.insert(name.to_string());
     }
 
@@ -202,6 +205,7 @@ fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>), 
         for endpoint in [left, right] {
             if known.insert(endpoint.to_string()) {
                 spec.nodes.push(DiagramNode { id: endpoint.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None });
+                sources.push_node(Some(relation.span.clone().into()));
             }
         }
 
@@ -218,12 +222,13 @@ fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>), 
             label: relation_label(relation),
             style: class_edge_style(&relation.kind),
         });
+        sources.push_edge(Some(relation.span.clone().into()));
     }
 
     if spec.nodes.is_empty() {
         return Err(DiagramError::empty_diagram("class diagram contains no classes or relations"));
     }
-    Ok((spec, diagnostics))
+    Ok((spec, diagnostics, sources))
 }
 
 /// Lower one PlantUML sequence diagram into the time-ordered sequence spec.
@@ -232,8 +237,9 @@ fn class_spec(diagram: &ClassDiagram) -> Result<(DiagramSpec, Vec<Diagnostic>), 
 /// activation spans the indices the AST recorded while scanning. A message
 /// endpoint with no declaration becomes an implicit participant, matching the
 /// Mermaid sequence lowering.
-fn sequence_spec(diagram: &SequenceDiagram) -> Result<DiagramSpec, DiagramError> {
+fn sequence_spec(diagram: &SequenceDiagram) -> Result<(DiagramSpec, SourceMap), DiagramError> {
     let mut spec = DiagramSpec::new(Direction::TopDown);
+    let mut sources = SourceMap::new(SOURCE);
     let mut known: BTreeSet<String> = BTreeSet::new();
 
     for participant in &diagram.participants {
@@ -252,6 +258,7 @@ fn sequence_spec(diagram: &SequenceDiagram) -> Result<DiagramSpec, DiagramError>
             ports: Vec::new(),
             cluster: None,
         });
+        sources.push_node(Some(participant.span.clone().into()));
         known.insert(id.to_string());
     }
 
@@ -264,6 +271,7 @@ fn sequence_spec(diagram: &SequenceDiagram) -> Result<DiagramSpec, DiagramError>
         for endpoint in [from, to] {
             if known.insert(endpoint.to_string()) {
                 spec.nodes.push(DiagramNode { id: endpoint.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None });
+                sources.push_node(Some(message.span.clone().into()));
             }
         }
         spec.edges.push(DiagramEdge {
@@ -272,6 +280,7 @@ fn sequence_spec(diagram: &SequenceDiagram) -> Result<DiagramSpec, DiagramError>
             label: message.text.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string),
             style: message_style(&message.arrow),
         });
+        sources.push_edge(Some(message.span.clone().into()));
     }
 
     let message_count = spec.edges.len();
@@ -294,7 +303,7 @@ fn sequence_spec(diagram: &SequenceDiagram) -> Result<DiagramSpec, DiagramError>
         messages: (0..message_count).collect(),
         activations,
     });
-    Ok(spec)
+    Ok((spec, sources))
 }
 
 fn class_label(class: &ClassDeclaration) -> String {

@@ -19,9 +19,10 @@ use oak_dot::{
 
 use crate::{
     LoweredDiagram,
-    compile::{LayoutOptions, compile},
+    compile::{LayoutOptions, compile_with_source},
     error::DiagramError,
     render::render,
+    source::SourceMap,
     spec::{Cluster, Constraint, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, NodeShape, Port, Side},
 };
 
@@ -96,14 +97,14 @@ pub fn parse_dot(source: &str) -> Result<DotRoot, DiagramError> {
 /// Lower DOT source into a source-independent diagram spec.
 pub fn dot_to_spec(source: &str) -> Result<DiagramSpec, DiagramError> {
     let root = parse_dot(source)?;
-    dot_root_to_spec(&root).map(|(spec, _)| spec)
+    dot_root_to_spec(&root).map(|(spec, _, _)| spec)
 }
 
 /// Lower DOT source to a layout plan and resolved display scene.
 pub fn dot_to_scene(source: &str) -> Result<LoweredDiagram, DiagramError> {
     let root = parse_dot(source)?;
-    let (spec, mut diagnostics) = dot_root_to_spec(&root)?;
-    let plan = compile(&spec, &LayoutOptions::default());
+    let (spec, mut diagnostics, sources) = dot_root_to_spec(&root)?;
+    let plan = compile_with_source(&spec, &LayoutOptions::default(), &sources);
     diagnostics.extend(plan.diagnostics.iter().cloned());
     let semantic = render(&plan);
     let scene = semantic.resolve(&davinci_scene::SceneResolver::default());
@@ -221,33 +222,36 @@ struct Collector {
     edges: Vec<DiagramEdge>,
     clusters: Vec<Cluster>,
     constraints: Vec<Constraint>,
+    sources: SourceMap,
 }
 
 impl Collector {
-    fn node_index(&mut self, id: &str) -> usize {
+    /// Intern a node id, recording the token range of its first declaration.
+    fn node_index(&mut self, id: &str, span: Option<Range<usize>>) -> usize {
         match self.indices.get(id) {
             Some(&index) => index,
             None => {
                 self.indices.insert(id.to_string(), self.nodes.len());
                 self.nodes.push(DiagramNode { id: id.to_string(), label: None, shape: NodeShape::Box, ports: Vec::new(), cluster: None });
+                self.sources.push_node(span);
                 self.nodes.len() - 1
             }
         }
     }
 
     fn set_label(&mut self, id: &str, label: &str) {
-        let index = self.node_index(id);
+        let index = self.node_index(id, None);
         self.nodes[index].label = Some(fold_label(label));
     }
 
     fn set_shape(&mut self, id: &str, shape: NodeShape) {
-        let index = self.node_index(id);
+        let index = self.node_index(id, None);
         self.nodes[index].shape = shape;
     }
 
     fn add_port(&mut self, id: &str, compass: Compass, span: Range<usize>, diagnostics: &mut Vec<Diagnostic>) -> String {
         let (name, side, offset) = port_geometry(compass, span, diagnostics);
-        let index = self.node_index(id);
+        let index = self.node_index(id, None);
         if self.nodes[index].ports.iter().all(|port| port.id != name) {
             self.nodes[index].ports.push(Port { id: name.to_string(), side, offset });
         }
@@ -256,9 +260,9 @@ impl Collector {
 }
 
 /// Create the node if needed and apply the defaults active at this point.
-fn ensure_node(collector: &mut Collector, defaults: &Defaults, id: &str) {
+fn ensure_node(collector: &mut Collector, defaults: &Defaults, id: &str, span: Option<Range<usize>>) {
     let existed = collector.indices.contains_key(id);
-    let index = collector.node_index(id);
+    let index = collector.node_index(id, span);
     if existed {
         return;
     }
@@ -313,7 +317,7 @@ fn compass_of(name: &str) -> Option<Compass> {
     COMPASSES.iter().find(|(token, _)| *token == normalized).map(|(_, compass)| compass.clone())
 }
 
-fn dot_root_to_spec(root: &DotRoot) -> Result<(DiagramSpec, Vec<Diagnostic>), DiagramError> {
+fn dot_root_to_spec(root: &DotRoot) -> Result<(DiagramSpec, Vec<Diagnostic>, SourceMap), DiagramError> {
     if root.graphs.len() > 1 {
         let second = span_of(root.graphs[1].span);
         return Err(unsupported_at(format!("a DOT document may contain exactly one top-level graph, found {}", root.graphs.len()), second));
@@ -326,7 +330,7 @@ fn dot_root_to_spec(root: &DotRoot) -> Result<(DiagramSpec, Vec<Diagnostic>), Di
         return Err(unsupported_at("`strict` graphs change multi-edge semantics that the DOT subset does not model", span_of(graph.span)));
     }
 
-    let mut collector = Collector::default();
+    let mut collector = Collector { sources: SourceMap::new(SOURCE), ..Collector::default() };
     let mut diagnostics = Vec::new();
     let mut defaults = Defaults::default();
     let mut direction = Direction::TopDown;
@@ -370,7 +374,7 @@ fn dot_root_to_spec(root: &DotRoot) -> Result<(DiagramSpec, Vec<Diagnostic>), Di
     spec.edges = collector.edges;
     spec.clusters = collector.clusters;
     spec.constraints = collector.constraints;
-    Ok((spec, diagnostics))
+    Ok((spec, diagnostics, collector.sources))
 }
 
 fn rankdir(value: &str, span: Range<usize>) -> Result<Direction, DiagramError> {
@@ -597,6 +601,7 @@ fn lower_edge(
             label: explicit_label.clone().or_else(|| defaults.edge_label.clone()),
             style,
         });
+        collector.sources.push_edge(Some(span_of(edge.span)));
     }
     Ok(members)
 }
@@ -650,7 +655,7 @@ fn endpoint(id: &NodeId, collector: &mut Collector, defaults: &Defaults, diagnos
     if node.is_empty() {
         return Err(unsupported_at("an empty node id is outside the DOT subset", span_of(id.span)));
     }
-    ensure_node(collector, defaults, node);
+    ensure_node(collector, defaults, node, Some(span_of(id.span)));
 
     let Some(port) = &id.port
     else {
@@ -749,7 +754,7 @@ fn lower_subgraph(
             }
         }
         for member in &ordered {
-            let index = collector.node_index(member);
+            let index = collector.node_index(member, None);
             collector.nodes[index].cluster = Some(cluster_id.clone());
         }
         collector.clusters.push(Cluster { id: cluster_id, label, members: ordered });

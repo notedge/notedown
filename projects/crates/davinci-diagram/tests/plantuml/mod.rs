@@ -8,13 +8,25 @@ use davinci_diagram::{
     DiagramError, plantuml_to_scene, plantuml_to_spec,
     spec::{Activation, DiagramEdge, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, SequenceLayout},
 };
-use davinci_types::codes;
+use davinci_types::{DiagnosticLocation, codes};
 
 fn span_of<'a>(source: &'a str, error: &DiagramError) -> &'a str {
     let span = error.span().unwrap_or_else(|| panic!("`{}` carries no span", error.message()));
     let Range { start, end } = span.clone();
     assert!(end <= source.len(), "span {start}..{end} leaves a {} byte source", source.len());
     &source[start..end]
+}
+
+/// The authored bytes a layout diagnostic's primary label covers.
+fn label_text<'a>(source: &'a str, diagnostic: &davinci_types::Diagnostic) -> &'a str {
+    let label = diagnostic
+        .primary()
+        .unwrap_or_else(|| panic!("`{}` carries no label, so it names no token", diagnostic.message().fallback().unwrap_or_default()));
+    let DiagnosticLocation::Text { range, .. } = label.location()
+    else {
+        panic!("the primary label must be a text range");
+    };
+    &source[range.start() as usize..range.end() as usize]
 }
 
 fn node(id: &str, label: Option<&str>, shape: NodeShape) -> DiagramNode {
@@ -231,4 +243,22 @@ fn sequence_markers_select_the_sequence_family_even_when_a_class_style_arrow_lea
     let spec = plantuml_to_spec(source).expect("the sequence marker decides the family");
     assert_eq!(spec.direction, Direction::TopDown);
     assert!(matches!(spec.layout, LayoutModel::TimeOrdered(_)), "the sequence layout must be declared: {:?}", spec.layout);
+}
+
+#[test]
+fn a_duplicate_participant_is_reported_at_its_second_declaration() {
+    let source = "@startuml\nparticipant Alice\nparticipant Alice\nAlice -> Bob: hi\n@enduml\n";
+    let lowered = plantuml_to_scene(source).expect("the first declaration still owns the lifeline");
+
+    let duplicate = lowered
+        .diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code().as_str() == codes::UNSUPPORTED
+                && diagnostic.message().fallback().unwrap_or_default().contains("duplicate participant")
+        })
+        .unwrap_or_else(|| panic!("the duplicate must be reported: {:?}", lowered.diagnostics));
+
+    assert_eq!(label_text(source, duplicate), "participant Alice", "the label must cover the second declaration");
+    assert_eq!(lowered.plan.nodes.len(), 2, "the duplicate must not add a third lifeline");
 }

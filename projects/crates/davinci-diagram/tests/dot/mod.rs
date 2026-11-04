@@ -7,12 +7,27 @@ use davinci_diagram::{
     DiagramError, dot_to_scene, dot_to_spec,
     spec::{Cluster, Constraint, DiagramEdge, DiagramNode, Direction, EdgeStyle, Endpoint, NodeShape, Port, Side},
 };
-use davinci_types::codes;
+use davinci_types::{DiagnosticLocation, codes};
 
 fn span_of<'a>(source: &'a str, error: &DiagramError) -> &'a str {
     let span = error.span().unwrap_or_else(|| panic!("`{}` carries no span", error.message()));
     let Range { start, end } = span.clone();
     assert!(end <= source.len(), "span {start}..{end} leaves a {} byte source", source.len());
+    &source[start..end]
+}
+
+/// The authored bytes a layout diagnostic's primary label covers.
+fn label_text<'a>(source: &'a str, diagnostic: &davinci_types::Diagnostic) -> &'a str {
+    let label = diagnostic
+        .primary()
+        .unwrap_or_else(|| panic!("`{}` carries no label, so it names no token", diagnostic.message().fallback().unwrap_or_default()));
+    let DiagnosticLocation::Text { range, .. } = label.location()
+    else {
+        panic!("the primary label must be a text range");
+    };
+    let start = range.start() as usize;
+    let end = range.end() as usize;
+    assert!(end <= source.len(), "label {start}..{end} leaves a {} byte source", source.len());
     &source[start..end]
 }
 
@@ -214,4 +229,22 @@ fn strict_graphs_unknown_styles_and_mismatched_edge_operators_are_rejected() {
     let source = "graph {\n  A -> B;\n}";
     let error = dot_to_spec(source).expect_err("`->` is not a `graph` operator");
     assert_eq!(error.code(), codes::UNSUPPORTED);
+}
+
+#[test]
+fn a_cycle_reports_the_back_edge_and_its_authored_span() {
+    let source = "digraph {\n  a -> b\n  b -> a\n}\n";
+    let lowered = dot_to_scene(source).expect("a cycle still lays out and routes every edge");
+
+    let cycle = lowered
+        .diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code().as_str() == codes::APPROXIMATED && diagnostic.message().fallback().unwrap_or_default().contains("cycle")
+        })
+        .unwrap_or_else(|| panic!("the cycle must be reported: {:?}", lowered.diagnostics));
+
+    assert_eq!(label_text(source, cycle), "b -> a", "the label must cover the edge the layered model reverses");
+    assert!(cycle.message().fallback().unwrap_or_default().contains("b->a"), "the message must name the reversed edge");
+    assert_eq!(lowered.plan.edges.len(), 2, "breaking the cycle must not drop an edge");
 }

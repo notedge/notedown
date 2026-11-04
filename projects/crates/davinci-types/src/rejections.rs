@@ -59,14 +59,17 @@ pub struct MatrixRow {
     pub item: String,
     /// One of `supported`, `approximated`, or `rejected`.
     pub status: String,
-    /// The code reported for a rejected row.
+    /// The diagnostic code a degraded row reports. A rejected row must name
+    /// one, an approximated row may, and a supported row must not.
     #[serde(default)]
     pub code: Option<String>,
     /// Catalog cases that exercise a rejected row, or that prove a supported
     /// row refuses malformed values inside it.
     #[serde(default)]
     pub cases: Vec<String>,
-    /// Why a rejected row has no catalog case.
+    /// The named reason a degraded row has no catalog case, such as the test
+    /// that pins its span when the behavior is a warning rather than a
+    /// rejection.
     #[serde(default)]
     pub reason: Option<String>,
 }

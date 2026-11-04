@@ -1,13 +1,20 @@
 //! Deterministic layered compilation from a diagram spec to a layout plan.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    ops::Range,
+};
 
 use davinci_scene::{Point, Rect, Size};
-use davinci_types::{Diagnostic, DiagnosticSeverity, codes, diagnostic, measure_line, wrap_label};
+use davinci_types::{
+    ByteRange, Diagnostic, DiagnosticLabel, DiagnosticLocation, DiagnosticSeverity, LabelRole, Message, NAMESPACE, SourceRef, codes,
+    diagnostic, measure_line, wrap_label,
+};
 
 use crate::{
     plan::{DiagramLayoutPlan, PlacedActivation, PlacedCluster, PlacedNode, PlanLayout, RoutedEdge},
-    spec::{Constraint, DiagramNode, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, Port, SequenceLayout, Side},
+    source::SourceMap,
+    spec::{Constraint, DiagramSpec, Direction, EdgeStyle, Endpoint, LayoutModel, NodeShape, Port, SequenceLayout, Side},
 };
 
 /// Tuning for deterministic layered compilation.
@@ -50,6 +57,8 @@ impl Default for LayoutOptions {
 const ACTIVATION_WIDTH: f64 = 8.0;
 
 struct ResolvedNode {
+    /// Index of this node in [`DiagramSpec::nodes`].
+    spec_index: usize,
     id: String,
     label: Option<String>,
     shape: NodeShape,
@@ -64,6 +73,8 @@ struct ResolvedCluster {
 }
 
 struct ResolvedEdge {
+    /// Index of this edge in [`DiagramSpec::edges`].
+    spec_index: usize,
     from: Endpoint,
     to: Endpoint,
     from_index: usize,
@@ -90,32 +101,53 @@ struct ResolvedEdge {
 /// - A self edge is skipped with a diagnostic.
 /// - Duplicate node ids keep the first definition, merge later ports, and
 ///   report the duplicate.
+/// - A cycle is broken in declaration order: the edges that no longer advance
+///   to a later layer are named, and the layout still routes every edge.
 /// - Unknown cluster references, cluster members that do not exist, and
 ///   clusters without members are reported; unusable members are ignored.
+///
+/// [`compile`] runs without authored positions. [`compile_with_source`] takes a
+/// [`SourceMap`] so the same diagnostics also point at the token that caused
+/// them.
 pub fn compile(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    compile_with_source(spec, options, &SourceMap::default())
+}
+
+/// Compile a diagram spec and locate diagnostics through a [`SourceMap`].
+///
+/// The map is optional per item: a diagnostic whose token the frontend could
+/// not find is emitted without a primary label instead of guessing a range.
+pub fn compile_with_source(spec: &DiagramSpec, options: &LayoutOptions, source: &SourceMap) -> DiagramLayoutPlan {
     match &spec.layout {
-        LayoutModel::Layered => compile_layered(spec, options),
-        LayoutModel::TimeOrdered(sequence) => compile_time_ordered(spec, sequence, options),
+        LayoutModel::Layered => compile_layered_with_source(spec, options, source),
+        LayoutModel::TimeOrdered(sequence) => compile_time_ordered(spec, sequence, options, source),
     }
 }
 
-/// Compile a layered graph spec.
+/// Compile a layered graph spec without authored positions.
 pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    compile_layered_with_source(spec, options, &SourceMap::default())
+}
+
+/// Compile a layered graph spec and locate diagnostics through a [`SourceMap`].
+pub fn compile_layered_with_source(spec: &DiagramSpec, options: &LayoutOptions, source: &SourceMap) -> DiagramLayoutPlan {
     let mut diagnostics = Vec::new();
-    let nodes = resolve_nodes(spec, &mut diagnostics);
+    let nodes = resolve_nodes(spec, &mut diagnostics, source);
     let index_by_id: BTreeMap<String, usize> = nodes.iter().enumerate().map(|(index, node)| (node.id.clone(), index)).collect();
 
     for node in &nodes {
         if matches!(node.shape, NodeShape::Subroutine) {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!("subroutine node `{}` is rendered as a plain rectangle without its double border", node.id),
+                source.node(node.spec_index),
+                source,
             ));
         }
     }
 
-    let clusters = resolve_clusters(spec, &nodes, &index_by_id, &mut diagnostics);
-    let edges = resolve_edges(spec, &index_by_id, &mut diagnostics);
+    let clusters = resolve_clusters(spec, &nodes, &index_by_id, &mut diagnostics, source);
+    let edges = resolve_edges(spec, &index_by_id, &mut diagnostics, source);
 
     if nodes.is_empty() {
         return DiagramLayoutPlan {
@@ -129,7 +161,7 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
         };
     }
 
-    let layers = assign_layers(&nodes, &edges, &spec.constraints, &index_by_id, &mut diagnostics);
+    let layers = assign_layers(&nodes, &edges, &spec.constraints, &index_by_id, &mut diagnostics, source);
     let sizes: Vec<Size> = nodes.iter().map(|node| node_size(node, options)).collect();
     let mut rects = place_rects(&sizes, &layers, spec.direction, options);
 
@@ -158,7 +190,7 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
 
     let mut ports: Vec<BTreeMap<String, Point>> = Vec::with_capacity(nodes.len());
     for (index, node) in nodes.iter().enumerate() {
-        ports.push(build_ports(node, rects[index], &mut diagnostics));
+        ports.push(build_ports(node, rects[index], &mut diagnostics, source));
     }
 
     let memberships = node_memberships(&clusters, nodes.len());
@@ -168,8 +200,9 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
         edges
             .iter()
             .map(|edge| {
-                let from = resolver.resolve(&edge.from, edge.from_index, true, &mut diagnostics);
-                let to = resolver.resolve(&edge.to, edge.to_index, false, &mut diagnostics);
+                let span = source.edge(edge.spec_index);
+                let from = resolver.resolve(&edge.from, edge.from_index, true, &mut diagnostics, span.clone(), source);
+                let to = resolver.resolve(&edge.to, edge.to_index, false, &mut diagnostics, span, source);
                 (from, to)
             })
             .collect::<Vec<_>>()
@@ -184,9 +217,11 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
     for (edge, &(from, to)) in edges.iter().zip(anchors.iter()) {
         let obstacles = inflated_node_obstacles(&rects, edge.from_index, edge.to_index);
         let points = route_avoiding(from, to, spec.direction, &obstacles, &mut lanes).unwrap_or_else(|| {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!("edge `{}->{}` found no channel that clears every node and keeps the direct route", edge.from.node, edge.to.node),
+                source.edge(edge.spec_index),
+                source,
             ));
             route(from, to, spec.direction)
         });
@@ -196,12 +231,14 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
         let label_box =
             label.as_ref().map(|label| estimate_label_box(label, polyline_midpoint(&points), edge_label_font_size(options.font_size)));
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!(
                     "dotted edge `{}->{}` is rendered as a solid line because the scene style has no dash surface",
                     edge.from.node, edge.to.node
                 ),
+                source.edge(edge.spec_index),
+                source,
             ));
         }
         routed.push(RoutedEdge { from: edge.from.clone(), to: edge.to.clone(), points, label, label_box, style: edge.style });
@@ -232,12 +269,14 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
             routed[index].label_box = label_box;
         }
         else {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!(
                     "edge `{}->{}` crosses a foreign edge label and found no clearing channel",
                     routed[index].from.node, routed[index].to.node
                 ),
+                source.edge(edges[index].spec_index),
+                source,
             ));
         }
     }
@@ -307,6 +346,11 @@ pub fn compile_layered(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLa
 /// - Cluster and ordering-constraint declarations are ignored with a diagnostic
 ///   because sequence rows come from source position.
 pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramLayoutPlan {
+    compile_sequence_with_source(spec, options, &SourceMap::default())
+}
+
+/// Compile a sequence spec and locate diagnostics through a [`SourceMap`].
+pub fn compile_sequence_with_source(spec: &DiagramSpec, options: &LayoutOptions, source: &SourceMap) -> DiagramLayoutPlan {
     let sequence = match &spec.layout {
         LayoutModel::TimeOrdered(sequence) => sequence.clone(),
         LayoutModel::Layered => SequenceLayout {
@@ -315,10 +359,10 @@ pub fn compile_sequence(spec: &DiagramSpec, options: &LayoutOptions) -> DiagramL
             activations: Vec::new(),
         },
     };
-    compile_time_ordered(spec, &sequence, options)
+    compile_time_ordered(spec, &sequence, options, source)
 }
 
-fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: &LayoutOptions) -> DiagramLayoutPlan {
+fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: &LayoutOptions, source: &SourceMap) -> DiagramLayoutPlan {
     let mut diagnostics = Vec::new();
     if !spec.clusters.is_empty() {
         diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence layout ignores {} cluster declarations", spec.clusters.len())));
@@ -330,17 +374,35 @@ fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: 
     let axis = declared_axis(spec, sequence, &mut diagnostics);
     let mut participants: Vec<ResolvedNode> = Vec::with_capacity(axis.len());
     let mut indices: BTreeMap<String, usize> = BTreeMap::new();
-    for node in axis {
+    for spec_index in axis {
+        let node = &spec.nodes[spec_index];
         if node.id.is_empty() {
-            diagnostics.push(warning(codes::UNSUPPORTED, "sequence participant with an empty id is ignored"));
+            diagnostics.push(located(
+                codes::UNSUPPORTED,
+                "sequence participant with an empty id is ignored",
+                source.node(spec_index),
+                source,
+            ));
             continue;
         }
         if indices.contains_key(&node.id) {
-            diagnostics.push(warning(codes::UNSUPPORTED, format!("duplicate participant id `{}`, the first declaration is kept", node.id)));
+            diagnostics.push(located(
+                codes::UNSUPPORTED,
+                format!("duplicate participant id `{}`, the first declaration is kept", node.id),
+                source.node(spec_index),
+                source,
+            ));
             continue;
         }
         indices.insert(node.id.clone(), participants.len());
-        participants.push(ResolvedNode { id: node.id.clone(), label: node.label.clone(), shape: node.shape, ports: Vec::new(), cluster: None });
+        participants.push(ResolvedNode {
+            spec_index,
+            id: node.id.clone(),
+            label: node.label.clone(),
+            shape: node.shape,
+            ports: Vec::new(),
+            cluster: None,
+        });
     }
 
     if participants.is_empty() {
@@ -376,16 +438,20 @@ fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: 
         let (Some(&from_index), Some(&to_index)) = (indices.get(&edge.from.node), indices.get(&edge.to.node))
         else {
             let missing = if indices.contains_key(&edge.from.node) { edge.to.node.as_str() } else { edge.from.node.as_str() };
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::UNSUPPORTED,
                 format!("sequence message `{}->{}` references unknown participant `{missing}` and is skipped", edge.from.node, edge.to.node),
+                source.edge(edge_index),
+                source,
             ));
             continue;
         };
         if from_index == to_index {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::UNSUPPORTED,
                 format!("self sequence message `{}->{}` is not routed and is skipped", edge.from.node, edge.to.node),
+                source.edge(edge_index),
+                source,
             ));
             continue;
         }
@@ -400,12 +466,14 @@ fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: 
             estimate_label_box(label, Point::new((from.x + to.x) * 0.5, line_y - options.font_size), edge_label_font_size(options.font_size))
         });
         if matches!(edge.style, EdgeStyle::DottedArrow | EdgeStyle::DottedLine) {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!(
                     "dotted sequence message `{}->{}` is rendered as a solid line because the scene style has no dash surface",
                     edge.from.node, edge.to.node
                 ),
+                source.edge(edge_index),
+                source,
             ));
         }
         messages.push(RoutedEdge { from: edge.from.clone(), to: edge.to.clone(), points: vec![from, to], label, label_box, style: edge.style });
@@ -466,25 +534,32 @@ fn compile_time_ordered(spec: &DiagramSpec, sequence: &SequenceLayout, options: 
     }
 }
 
-/// Participant ids in the declared axis order.
+/// Participant indices in the declared axis order.
 ///
 /// A declaration that names an unknown id reports it and otherwise keeps every
 /// node: a missing participant means the declaration is stale, and dropping a
 /// whole lifeline would hide it.
-fn declared_axis<'a>(spec: &'a DiagramSpec, sequence: &SequenceLayout, diagnostics: &mut Vec<Diagnostic>) -> Vec<&'a DiagramNode> {
+///
+/// The axis keeps every declaration, including a repeated one. Collapsing a
+/// duplicate here would consume the second token and leave the duplicate
+/// diagnostic pointing at the first declaration, so the caller reports it
+/// while it owns the right spec index.
+fn declared_axis(spec: &DiagramSpec, sequence: &SequenceLayout, diagnostics: &mut Vec<Diagnostic>) -> Vec<usize> {
     if sequence.participants.is_empty() {
-        return spec.nodes.iter().collect();
+        return (0..spec.nodes.len()).collect();
     }
-    let mut ordered: Vec<&DiagramNode> = Vec::with_capacity(spec.nodes.len());
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut ordered: Vec<usize> = Vec::with_capacity(spec.nodes.len());
+    let mut consumed: BTreeSet<usize> = BTreeSet::new();
     for id in &sequence.participants {
-        match spec.nodes.iter().find(|node| &node.id == id) {
-            Some(node) if seen.insert(node.id.as_str()) => ordered.push(node),
-            Some(_) => {}
+        match (0..spec.nodes.len()).find(|&index| &spec.nodes[index].id == id && !consumed.contains(&index)) {
+            Some(index) => {
+                consumed.insert(index);
+                ordered.push(index);
+            }
             None => diagnostics.push(warning(codes::UNSUPPORTED, format!("sequence axis names unknown participant `{id}` and is ignored"))),
         }
     }
-    ordered.extend(spec.nodes.iter().filter(|node| !seen.contains(node.id.as_str())));
+    ordered.extend((0..spec.nodes.len()).filter(|&index| !consumed.contains(&index)));
     ordered
 }
 
@@ -510,26 +585,29 @@ fn declared_messages(spec: &DiagramSpec, sequence: &SequenceLayout, diagnostics:
     ordered
 }
 
-fn resolve_nodes(spec: &DiagramSpec, diagnostics: &mut Vec<Diagnostic>) -> Vec<ResolvedNode> {
+fn resolve_nodes(spec: &DiagramSpec, diagnostics: &mut Vec<Diagnostic>, source: &SourceMap) -> Vec<ResolvedNode> {
     let mut nodes: Vec<ResolvedNode> = Vec::with_capacity(spec.nodes.len());
     let mut indices: BTreeMap<String, usize> = BTreeMap::new();
 
-    for node in &spec.nodes {
+    for (spec_index, node) in spec.nodes.iter().enumerate() {
         if node.id.is_empty() {
-            diagnostics.push(warning(codes::UNSUPPORTED, "node with an empty id is ignored"));
+            diagnostics.push(located(codes::UNSUPPORTED, "node with an empty id is ignored", source.node(spec_index), source));
             continue;
         }
         match indices.get(&node.id) {
             Some(&index) => {
-                diagnostics.push(warning(
+                diagnostics.push(located(
                     codes::UNSUPPORTED,
                     format!("duplicate node id `{}`, the first definition is kept and later port declarations are merged", node.id),
+                    source.node(spec_index),
+                    source,
                 ));
                 nodes[index].ports.extend(node.ports.iter().cloned());
             }
             None => {
                 indices.insert(node.id.clone(), nodes.len());
                 nodes.push(ResolvedNode {
+                    spec_index,
                     id: node.id.clone(),
                     label: node.label.clone(),
                     shape: node.shape,
@@ -548,6 +626,7 @@ fn resolve_clusters(
     nodes: &[ResolvedNode],
     index_by_id: &BTreeMap<String, usize>,
     diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceMap,
 ) -> Vec<ResolvedCluster> {
     let mut clusters: Vec<ResolvedCluster> = Vec::with_capacity(spec.clusters.len());
     let mut declared: BTreeSet<String> = BTreeSet::new();
@@ -585,9 +664,11 @@ fn resolve_clusters(
     for node in nodes {
         if let Some(cluster) = &node.cluster {
             if !declared.contains(cluster) {
-                diagnostics.push(warning(
+                diagnostics.push(located(
                     codes::UNSUPPORTED,
                     format!("node `{}` references unknown cluster `{cluster}`, the reference is ignored", node.id),
+                    source.node(node.spec_index),
+                    source,
                 ));
             }
         }
@@ -596,9 +677,11 @@ fn resolve_clusters(
     let memberships = node_memberships(&clusters, nodes.len());
     for (index, members) in memberships.iter().enumerate() {
         if members.len() > 1 {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::UNSUPPORTED,
                 format!("node `{}` belongs to multiple clusters, the first declared frame is used", nodes[index].id),
+                source.node(nodes[index].spec_index),
+                source,
             ));
         }
     }
@@ -606,37 +689,52 @@ fn resolve_clusters(
     clusters
 }
 
-fn resolve_edges(spec: &DiagramSpec, index_by_id: &BTreeMap<String, usize>, diagnostics: &mut Vec<Diagnostic>) -> Vec<ResolvedEdge> {
+fn resolve_edges(
+    spec: &DiagramSpec,
+    index_by_id: &BTreeMap<String, usize>,
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceMap,
+) -> Vec<ResolvedEdge> {
     let mut edges: Vec<ResolvedEdge> = Vec::with_capacity(spec.edges.len());
 
-    for edge in &spec.edges {
+    for (spec_index, edge) in spec.edges.iter().enumerate() {
+        let span = source.edge(spec_index);
         let from_index = index_by_id.get(&edge.from.node).copied();
         let to_index = index_by_id.get(&edge.to.node).copied();
         let (from_index, to_index) = match (from_index, to_index) {
             (Some(from), Some(to)) => (from, to),
             (None, _) => {
-                diagnostics.push(warning(
+                diagnostics.push(located(
                     codes::UNSUPPORTED,
                     format!("edge `{}->{}` references unknown node `{}` and is skipped", edge.from.node, edge.to.node, edge.from.node),
+                    span,
+                    source,
                 ));
                 continue;
             }
             (_, None) => {
-                diagnostics.push(warning(
+                diagnostics.push(located(
                     codes::UNSUPPORTED,
                     format!("edge `{}->{}` references unknown node `{}` and is skipped", edge.from.node, edge.to.node, edge.to.node),
+                    span,
+                    source,
                 ));
                 continue;
             }
         };
 
         if from_index == to_index {
-            diagnostics
-                .push(warning(codes::UNSUPPORTED, format!("self edge `{}->{}` is not routed and is skipped", edge.from.node, edge.to.node)));
+            diagnostics.push(located(
+                codes::UNSUPPORTED,
+                format!("self edge `{}->{}` is not routed and is skipped", edge.from.node, edge.to.node),
+                span,
+                source,
+            ));
             continue;
         }
 
         edges.push(ResolvedEdge {
+            spec_index,
             from: edge.from.clone(),
             to: edge.to.clone(),
             from_index,
@@ -655,6 +753,7 @@ fn assign_layers(
     constraints: &[Constraint],
     index_by_id: &BTreeMap<String, usize>,
     diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceMap,
 ) -> Vec<usize> {
     let count = nodes.len();
     let mut successors = vec![Vec::new(); count];
@@ -699,11 +798,23 @@ fn assign_layers(
     }
 
     if !cycle_nodes.is_empty() {
-        let ids: Vec<&str> = cycle_nodes.iter().map(|&index| nodes[index].id.as_str()).collect();
-        diagnostics.push(warning(
-            codes::APPROXIMATED,
-            format!("diagram contains a cycle involving nodes {ids:?}. Layered placement breaks it in declaration order"),
-        ));
+        // After the repair pass, an edge whose source already sits on the
+        // target layer or later is the one the layered model cannot honour.
+        // Naming those edges turns "there is a cycle somewhere" into a
+        // locatable statement.
+        let reversed: Vec<&ResolvedEdge> = edges.iter().filter(|edge| layer[edge.from_index] >= layer[edge.to_index]).collect();
+        let message = if reversed.is_empty() {
+            let ids: Vec<&str> = cycle_nodes.iter().map(|&index| nodes[index].id.as_str()).collect();
+            format!("diagram contains a cycle involving nodes {ids:?}. Layered placement breaks it in declaration order")
+        }
+        else {
+            let pairs: Vec<String> = reversed.iter().map(|edge| format!("{}->{}", edge.from.node, edge.to.node)).collect();
+            format!(
+                "diagram contains a cycle closed by edge {pairs:?}, which no longer advances to a later layer and is drawn in declaration order"
+            )
+        };
+        let span = reversed.iter().find_map(|edge| source.edge(edge.spec_index));
+        diagnostics.push(located(codes::APPROXIMATED, message, span, source));
     }
 
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -933,30 +1044,42 @@ fn canvas_shift(rects: &[Rect], cluster_rects: &[Option<Rect>], options: &Layout
     (shift_x, shift_y, canvas)
 }
 
-fn build_ports(node: &ResolvedNode, rect: Rect, diagnostics: &mut Vec<Diagnostic>) -> BTreeMap<String, Point> {
+fn build_ports(node: &ResolvedNode, rect: Rect, diagnostics: &mut Vec<Diagnostic>, source: &SourceMap) -> BTreeMap<String, Point> {
     let mut ports = BTreeMap::new();
     for port in &node.ports {
         if port.id.is_empty() {
-            diagnostics
-                .push(warning(codes::UNSUPPORTED, format!("node `{}` declares a port with an empty id, the declaration is ignored", node.id)));
+            diagnostics.push(located(
+                codes::UNSUPPORTED,
+                format!("node `{}` declares a port with an empty id, the declaration is ignored", node.id),
+                source.node(node.spec_index),
+                source,
+            ));
             continue;
         }
         if ports.contains_key(&port.id) {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::UNSUPPORTED,
                 format!("node `{}` declares duplicate port id `{}`, the first declaration is kept", node.id, port.id),
+                source.node(node.spec_index),
+                source,
             ));
             continue;
         }
         let offset = if !port.offset.is_finite() {
-            diagnostics
-                .push(warning(codes::APPROXIMATED, format!("node `{}` declares a port offset that is not finite, `0.0` is used", node.id)));
+            diagnostics.push(located(
+                codes::APPROXIMATED,
+                format!("node `{}` declares a port offset that is not finite, `0.0` is used", node.id),
+                source.node(node.spec_index),
+                source,
+            ));
             0.0
         }
         else if !(0.0..=1.0).contains(&port.offset) {
-            diagnostics.push(warning(
+            diagnostics.push(located(
                 codes::APPROXIMATED,
                 format!("port `{}` on node `{}` has an offset outside `0.0..=1.0` and is clamped", port.id, node.id),
+                source.node(node.spec_index),
+                source,
             ));
             port.offset.clamp(0.0, 1.0)
         }
@@ -1000,7 +1123,15 @@ struct EndpointResolver<'a> {
 }
 
 impl EndpointResolver<'_> {
-    fn resolve(&mut self, endpoint: &Endpoint, node_index: usize, is_source: bool, diagnostics: &mut Vec<Diagnostic>) -> Point {
+    fn resolve(
+        &mut self,
+        endpoint: &Endpoint,
+        node_index: usize,
+        is_source: bool,
+        diagnostics: &mut Vec<Diagnostic>,
+        span: Option<Range<usize>>,
+        source: &SourceMap,
+    ) -> Point {
         let rect = self.rects[node_index];
         match endpoint.port.as_deref() {
             None => default_anchor(rect, self.direction, is_source),
@@ -1009,11 +1140,13 @@ impl EndpointResolver<'_> {
                 None => {
                     let node_id = &self.nodes[node_index].id;
                     if self.reported_ports.insert((node_id.clone(), port_id.to_string())) {
-                        diagnostics.push(warning(
+                        diagnostics.push(located(
                             codes::APPROXIMATED,
                             format!(
                                 "edge endpoint references unknown port `{port_id}` on node `{node_id}`, the default anchor for the layout direction is used"
                             ),
+                            span,
+                            source,
                         ));
                     }
                     default_anchor(rect, self.direction, is_source)
@@ -1285,4 +1418,28 @@ fn node_memberships(clusters: &[ResolvedCluster], node_count: usize) -> Vec<Vec<
 
 fn warning(code: &'static str, message: impl Into<String>) -> Diagnostic {
     diagnostic("diagram", code, DiagnosticSeverity::Warning, message)
+}
+
+/// Emit a warning and, when the frontend located the token, attach a primary
+/// label covering that byte range.
+///
+/// The label names the frontend family from [`SourceMap::family`], so a DOT
+/// range is attributed to `dot` and a PlantUML range to `plantuml`, matching
+/// [`crate::DiagramError::labelled`].
+fn located(code: &'static str, message: impl Into<String>, span: Option<Range<usize>>, source: &SourceMap) -> Diagnostic {
+    let message = message.into();
+    let record = diagnostic("diagram", code, DiagnosticSeverity::Warning, message.clone());
+    let Some(span) = span
+    else {
+        return record;
+    };
+    let (Ok(source_ref), Ok(range)) = (SourceRef::new(NAMESPACE, source.family()), ByteRange::new(span.start as u64, span.end as u64))
+    else {
+        return record;
+    };
+    record.with_primary(DiagnosticLabel::new(
+        DiagnosticLocation::Text { source: source_ref, range },
+        Message::new(code).with_fallback(message),
+        LabelRole::Primary,
+    ))
 }

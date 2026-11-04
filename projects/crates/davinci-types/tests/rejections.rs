@@ -11,10 +11,10 @@ const MATRIX_AREAS: [&str; 2] = ["chart", "diagram"];
 /// The published matrix totals. A row added or reclassified must update this
 /// gate in the same change, so the doc, the catalog and the tests stay one
 /// source of truth.
-const MATRIX_TOTAL: usize = 79;
+const MATRIX_TOTAL: usize = 83;
 const MATRIX_SUPPORTED: usize = 33;
-const MATRIX_APPROXIMATED: usize = 8;
-const MATRIX_REJECTED: usize = 38;
+const MATRIX_APPROXIMATED: usize = 10;
+const MATRIX_REJECTED: usize = 40;
 
 /// Every code the subsystem can emit. A new constant must land here and in the
 /// catalog in the same change, otherwise the catalog stops being authoritative.
@@ -99,8 +99,8 @@ fn every_rejection_matrix_row_points_at_a_fixture_or_a_named_reason() {
         assert!(MATRIX_STATUSES.contains(&row.status.as_str()), "`{}` declares an unknown status `{}`", row.id, row.status);
         assert!(!row.item.trim().is_empty(), "`{}` has no description", row.id);
 
-        if row.status != "rejected" {
-            assert!(row.code.is_none() && row.reason.is_none(), "`{}` is not rejected but names a code or a reason", row.id);
+        if row.status == "supported" {
+            assert!(row.code.is_none() && row.reason.is_none(), "`{}` is supported but names a code or a reason", row.id);
             for case in &row.cases {
                 assert!(case_ids.contains(case.as_str()), "`{}` references `{case}`, which the catalog does not carry", row.id);
                 referenced.insert(case.as_str());
@@ -108,17 +108,26 @@ fn every_rejection_matrix_row_points_at_a_fixture_or_a_named_reason() {
             continue;
         }
 
-        let code = row.code.as_deref().unwrap_or_else(|| panic!("`{}` is rejected but names no code", row.id));
-        assert!(documented.contains(code), "`{}` names `{code}`, which the catalog does not document", row.id);
+        // A degraded row names the code it reports, and either the fixture that
+        // proves it or the reason the fixture cannot exist. A supported row owns
+        // no diagnostic, so it may carry neither a code nor a reason.
+        if let Some(code) = row.code.as_deref() {
+            assert!(documented.contains(code), "`{}` names `{code}`, which the catalog does not document", row.id);
+        }
+        else {
+            assert_ne!(row.status, "rejected", "`{}` is rejected but names no code", row.id);
+        }
         for case in &row.cases {
             assert!(case_ids.contains(case.as_str()), "`{}` references `{case}`, which the catalog does not carry", row.id);
             referenced.insert(case.as_str());
         }
-        assert!(
-            !row.cases.is_empty() || row.reason.as_deref().is_some_and(|reason| !reason.trim().is_empty()),
-            "`{}` is rejected but points at neither a fixture nor a reason",
-            row.id
-        );
+        if row.status == "rejected" {
+            assert!(
+                !row.cases.is_empty() || row.reason.as_deref().is_some_and(|reason| !reason.trim().is_empty()),
+                "`{}` is rejected but points at neither a fixture nor a reason",
+                row.id
+            );
+        }
     }
 
     for case in &case_ids {

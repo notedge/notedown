@@ -32,6 +32,7 @@ pub mod compile;
 pub mod error;
 pub mod plan;
 pub mod render;
+pub mod source;
 pub mod spec;
 
 #[cfg(feature = "dot")]
@@ -44,6 +45,7 @@ pub mod parse;
 pub mod plantuml;
 
 pub use error::DiagramError;
+pub use source::SourceMap;
 
 #[cfg(feature = "dot")]
 pub use dot::{dot_to_scene, dot_to_spec, parse_dot};

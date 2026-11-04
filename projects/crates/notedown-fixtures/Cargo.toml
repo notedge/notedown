@@ -11,16 +11,10 @@ edition.workspace = true
 [lib]
 path = "src/lib.rs"
 
-[dependencies]
+[dev-dependencies]
 oak-core = { workspace = true }
 oak-html = { workspace = true, features = ["serde"] }
 oak-markdown = { workspace = true, features = ["serde"] }
 oak-notedown = { workspace = true, features = ["serde", "diagnostic"] }
 oak-testing = { workspace = true }
 oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
-acorn-doc = { workspace = true }
-notedown-formats = { workspace = true, default-features = false, features = ["doc", "markdown", "notedown"] }
-notedown-ir = { workspace = true }
-
-[dev-dependencies]
-cfb = { workspace = true }

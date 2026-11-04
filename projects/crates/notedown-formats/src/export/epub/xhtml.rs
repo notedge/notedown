@@ -132,6 +132,12 @@ fn nested_block_ids(graph: &DocumentGraph, node_id: NodeId) -> Vec<NodeId> {
                 out.extend(nested_block_ids(graph, *child));
             }
         }
+        Block::Quote { children, .. } => {
+            for child in children {
+                out.push(*child);
+                out.extend(nested_block_ids(graph, *child));
+            }
+        }
         Block::List { items, .. } => {
             for item in items {
                 for child in &item.children {
@@ -179,9 +185,16 @@ fn write_block(
             write_inlines(out, content, source_map)?;
             out.push_str("</p>\n");
         }
-        Block::Quote { content } => {
+        Block::Quote { content, children } => {
             out.push_str("<blockquote>");
             write_inlines(out, content, source_map)?;
+            for child_id in children {
+                let Some(child) = graph.block(*child_id)
+                else {
+                    return Err(FormatError::invalid_input(format!("missing quote child {child_id:?}")));
+                };
+                write_node(out, graph, &child.block, source_map)?;
+            }
             out.push_str("</blockquote>\n");
         }
         Block::Code { language, content } => {

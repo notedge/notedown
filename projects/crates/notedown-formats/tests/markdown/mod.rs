@@ -73,10 +73,32 @@ fn markdown_lists_lower_to_list_blocks() {
 }
 
 #[test]
+fn markdown_quote_nested_blocks_round_trip() {
+    let source = "> - a\n> - b\n";
+    let graph = import_markdown_bytes("quote-list.md", source).expect("import quoted list");
+    let Block::Quote { content, children } = &graph.blocks.iter().find(|node| matches!(node.block, Block::Quote { .. })).expect("quote block").block
+    else {
+        unreachable!()
+    };
+    assert!(content.is_empty(), "{content:#?}");
+    assert_eq!(children.len(), 1, "{children:#?}");
+    let markdown = export_markdown(&graph).expect("export quoted list");
+    assert_eq!(markdown, "> - a\n> - b\n\n");
+
+    let heading_source = "> # Title\n> - a\n";
+    let heading_graph = import_markdown_bytes("quote-heading.md", heading_source).expect("import quoted heading");
+    let heading_markdown = export_markdown(&heading_graph).expect("export quoted heading");
+    assert_eq!(heading_markdown, "> # Title\n>\n> - a\n\n");
+
+    let reopened = import_markdown_bytes("quote-heading-roundtrip.md", &heading_markdown).expect("reopen quoted heading");
+    assert_eq!(export_markdown(&reopened).expect("re-export quoted heading"), heading_markdown);
+}
+
+#[test]
 fn markdown_blockquote_lowers_inline_content() {
     let source = "> **bold** text\n";
     let graph = import_markdown_bytes("quote.md", source).expect("import markdown");
-    let Block::Quote { content } = &graph.blocks[0].block
+    let Block::Quote { content, .. } = &graph.blocks[0].block
     else {
         panic!("quote expected: {:#?}", graph.blocks)
     };
@@ -96,7 +118,7 @@ fn markdown_blockquote_lowers_inline_content() {
 
     let multiline = "> first line\n> second line\n";
     let multiline_graph = import_markdown_bytes("multiline-quote.md", multiline).expect("import multiline quote");
-    let Block::Quote { content } = &multiline_graph.blocks[0].block
+    let Block::Quote { content, .. } = &multiline_graph.blocks[0].block
     else {
         panic!("quote expected: {:#?}", multiline_graph.blocks)
     };

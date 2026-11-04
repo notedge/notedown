@@ -46,6 +46,13 @@ pub enum ValidationIssue {
         /// Missing child id.
         child: NodeId,
     },
+    /// Quote child id not present in the block list.
+    UnknownQuoteChild {
+        /// Quote node id.
+        quote: NodeId,
+        /// Missing child id.
+        child: NodeId,
+    },
     /// Inline reference targets a missing node.
     UnknownInlineReference {
         /// Source node id.
@@ -243,8 +250,16 @@ impl DocumentGraph {
                         }
                     }
                 }
-                Block::Paragraph { content } | Block::Quote { content } => {
+                Block::Paragraph { content } => {
                     check_inline_refs(node.id, content, &context, report);
+                }
+                Block::Quote { content, children } => {
+                    check_inline_refs(node.id, content, &context, report);
+                    for child in children {
+                        if !node_ids.contains(child) {
+                            report.issues.push(ValidationIssue::UnknownQuoteChild { quote: node.id, child: *child });
+                        }
+                    }
                 }
                 Block::List { ordered, items, .. } => {
                     check_list_numbering(node.id, *ordered, items, report);

@@ -62,6 +62,7 @@ fn nested_block_ids(graph: &DocumentGraph) -> HashSet<NodeId> {
     for node in &graph.blocks {
         match &node.block {
             Block::Section { children, .. } => ids.extend(children.iter().copied()),
+            Block::Quote { children, .. } => ids.extend(children.iter().copied()),
             Block::List { items, .. } => {
                 for item in items {
                     ids.extend(item.children.iter().copied());
@@ -107,13 +108,34 @@ fn write_block(
             ensure_reopenable_chart_language(language)?;
             write_fenced(out, Some(language), source);
         }
-        Block::Quote { content } => {
-            let mut line = String::new();
-            write_inlines(&mut line, content, image_urls)?;
-            for part in line.lines() {
-                out.push_str("> ");
-                out.push_str(part);
-                out.push('\n');
+        Block::Quote { content, children } => {
+            let mut body = String::new();
+            if !content.is_empty() {
+                write_inlines(&mut body, content, image_urls)?;
+            }
+            for child_id in children {
+                let child =
+                    graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("quote child `{child_id:?}` is missing")))?;
+                if !body.is_empty() {
+                    body.push_str("\n\n");
+                }
+                write_block(&mut body, graph, &child.block, image_urls)?;
+            }
+            let mut previous_blank = false;
+            for part in body.trim_end_matches('\n').lines() {
+                if part.is_empty() {
+                    if previous_blank {
+                        continue;
+                    }
+                    previous_blank = true;
+                    out.push_str(">\n");
+                }
+                else {
+                    previous_blank = false;
+                    out.push_str("> ");
+                    out.push_str(part);
+                    out.push('\n');
+                }
             }
             out.push('\n');
         }

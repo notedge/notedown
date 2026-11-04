@@ -317,7 +317,7 @@ fn lower_block_node(
             let (ordered, items) = extract_list(node, source, context, graph);
             BlockOutcome::Block(Block::List { ordered, items })
         }
-        MarkdownElementType::Blockquote => BlockOutcome::Block(Block::Quote { content: lower_blockquote_inlines(node, source, context) }),
+        MarkdownElementType::Blockquote => BlockOutcome::Block(lower_blockquote(node, source, context, graph)),
         MarkdownElementType::Table => BlockOutcome::Block(Block::Table { caption: None, rows: extract_table(node, source, context) }),
         MarkdownElementType::HorizontalRule => {
             BlockOutcome::Block(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial })
@@ -918,6 +918,90 @@ fn lower_list_item(
         }
     }
     (content, children)
+}
+
+/// Lower a blockquote into inline content plus nested block children.
+///
+/// `oak-markdown` keeps a blockquote's `>` markers and inner list/heading
+/// markers inside one flat node, so nested structure cannot be read from the
+/// tree. The dequoted body is re-read with the same import profile: a body that
+/// lowers to paragraphs becomes quoted inline content, and any deeper block
+/// (list, heading, table, code, nested quote) becomes a real quote child.
+fn lower_blockquote(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext, graph: &mut DocumentGraph) -> Block {
+    let raw = node.text(source);
+    let body = strip_blockquote_markers(&raw);
+    if body != raw && !body.trim().is_empty() {
+        if let Ok(inner) = import_markdown_bytes("blockquote", &body) {
+            let mut payloads = root_block_payloads(&inner);
+            let mut content = Vec::new();
+            if let Some(Block::Paragraph { content: paragraph }) = payloads.first().cloned() {
+                content = split_text_newlines(paragraph);
+                payloads.remove(0);
+            }
+            if !content.is_empty() || !payloads.is_empty() {
+                let children = payloads.into_iter().map(|block| graph.push_block(block)).collect();
+                return Block::Quote { content, children };
+            }
+        }
+    }
+    Block::Quote { content: lower_blockquote_inlines(node, source, context), children: Vec::new() }
+}
+
+/// Split raw newlines inside text runs into soft breaks so quoted inline
+/// content keeps the same shape as a directly lowered paragraph.
+fn split_text_newlines(inlines: Vec<Inline>) -> Vec<Inline> {
+    let mut out = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        if let Inline::Text { text } = &inline {
+            if text.contains('\n') {
+                for (index, part) in text.split('\n').enumerate() {
+                    if index > 0 {
+                        push_soft_break(&mut out);
+                    }
+                    if !part.is_empty() {
+                        out.push(Inline::Text { text: part.to_owned() });
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(inline);
+    }
+    out
+}
+
+/// Remove one `>` marker per line so the quoted body can be parsed again.
+fn strip_blockquote_markers(raw: &str) -> String {
+    let mut body = String::with_capacity(raw.len());
+    for line in raw.split_inclusive('\n') {
+        let (line, newline) = match line.strip_suffix('\n') {
+            Some(line) => (line, "\n"),
+            None => (line, ""),
+        };
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        let stripped = trimmed.strip_prefix('>').unwrap_or(trimmed);
+        let stripped = stripped.strip_prefix(' ').unwrap_or(stripped);
+        body.push_str(stripped);
+        body.push_str(newline);
+    }
+    body
+}
+
+/// Payloads of the top-level blocks of a freshly imported graph.
+fn root_block_payloads(graph: &DocumentGraph) -> Vec<Block> {
+    let mut contained = std::collections::HashSet::new();
+    for node in &graph.blocks {
+        match &node.block {
+            Block::Section { children, .. } | Block::Quote { children, .. } => contained.extend(children.iter().copied()),
+            Block::List { items, .. } => {
+                for item in items {
+                    contained.extend(item.children.iter().copied());
+                }
+            }
+            _ => {}
+        }
+    }
+    graph.blocks.iter().filter(|node| !contained.contains(&node.id)).map(|node| node.block.clone()).collect()
 }
 
 fn lower_blockquote_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context: &mut LinkContext) -> Vec<Inline> {

@@ -223,6 +223,11 @@ impl DocumentGraph {
                         }
                     }
                 }
+                Block::Quote { children, .. } => {
+                    for c in children {
+                        contained.insert(*c);
+                    }
+                }
                 _ => {}
             }
         }
@@ -239,6 +244,7 @@ impl DocumentGraph {
     fn collect_children_rec(block: &Block, out: &mut Vec<NodeId>) {
         match block {
             Block::Section { children, .. } => out.extend(children.iter().copied()),
+            Block::Quote { children, .. } => out.extend(children.iter().copied()),
             Block::List { items, .. } => {
                 for item in items {
                     out.extend(item.children.iter().copied());
@@ -277,6 +283,11 @@ impl DocumentGraph {
                 }
                 Block::List { items, .. } => {
                     if items.iter().any(|it| it.children.iter().any(|c| *c == child_id)) {
+                        return Some(node.id);
+                    }
+                }
+                Block::Quote { children, .. } => {
+                    if children.iter().any(|c| *c == child_id) {
                         return Some(node.id);
                     }
                 }
@@ -339,6 +350,11 @@ impl DocumentGraph {
                     if let Some(pos) = item.children.iter().position(|c| *c == old_child) {
                         item.children.splice(pos..=pos, new_children.iter().copied());
                     }
+                }
+            }
+            Block::Quote { children, .. } => {
+                if let Some(pos) = children.iter().position(|c| *c == old_child) {
+                    children.splice(pos..=pos, new_children.iter().copied());
                 }
             }
             _ => return Err(TransformError::InvalidParent(parent_id)),

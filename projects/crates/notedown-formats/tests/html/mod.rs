@@ -126,7 +126,7 @@ fn html_export_preserves_list_children_and_their_reference_targets() {
     let mut graph = DocumentGraph::new(IdAllocator::default().document_id());
     let paragraph = graph.push_block(Block::Paragraph { content: vec![Inline::Text { text: "child paragraph".into() }] });
     let code = graph.push_block(Block::Code { language: Some("rust".into()), content: "value < limit".into() });
-    let quote = graph.push_block(Block::Quote { content: vec![Inline::Text { text: "child quote".into() }] });
+    let quote = graph.push_block(Block::Quote { content: vec![Inline::Text { text: "child quote".into() }], children: Vec::new() });
     let nested_list = graph.push_block(Block::List {
         ordered: true,
         items: vec![notedown_ir::ListItem {

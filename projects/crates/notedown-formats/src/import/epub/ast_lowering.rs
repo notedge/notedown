@@ -117,7 +117,7 @@ fn lower_semantic_block(
             let inner = collect_child_blocks(element, graph, member_path, losses);
             if inner.is_empty() {
                 let plain = descendant_text(element);
-                if plain.is_empty() { None } else { Some(Block::Quote { content: vec![Inline::Text { text: plain }] }) }
+                if plain.is_empty() { None } else { Some(Block::Quote { content: vec![Inline::Text { text: plain }], children: Vec::new() }) }
             }
             else {
                 Some(quote_block_from_blocks(inner))

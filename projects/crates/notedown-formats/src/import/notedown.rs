@@ -146,7 +146,7 @@ fn lower_block_node(node: RedNode<NoteLanguage>, source: &SourceText, kind: Note
         }
         NoteElementType::Table => Some(Block::Table { caption: None, rows: extract_table_rows(node, source) }),
         NoteElementType::Blockquote => {
-            Some(Block::Quote { content: vec![Inline::Text { text: extract_notedown_blockquote_text(node, source) }] })
+            Some(Block::Quote { content: vec![Inline::Text { text: extract_notedown_blockquote_text(node, source) }], children: Vec::new() })
         }
         NoteElementType::HorizontalRule => {
             Some(Block::Opaque { kind: "thematic_break".into(), payload_hint: "---".into(), status: SemanticStatus::Partial })

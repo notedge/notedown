@@ -180,7 +180,7 @@ fn strong_and_emphasis_project_distinct_styled_inlines() {
 fn blockquote_projects_a_quote_block() {
     let graph = import("> Quoted line\n");
 
-    let Block::Quote { content } = &graph.blocks[0].block
+    let Block::Quote { content, .. } = &graph.blocks[0].block
     else {
         panic!("expected quote, got {:?}", graph.blocks[0].block);
     };

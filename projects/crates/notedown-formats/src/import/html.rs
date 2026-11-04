@@ -300,7 +300,22 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
             )]
         }
         "p" => vec![(Block::Paragraph { content: lower_inlines(element, graph, source) }, span)],
-        "blockquote" => vec![(Block::Quote { content: lower_inlines(element, graph, source) }, span)],
+        "blockquote" => {
+            let mut content = Vec::new();
+            let mut children = Vec::new();
+            for (child, child_span) in lower_children(&element.children, graph, source) {
+                match child {
+                    Block::Paragraph { content: paragraph } => {
+                        if !content.is_empty() {
+                            content.push(Inline::Break { kind: BreakKind::Soft });
+                        }
+                        content.extend(paragraph);
+                    }
+                    block => children.push(push_block_with_source(graph, block, child_span)),
+                }
+            }
+            vec![(Block::Quote { content, children }, span)]
+        }
         "pre" => {
             if let Some((language, chart)) = explicit_chart_marker(element, source) {
                 vec![(Block::Chart { language, source: chart }, span)]

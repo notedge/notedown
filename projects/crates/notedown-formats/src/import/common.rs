@@ -56,7 +56,7 @@ fn bind_block_image_assets(node: notedown_ir::NodeId, block: &mut Block, referen
         Block::Section { title, .. } => {
             bind_inline_image_assets(node, title, references);
         }
-        Block::Paragraph { content } | Block::Quote { content } => bind_inline_image_assets(node, content, references),
+        Block::Paragraph { content } | Block::Quote { content, .. } => bind_inline_image_assets(node, content, references),
         Block::List { items, .. } => {
             for item in items {
                 bind_inline_image_assets(node, &mut item.content, references);

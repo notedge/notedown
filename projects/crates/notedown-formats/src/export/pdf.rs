@@ -178,7 +178,14 @@ fn render_block(lines: &mut Vec<RenderLine>, graph: &DocumentGraph, block: &Bloc
                 render_block(lines, graph, &child.block)?;
             }
         }
-        Block::Paragraph { content } | Block::Quote { content } => push_inline_lines(lines, graph, content)?,
+        Block::Paragraph { content } => push_inline_lines(lines, graph, content)?,
+        Block::Quote { content, children } => {
+            push_inline_lines(lines, graph, content)?;
+            for child_id in children {
+                let child = graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("missing PDF quote child {child_id:?}")))?;
+                render_block(lines, graph, &child.block)?;
+            }
+        }
         Block::Code { content, .. } | Block::Diagram { source: content, .. } | Block::Chart { source: content, .. } => {
             lines.extend(content.lines().map(|line| RenderLine::Text(line.to_owned())))
         }

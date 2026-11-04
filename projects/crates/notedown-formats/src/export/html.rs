@@ -121,6 +121,7 @@ fn nested_block_ids(graph: &DocumentGraph) -> std::collections::HashSet<notedown
     for node in &graph.blocks {
         match &node.block {
             Block::Section { children, .. } => ids.extend(children.iter().copied()),
+            Block::Quote { children, .. } => ids.extend(children.iter().copied()),
             Block::List { items, .. } => {
                 for item in items {
                     ids.extend(item.children.iter().copied());
@@ -156,9 +157,14 @@ fn write_block(
             write_inlines(out, content)?;
             out.push_str("</p>");
         }
-        Block::Quote { content } => {
+        Block::Quote { content, children } => {
             out.push_str("<blockquote>");
             write_inlines(out, content)?;
+            for child_id in children {
+                let child =
+                    graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("quote child `{child_id:?}` is missing")))?;
+                write_node(out, graph, child.id, &child.block, diagrams)?;
+            }
             out.push_str("</blockquote>");
         }
         Block::Code { language, content } => {

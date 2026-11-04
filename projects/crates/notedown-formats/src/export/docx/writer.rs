@@ -114,10 +114,14 @@ fn write_block(out: &mut String, block: &Block, graph: &DocumentGraph, rels: &mu
             write_run_text(out, source)?;
             out.push_str("</w:p>");
         }
-        Block::Quote { content } => {
+        Block::Quote { content, children } => {
             out.push_str("<w:p><w:pPr><w:pStyle w:val=\"Quote\"/></w:pPr>");
             write_inlines(out, content, graph, rels)?;
             out.push_str("</w:p>");
+            for child_id in children {
+                let child = graph.block(*child_id).ok_or_else(|| FormatError::invalid_input(format!("missing quote child {child_id:?}")))?;
+                write_block(out, &child.block, graph, rels)?;
+            }
         }
         Block::List { ordered, items } => {
             write_list(out, *ordered, items, graph, rels)?;
@@ -195,6 +199,15 @@ fn nested_block_ids(graph: &DocumentGraph) -> HashSet<NodeId> {
 fn collect_nested_ids(block: &Block, ids: &mut HashSet<NodeId>, graph: &DocumentGraph) {
     match block {
         Block::Section { children, .. } => {
+            for child in children {
+                if ids.insert(*child) {
+                    if let Some(node) = graph.block(*child) {
+                        collect_nested_ids(&node.block, ids, graph);
+                    }
+                }
+            }
+        }
+        Block::Quote { children, .. } => {
             for child in children {
                 if ids.insert(*child) {
                     if let Some(node) = graph.block(*child) {

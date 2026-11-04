@@ -72,7 +72,7 @@ pub(crate) fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
                     push_inline(&mut content, inline.clone());
                 }
             }
-            Block::Quote { content: quote } => {
+            Block::Quote { content: quote, .. } => {
                 for inline in quote {
                     push_inline(&mut content, inline.clone());
                 }
@@ -88,7 +88,7 @@ pub(crate) fn quote_block_from_blocks(blocks: Vec<Block>) -> Block {
             _ => {}
         }
     }
-    if content.is_empty() { Block::Quote { content: vec![Inline::Text { text: String::new() }] } } else { Block::Quote { content } }
+    if content.is_empty() { Block::Quote { content: vec![Inline::Text { text: String::new() }], children: Vec::new() } } else { Block::Quote { content, children: Vec::new() } }
 }
 
 pub(crate) fn push_inline(inlines: &mut Vec<Inline>, inline: Inline) {

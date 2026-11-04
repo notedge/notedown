@@ -185,7 +185,7 @@ fn pdf_diagram_export_keeps_every_source_line_intact() {
                 .blocks
                 .iter()
                 .filter_map(|node| match &node.block {
-                    Block::Paragraph { content } | Block::Quote { content } => Some(content.iter().map(Inline::plain_text).collect::<String>()),
+                    Block::Paragraph { content } | Block::Quote { content, .. } => Some(content.iter().map(Inline::plain_text).collect::<String>()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

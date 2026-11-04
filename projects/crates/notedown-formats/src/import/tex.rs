@@ -1343,7 +1343,7 @@ fn resolve_pending_references(graph: &mut DocumentGraph, labels: &HashMap<String
     for node in &mut graph.blocks {
         match &mut node.block {
             Block::Section { title, .. } => fix_pending_refs(title, labels, &mut unresolved),
-            Block::Paragraph { content } | Block::Quote { content } => fix_pending_refs(content, labels, &mut unresolved),
+            Block::Paragraph { content } | Block::Quote { content, .. } => fix_pending_refs(content, labels, &mut unresolved),
             Block::List { items, .. } => {
                 for item in items {
                     fix_pending_refs(&mut item.content, labels, &mut unresolved);

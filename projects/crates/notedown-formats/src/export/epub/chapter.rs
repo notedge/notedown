@@ -131,6 +131,7 @@ fn plan_by_top_level_sections(graph: &DocumentGraph) -> Option<Vec<ChapterPlan>>
             label,
             blocks,
             synthetic: true,
+            Block::Quote { children, .. } => ids.extend(children.iter().copied()),
         });
     }
     if plans.is_empty() { None } else { Some(plans) }

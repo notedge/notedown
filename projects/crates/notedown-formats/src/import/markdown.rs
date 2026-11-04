@@ -109,6 +109,17 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
             }
             pending_footnote = None;
         }
+        if matches!(
+            node.element_type(),
+            MarkdownElementType::HtmlTag | MarkdownElementType::HtmlComment | MarkdownElementType::XmlTag | MarkdownElementType::XmlComment
+        ) {
+            let (html, consumed) = extract_html_block(node, children.get(index..).unwrap_or_default(), source);
+            index += consumed;
+            let html = html.trim_end_matches('\n').trim_end_matches('\r').to_owned();
+            graph.push_block(Block::RawHtml { html });
+            pending_footnote = None;
+            continue;
+        }
         match lower_block_node(node, source, &mut context, &mut graph) {
             BlockOutcome::Block(block) => {
                 graph.push_block(block);
@@ -918,6 +929,30 @@ fn lower_list_item(
         }
     }
     (content, children)
+}
+
+/// Collect the complete HTML block that starts at `node`.
+///
+/// `oak-markdown` emits only the opening tag as an `HtmlTag` node and leaves the
+/// remaining lines as paragraph text, so the closing tag would be escaped on
+/// export. CommonMark ends an HTML block at the first blank line, which makes
+/// the block the contiguous run of siblings after the opening tag.
+fn extract_html_block(node: RedNode<MarkdownLanguage>, trailing: &[RedTree<MarkdownLanguage>], source: &SourceText) -> (String, usize) {
+    let mut end = node.span().end;
+    let mut consumed = 0;
+    for child in trailing {
+        let (start, child_end) = match child {
+            RedTree::Node(candidate) => (candidate.span().start, candidate.span().end),
+            RedTree::Leaf(leaf) => (leaf.span().start, leaf.span().end),
+        };
+        let gap = source.slice((end..start).into());
+        if !gap.trim().is_empty() || gap.contains("\n\n") || gap.contains("\r\n\r\n") {
+            break;
+        }
+        end = child_end;
+        consumed += 1;
+    }
+    (source.slice((node.span().start..end).into()).into_owned(), consumed)
 }
 
 /// Lower a blockquote into inline content plus nested block children.

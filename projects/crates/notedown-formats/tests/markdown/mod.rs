@@ -762,6 +762,22 @@ fn markdown_task_list_lowers_checkbox_state() {
 }
 
 #[test]
+fn markdown_raw_html_block_keeps_every_line() {
+    for source in ["<div>text</div>\n", "<div>\nline one\nline two\n</div>\n"] {
+        let graph = import_markdown_bytes("html-block.md", source).expect("import raw HTML block");
+        let Block::RawHtml { html } = &graph.blocks[0].block else {
+            panic!("expected one raw HTML block, got {:#?}", graph.blocks)
+        };
+        assert_eq!(graph.blocks.len(), 1, "{:#?}", graph.blocks);
+        assert_eq!(html.trim_end(), source.trim_end());
+        let markdown = export_markdown(&graph).expect("export raw HTML block");
+        assert_eq!(markdown, format!("{}\n\n", source.trim_end()));
+        let reopened = import_markdown_bytes("html-block-roundtrip.md", &markdown).expect("reopen raw HTML block");
+        assert_eq!(export_markdown(&reopened).expect("re-export raw HTML block"), markdown);
+    }
+}
+
+#[test]
 fn markdown_raw_html_block_is_preserved() {
     let source = "# Task + HTML Test\n\n<div class=\"note\">\n\nBody text.\n";
     let graph = import_markdown_bytes("html.md", source).expect("import markdown with HTML");

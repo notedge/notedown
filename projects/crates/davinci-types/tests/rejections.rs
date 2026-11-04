@@ -13,8 +13,8 @@ const MATRIX_AREAS: [&str; 2] = ["chart", "diagram"];
 /// source of truth.
 const MATRIX_TOTAL: usize = 83;
 const MATRIX_SUPPORTED: usize = 33;
-const MATRIX_APPROXIMATED: usize = 10;
-const MATRIX_REJECTED: usize = 40;
+const MATRIX_APPROXIMATED: usize = 9;
+const MATRIX_REJECTED: usize = 41;
 
 /// Every code the subsystem can emit. A new constant must land here and in the
 /// catalog in the same change, otherwise the catalog stops being authoritative.

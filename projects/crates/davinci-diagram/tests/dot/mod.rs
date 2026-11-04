@@ -248,3 +248,18 @@ fn a_cycle_reports_the_back_edge_and_its_authored_span() {
     assert!(cycle.message().fallback().unwrap_or_default().contains("b->a"), "the message must name the reversed edge");
     assert_eq!(lowered.plan.edges.len(), 2, "breaking the cycle must not drop an edge");
 }
+
+#[test]
+fn a_self_edge_is_refused_at_its_own_statement() {
+    let source = "digraph {\n  a -> b\n  b -> b\n}\n";
+    let lowered = dot_to_scene(source).expect("the rest of the graph still lays out");
+
+    let refusal = lowered
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == codes::UNSUPPORTED)
+        .unwrap_or_else(|| panic!("a self edge must be refused: {:?}", lowered.diagnostics));
+
+    assert_eq!(label_text(source, refusal), "b -> b", "the label must cover the self edge statement");
+    assert_eq!(lowered.plan.edges.len(), 1, "the self edge is skipped and every other edge is routed");
+}

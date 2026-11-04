@@ -88,10 +88,10 @@
     },
     {
       "code": "davinci.chart.missing-value",
-      "severity": "error",
-      "meaning": "A row has no value for a field the encoding needs.",
-      "trigger": "A row that omits an encoded field, or carries `null` for it.",
-      "span": "The row object inside `data.values`."
+      "severity": "warning",
+      "meaning": "A row has no value for a field the encoding needs, so that row is skipped.",
+      "trigger": "A row that omits an encoded field or carries `null` for it, which leaves the affected rows out of the marks.",
+      "span": "The row object inside `data.values`, otherwise the column that owns the skipped rows."
     },
     {
       "code": "davinci.chart.non-finite-value",
@@ -395,7 +395,7 @@
     {"id": "diagram-37", "area": "diagram", "item": "PlantUML rejected statements", "status": "rejected", "code": "davinci.diagram.unsupported", "cases": ["diagram-plantuml-skinparam"]},
     {"id": "diagram-38", "area": "diagram", "item": "class and sequence mixed in one PlantUML source", "status": "rejected", "code": "davinci.diagram.unsupported", "reason": "`mixed_class_and_sequence_sources_are_refused_at_the_contradicting_marker` pins the contradicting marker span"},
     {"id": "diagram-39", "area": "diagram", "item": "nested Mermaid subgraphs", "status": "approximated"},
-    {"id": "diagram-40", "area": "diagram", "item": "Mermaid self messages", "status": "approximated"},
+    {"id": "diagram-40", "area": "diagram", "item": "self edges (DOT `a -> a`, Mermaid `A->>A`, PlantUML self message)", "status": "rejected", "code": "davinci.diagram.unsupported", "reason": "neither the layered layout nor the time-ordered layout has a loop route, so the edge is skipped with an error located on its own statement and the rest of the scene still renders. `a_self_edge_is_refused_at_its_own_statement` pins the DOT case"},
     {"id": "diagram-41", "area": "diagram", "item": "four-corner DOT compass ports", "status": "approximated"},
     {"id": "diagram-42", "area": "diagram", "item": "non-equivalent DOT shapes", "status": "approximated"},
     {"id": "diagram-43", "area": "diagram", "item": "cycle broken by layered placement", "status": "approximated", "code": "davinci.diagram.approximated", "reason": "`a_cycle_reports_the_back_edge_and_its_authored_span` pins the DOT label, span = the edge statement that no longer advances to a later layer (`b -> a`), and the message names every reversed edge. The layout still routes every edge, so the row has no rejection fixture"},

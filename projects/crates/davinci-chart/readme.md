@@ -71,10 +71,13 @@ Documented degradations are recorded as diagnostics:
 
 Structural failures return `ChartError` with one of these codes:
 
-`davinci.chart.empty-data`, `davinci.chart.ragged-column`, `davinci.chart.type-mismatch`, `davinci.chart.missing-value`,
+`davinci.chart.empty-data`, `davinci.chart.ragged-column`, `davinci.chart.type-mismatch`,
 `davinci.chart.non-finite-value`, `davinci.chart.duplicate-field`, `davinci.chart.unknown-field`,
-`davinci.chart.invalid-spec`, `davinci.chart.invalid-scale`, `davinci.chart.empty-domain`,
-`davinci.chart.degenerate-domain`, and `davinci.chart.approximated`.
+`davinci.chart.invalid-spec`, `davinci.chart.invalid-scale`, and `davinci.chart.empty-domain`.
+
+Warnings travel with a built scene and never fail the compile: `davinci.chart.missing-value`
+(rows are skipped), `davinci.chart.degenerate-domain` (the domain is expanded), and
+`davinci.chart.approximated`.
 
 ## Out of scope in this slice
 

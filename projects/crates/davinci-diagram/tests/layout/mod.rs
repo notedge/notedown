@@ -343,3 +343,30 @@ fn converging_edges_share_a_track_in_front_of_the_target() {
 fn routing_is_byte_deterministic() {
     assert_eq!(bypass_plan(), bypass_plan());
 }
+
+#[test]
+fn an_edge_to_an_undeclared_node_is_refused_at_its_statement() {
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    spec.nodes = vec![node("A")];
+    spec.edges = vec![edge("A", "missing")];
+
+    let plan = compile_spec(&spec);
+    assert!(has_message(&plan, "references unknown node `missing`"), "the diagnostic must name the missing node: {:?}", plan.diagnostics);
+    assert!(plan.edges.is_empty(), "the dangling edge is dropped and the remaining nodes still lay out");
+}
+
+#[test]
+fn an_edge_to_an_undeclared_port_keeps_its_route_on_the_default_anchor() {
+    let mut spec = DiagramSpec::new(Direction::TopDown);
+    spec.nodes = vec![node("A"), node("B")];
+    spec.edges = vec![DiagramEdge {
+        from: Endpoint { node: "A".to_string(), port: Some("ghost".to_string()) },
+        to: Endpoint { node: "B".to_string(), port: None },
+        label: None,
+        style: EdgeStyle::Arrow,
+    }];
+
+    let plan = compile_spec(&spec);
+    assert!(has_message(&plan, "unknown port `ghost`"), "the diagnostic must name the port: {:?}", plan.diagnostics);
+    assert_eq!(plan.edges.len(), 1, "the edge keeps its route on the default anchor");
+}

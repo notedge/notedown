@@ -216,6 +216,13 @@ fn write_table(out: &mut String, rows: &[TableRow], image_urls: Option<&HashMap<
     if rows.is_empty() {
         return Ok(());
     }
+    if rows.iter().any(|row| row.cells.iter().any(|cell| cell.colspan > 1 || cell.rowspan > 1)) {
+        // GFM tables cannot express merged cells, so a spanning table is written
+        // as an inline HTML table instead of silently dropping the spans.
+        super::html::write_table(out, rows)?;
+        out.push('\n');
+        return Ok(());
+    }
     for (index, row) in rows.iter().enumerate() {
         out.push('|');
         for cell in &row.cells {

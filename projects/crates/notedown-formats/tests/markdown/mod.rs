@@ -206,6 +206,52 @@ fn markdown_table_export_uses_three_hyphen_delimiters() {
 }
 
 #[test]
+fn markdown_spanning_table_round_trips_through_an_html_table() {
+    let mut graph = DocumentGraph::new(DocumentId(7));
+    graph.push_block(Block::Table {
+        caption: None,
+        rows: vec![
+            notedown_ir::TableRow {
+                is_header: true,
+                cells: vec![notedown_ir::TableCell {
+                    content: vec![Inline::Text { text: "Head".into() }],
+                    colspan: 2,
+                    rowspan: 1,
+                }],
+            },
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "a".into() }], colspan: 1, rowspan: 2 },
+                    notedown_ir::TableCell { content: vec![Inline::Text { text: "b".into() }], colspan: 1, rowspan: 1 },
+                ],
+            },
+            notedown_ir::TableRow {
+                is_header: false,
+                cells: vec![notedown_ir::TableCell { content: vec![Inline::Text { text: "c".into() }], colspan: 1, rowspan: 1 }],
+            },
+        ],
+    });
+
+    let markdown = export_markdown(&graph).expect("export spanning table");
+    assert!(markdown.contains("<table>"), "{markdown:?}");
+    assert!(markdown.contains("colspan=\"2\""), "{markdown:?}");
+    assert!(markdown.contains("rowspan=\"2\""), "{markdown:?}");
+
+    let reopened = import_markdown_bytes("span-table-roundtrip.md", &markdown).expect("reopen spanning table");
+    let Block::Table { rows, .. } = &reopened.blocks[0].block
+    else {
+        panic!("reopened table expected: {:#?}", reopened.blocks)
+    };
+    assert!(rows[0].is_header);
+    assert_eq!(rows[0].cells[0].colspan, 2);
+    assert_eq!(rows[1].cells[0].rowspan, 2);
+    assert_eq!(rows[1].cells[1].rowspan, 1);
+    assert!(reopened.validate().is_valid());
+    assert_eq!(export_markdown(&reopened).expect("re-export spanning table"), markdown);
+}
+
+#[test]
 fn markdown_inline_code_strips_backticks() {
     let source = "Use `code` here.\n";
     let graph = import_markdown_bytes("inline-code.md", source).expect("import markdown");

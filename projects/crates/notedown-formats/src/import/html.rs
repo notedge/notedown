@@ -278,6 +278,28 @@ fn attribute(element: &Element, name: &str) -> Option<String> {
     element.attributes.iter().find(|attribute| attribute.name.eq_ignore_ascii_case(name)).and_then(|attribute| attribute.value.clone())
 }
 
+/// Read a table cell span attribute.
+///
+/// The IR carries spans as counts, so they map directly when the authored value
+/// is a positive integer. Anything else cannot be represented and is refused
+/// with a loss marker instead of silently collapsing the cell to a single slot.
+fn cell_span(attribute_name: &str, cell: &Element, graph: &mut DocumentGraph) -> u32 {
+    let Some(raw) = attribute(cell, attribute_name) else {
+        return 1;
+    };
+    if let Ok(span) = raw.trim().parse::<u32>() {
+        if span >= 1 {
+            return span;
+        }
+    }
+    graph.push_loss(LossMarker {
+        code: "import.html.invalid_cell_span".into(),
+        message: format!("`{attribute_name}` value `{raw}` is not a positive integer, so the cell keeps a span of 1"),
+        status: SemanticStatus::Partial,
+    });
+    1
+}
+
 fn decode_hex(text: &str) -> Option<String> {
     if text.len() % 2 != 0 {
         return None;
@@ -402,7 +424,11 @@ fn lower_blocks(element: &Element, graph: &mut DocumentGraph, source: &str) -> V
                             if cell.children.iter().filter_map(as_element).any(is_block_element) {
                                 flattened_cell_blocks = true;
                             }
-                            notedown_ir::TableCell { content: lower_inlines(cell, graph, source), colspan: 1, rowspan: 1 }
+                            notedown_ir::TableCell {
+                                content: lower_inlines(cell, graph, source),
+                                colspan: cell_span("colspan", cell, graph),
+                                rowspan: cell_span("rowspan", cell, graph),
+                            }
                         })
                         .collect();
                     notedown_ir::TableRow { is_header, cells }

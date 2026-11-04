@@ -494,6 +494,43 @@ fn html_import_reads_pandoc_style_footnotes() {
 }
 
 #[test]
+fn html_import_maps_table_cell_spans_into_the_ir() {
+    let graph = import_html_text(
+        "spans.html",
+        "<body><table><tr><th colspan=\"2\">Head</th></tr><tr><td rowspan=\"2\">a</td><td>b</td></tr><tr><td>c</td></tr></table></body>",
+    )
+    .expect("import html");
+    let Block::Table { rows, .. } = &graph.blocks[0].block
+    else {
+        panic!("table expected, got {:?}", graph.blocks)
+    };
+    assert_eq!(rows[0].cells[0].colspan, 2);
+    assert_eq!(rows[0].cells[0].rowspan, 1);
+    assert_eq!(rows[1].cells[0].colspan, 1);
+    assert_eq!(rows[1].cells[0].rowspan, 2);
+    assert_eq!(rows[1].cells[1].colspan, 1);
+    assert_eq!(rows[1].cells[1].rowspan, 1);
+    assert!(!graph.coverage.loss.iter().any(|loss| loss.code == "import.html.invalid_cell_span"), "{:?}", graph.coverage.loss);
+    assert!(graph.validate().is_valid());
+}
+
+#[test]
+fn html_import_refuses_invalid_cell_span_instead_of_collapsing_it() {
+    let graph = import_html_text("bad-span.html", "<body><table><tr><td colspan=\"0\">a</td><td rowspan=\"wide\">b</td></tr></table></body>")
+        .expect("import html");
+    let Block::Table { rows, .. } = &graph.blocks[0].block
+    else {
+        panic!("table expected, got {:?}", graph.blocks)
+    };
+    assert_eq!(rows[0].cells[0].colspan, 1);
+    assert_eq!(rows[0].cells[1].rowspan, 1);
+    let invalid: Vec<&notedown_ir::LossMarker> =
+        graph.coverage.loss.iter().filter(|loss| loss.code == "import.html.invalid_cell_span").collect();
+    assert_eq!(invalid.len(), 2, "{:?}", graph.coverage.loss);
+    assert!(invalid.iter().all(|loss| loss.status == SemanticStatus::Partial));
+}
+
+#[test]
 fn html_import_records_flattened_table_cell_blocks() {
     let graph =
         import_html_text("cell-blocks.html", "<body><table><tr><th>Head</th></tr><tr><td><p>one</p><p>two</p></td></tr></table></body>")

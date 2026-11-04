@@ -120,7 +120,12 @@ fn lower_markdown_tree(label: &str, green_tree: &GreenNode<MarkdownLanguage>, so
             let (html, consumed) = extract_html_block(node, children.get(index..).unwrap_or_default(), source);
             index += consumed;
             let html = html.trim_end_matches('\n').trim_end_matches('\r').to_owned();
-            graph.push_block(Block::RawHtml { html });
+            // GFM tables cannot express merged cells, so a spanning table is
+            // exported as an inline HTML table. Reopening it as an opaque raw
+            // block would quietly turn the table back into markup, so a
+            // standalone `<table>` element is lowered into the IR table.
+            let block = lower_html_table_block(&html).unwrap_or(Block::RawHtml { html });
+            graph.push_block(block);
             pending_footnote = None;
             continue;
         }
@@ -961,6 +966,28 @@ fn extract_html_block(node: RedNode<MarkdownLanguage>, trailing: &[RedTree<Markd
         consumed += 1;
     }
     (source.slice((node.span().start..end).into()).into_owned(), consumed)
+}
+
+/// Lower a standalone HTML table block into the IR table.
+///
+/// Only a block that is exactly one `<table>` element is lowered. Anything
+/// else stays verbatim raw HTML, so authored markup is never re-read
+/// opportunistically.
+fn lower_html_table_block(html: &str) -> Option<Block> {
+    let trimmed = html.trim();
+    if !trimmed.starts_with("<table") || !trimmed.ends_with("</table>") {
+        return None;
+    }
+    let imported = crate::import::html::import_html_text("markdown-html-table", trimmed).ok()?;
+    let mut blocks = imported.blocks.into_iter();
+    let first = blocks.next()?;
+    if blocks.next().is_some() {
+        return None;
+    }
+    match first.block {
+        block @ Block::Table { .. } => Some(block),
+        _ => None,
+    }
 }
 
 /// Lower a blockquote into inline content plus nested block children.

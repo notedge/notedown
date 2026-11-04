@@ -279,7 +279,7 @@ fn write_list(
     Ok(())
 }
 
-fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
+pub(crate) fn write_table(out: &mut String, rows: &[TableRow]) -> Result<(), FormatError> {
     out.push_str("<table>");
     for row in rows {
         out.push_str("<tr>");

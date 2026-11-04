@@ -76,12 +76,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 cfb = "0.15.0"
 
-# Benchmark comparison only — production path uses acorn-codec.
-# Kept so that comparative benchmarks between flate2 and acorn-codec
-# remain possible. Do NOT add this to any crate's [dependencies]; use as
-# dev-dependency only for benchmark fixtures.
-flate2 = "1.1.10"
-
 [profile.release]
 lto = true
 opt-level = "s"

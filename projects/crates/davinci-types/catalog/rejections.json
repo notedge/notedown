@@ -33,9 +33,9 @@
     {
       "code": "davinci.diagram.parse-failed",
       "severity": "error",
-      "meaning": "The fence is not valid for the language it declares.",
-      "trigger": "A DOT or Mermaid statement the frontend cannot parse at all.",
-      "span": "The failing token when the parser reports one, otherwise the whole fence body."
+      "meaning": "The frontend rejected the fence before it could hand back a tree.",
+      "trigger": "An Oak parser returns a hard error instead of a recovered tree, which the DOT, Mermaid, and PlantUML parsers only do for input they cannot even tokenize.",
+      "span": "The parser reports no location today, so every entry falls back to the whole fence body."
     },
     {
       "code": "davinci.diagram.ast-unavailable",
@@ -286,12 +286,12 @@
       "span_text": "<b>bold</b>"
     },
     {
-      "id": "diagram-dot-parse-failed",
+      "id": "diagram-dot-record-shape",
       "language": "dot",
-      "source": "digraph {\n  a ->\n}\n",
-      "code": "davinci.diagram.parse-failed",
+      "source": "digraph {\n  a [shape=record]\n}\n",
+      "code": "davinci.diagram.unsupported",
       "severity": "error",
-      "span_text": "a ->"
+      "span_text": "shape=record"
     },
     {
       "id": "diagram-plantuml-skinparam",

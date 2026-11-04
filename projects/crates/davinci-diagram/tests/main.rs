@@ -1,3 +1,4 @@
+mod catalog;
 #[cfg(feature = "dot")]
 mod dot;
 mod layout;

@@ -22,3 +22,6 @@ default = ["mermaid", "dot", "plantuml"]
 dot = ["dep:oak-core", "dep:oak-dot"]
 mermaid = ["dep:oak-core", "dep:oak-mermaid", "dep:oak-uml"]
 plantuml = ["dep:oak-core", "dep:oak-plantuml"]
+
+[dev-dependencies]
+serde_json = { workspace = true }

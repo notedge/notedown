@@ -16,25 +16,11 @@ oak-core = { workspace = true }
 oak-html = { workspace = true, features = ["serde"] }
 oak-markdown = { workspace = true, features = ["serde"] }
 oak-notedown = { workspace = true, features = ["serde", "diagnostic"] }
-oak-org-mode = { workspace = true, features = ["serde"] }
 oak-testing = { workspace = true }
 oak-xml = { workspace = true, features = ["serde", "diagnostic"] }
 acorn-doc = { workspace = true }
 notedown-formats = { workspace = true, default-features = false, features = ["doc", "markdown", "notedown"] }
 notedown-ir = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
-boost-benchmark = { workspace = true }
 cfb = { workspace = true }
-markdown = "1.0.0"
-pulldown-cmark = "0.13.1"
-html5ever = "0.38.0"
-
-[[bench]]
-name = "compare_markdown"
-harness = false
-
-[[bench]]
-name = "compare_html"
-harness = false

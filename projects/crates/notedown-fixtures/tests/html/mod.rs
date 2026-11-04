@@ -1,2 +1,1 @@
-mod lexer;
 mod parser;

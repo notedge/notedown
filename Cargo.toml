@@ -57,7 +57,6 @@ oak-testing = { git = "https://github.com/yggdrasil-language/oak.rs.git", rev = 
 notedown = { path = "projects/crates/notedown" }
 notedown-ir = { path = "projects/crates/notedown-ir" }
 notedown-formats = { path = "projects/crates/notedown-formats", default-features = false }
-notedown-fixtures = { path = "projects/crates/notedown-fixtures" }
 
 # DaVinci diagram subsystem
 davinci-types = { path = "projects/crates/davinci-types" }

@@ -5,7 +5,11 @@ use notedown_ir::{
     SourceSpan, TableCell, TableRow,
 };
 use oak_core::{GreenNode, Parser, RedNode, RedTree, SourceText, parser::session::ParseSession};
-use oak_markdown::{MarkdownLanguage, MarkdownParser, parser::element_type::MarkdownElementType};
+use oak_markdown::{
+    MarkdownLanguage, MarkdownParser,
+    lexer::token_type::MarkdownTokenType,
+    parser::element_type::MarkdownElementType,
+};
 
 use super::{
     common::{decode_escaped_text, register_image_assets},
@@ -381,10 +385,14 @@ fn collect_inlines(node: RedNode<MarkdownLanguage>, source: &SourceText, context
                     push_inline(&mut inlines, Inline::Text { text: trailing });
                 }
             }
-            RedTree::Leaf(_) => {
-                let text = child.text(source);
+            RedTree::Leaf(leaf) => {
+                let text = leaf.text(source);
                 if !text.is_empty() && !is_markdown_marker(text.as_ref()) {
-                    push_inline(&mut inlines, Inline::Text { text: decode_escaped_text(text.as_ref()) });
+                    let inline = match leaf.kind() {
+                        MarkdownTokenType::HtmlTag | MarkdownTokenType::HtmlComment => Inline::RawHtml { html: text.into_owned() },
+                        _ => Inline::Text { text: decode_escaped_text(text.as_ref()) },
+                    };
+                    push_inline(&mut inlines, inline);
                 }
             }
         }

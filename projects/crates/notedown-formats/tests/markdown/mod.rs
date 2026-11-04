@@ -762,6 +762,16 @@ fn markdown_task_list_lowers_checkbox_state() {
 }
 
 #[test]
+fn markdown_inline_html_stays_verbatim() {
+    let source = "a <b>x</b> b\n";
+    let graph = import_markdown_bytes("inline-html.md", source).expect("import inline HTML");
+    let markdown = export_markdown(&graph).expect("export inline HTML");
+    assert_eq!(markdown, "a <b>x</b> b\n\n");
+    let reopened = import_markdown_bytes("inline-html-roundtrip.md", &markdown).expect("reopen inline HTML");
+    assert_eq!(export_markdown(&reopened).expect("re-export inline HTML"), markdown);
+}
+
+#[test]
 fn markdown_raw_html_block_keeps_every_line() {
     for source in ["<div>text</div>\n", "<div>\nline one\nline two\n</div>\n"] {
         let graph = import_markdown_bytes("html-block.md", source).expect("import raw HTML block");

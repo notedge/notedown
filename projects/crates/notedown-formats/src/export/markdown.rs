@@ -369,7 +369,13 @@ fn write_inline(
                 }
             }
         },
-        Inline::Citation { .. } | Inline::Attributed { .. } => {
+        Inline::Attributed { .. } => {
+            return Err(FormatError::unsupported(
+                "markdown",
+                "inline `id`/`class` attributes on inline content have no Markdown representation and are refused instead of dropped",
+            ));
+        }
+        Inline::Citation { .. } => {
             return Err(FormatError::unsupported(
                 "markdown",
                 "inline semantic node is not representable by the conservative IR markdown exporter yet",

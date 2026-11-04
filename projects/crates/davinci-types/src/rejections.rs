@@ -44,10 +44,38 @@ pub struct RejectionCase {
     pub span_text: String,
 }
 
+/// One row of the published capability matrix.
+///
+/// A rejected row is a promise: it names the code the entry reports and either
+/// the catalog case that exercises it or the reason no case exists. Supported
+/// and approximated rows carry no rejection evidence.
+#[derive(Clone, Debug, Deserialize)]
+pub struct MatrixRow {
+    /// Stable row id, `chart-<n>` or `diagram-<n>`.
+    pub id: String,
+    /// Owning component, `chart` or `diagram`.
+    pub area: String,
+    /// Short author-facing description of the row.
+    pub item: String,
+    /// One of `supported`, `approximated`, or `rejected`.
+    pub status: String,
+    /// The code reported for a rejected row.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Catalog cases that exercise a rejected row, or that prove a supported
+    /// row refuses malformed values inside it.
+    #[serde(default)]
+    pub cases: Vec<String>,
+    /// Why a rejected row has no catalog case.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct Catalog {
     codes: Vec<CodeDoc>,
     cases: Vec<RejectionCase>,
+    matrix: Vec<MatrixRow>,
 }
 
 fn catalog() -> Catalog {
@@ -67,4 +95,9 @@ pub fn cases() -> Vec<RejectionCase> {
 /// The cases for one fence language, in catalog order.
 pub fn cases_for(language: &str) -> Vec<RejectionCase> {
     cases().into_iter().filter(|case| case.language == language).collect()
+}
+
+/// Every capability matrix row, in catalog order.
+pub fn matrix() -> Vec<MatrixRow> {
+    catalog().matrix
 }

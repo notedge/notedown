@@ -2,9 +2,19 @@
 
 use std::collections::BTreeSet;
 
-use davinci_types::{CATALOG_JSON, cases, code_docs, codes};
+use davinci_types::{CATALOG_JSON, cases, code_docs, codes, matrix};
 
 const SEVERITIES: [&str; 2] = ["error", "warning"];
+const MATRIX_STATUSES: [&str; 3] = ["supported", "approximated", "rejected"];
+const MATRIX_AREAS: [&str; 2] = ["chart", "diagram"];
+
+/// The published matrix totals. A row added or reclassified must update this
+/// gate in the same change, so the doc, the catalog and the tests stay one
+/// source of truth.
+const MATRIX_TOTAL: usize = 79;
+const MATRIX_SUPPORTED: usize = 33;
+const MATRIX_APPROXIMATED: usize = 8;
+const MATRIX_REJECTED: usize = 38;
 
 /// Every code the subsystem can emit. A new constant must land here and in the
 /// catalog in the same change, otherwise the catalog stops being authoritative.
@@ -59,6 +69,60 @@ fn every_code_documents_a_meaning_a_trigger_and_a_span() {
         assert!(!doc.meaning.trim().is_empty(), "`{}` has no author-facing meaning", doc.code);
         assert!(!doc.trigger.trim().is_empty(), "`{}` has no trigger", doc.code);
         assert!(!doc.span.trim().is_empty(), "`{}` has no span description", doc.code);
+    }
+}
+
+#[test]
+fn every_rejection_matrix_row_points_at_a_fixture_or_a_named_reason() {
+    let rows = matrix();
+    assert_eq!(rows.len(), MATRIX_TOTAL, "the catalog matrix must mirror the published matrix");
+    for status in MATRIX_STATUSES {
+        let expected = match status {
+            "supported" => MATRIX_SUPPORTED,
+            "approximated" => MATRIX_APPROXIMATED,
+            _ => MATRIX_REJECTED,
+        };
+        let actual = rows.iter().filter(|row| row.status == status).count();
+        assert_eq!(actual, expected, "the matrix must carry {expected} `{status}` rows, got {actual}");
+    }
+
+    let docs = code_docs();
+    let documented: BTreeSet<&str> = docs.iter().map(|doc| doc.code.as_str()).collect();
+    let shipped = cases();
+    let case_ids: BTreeSet<&str> = shipped.iter().map(|case| case.id.as_str()).collect();
+    let mut ids = BTreeSet::new();
+    let mut referenced = BTreeSet::new();
+
+    for row in &rows {
+        assert!(ids.insert(row.id.clone()), "duplicate matrix row id `{}`", row.id);
+        assert!(MATRIX_AREAS.contains(&row.area.as_str()), "`{}` declares an unknown area `{}`", row.id, row.area);
+        assert!(MATRIX_STATUSES.contains(&row.status.as_str()), "`{}` declares an unknown status `{}`", row.id, row.status);
+        assert!(!row.item.trim().is_empty(), "`{}` has no description", row.id);
+
+        if row.status != "rejected" {
+            assert!(row.code.is_none() && row.reason.is_none(), "`{}` is not rejected but names a code or a reason", row.id);
+            for case in &row.cases {
+                assert!(case_ids.contains(case.as_str()), "`{}` references `{case}`, which the catalog does not carry", row.id);
+                referenced.insert(case.as_str());
+            }
+            continue;
+        }
+
+        let code = row.code.as_deref().unwrap_or_else(|| panic!("`{}` is rejected but names no code", row.id));
+        assert!(documented.contains(code), "`{}` names `{code}`, which the catalog does not document", row.id);
+        for case in &row.cases {
+            assert!(case_ids.contains(case.as_str()), "`{}` references `{case}`, which the catalog does not carry", row.id);
+            referenced.insert(case.as_str());
+        }
+        assert!(
+            !row.cases.is_empty() || row.reason.as_deref().is_some_and(|reason| !reason.trim().is_empty()),
+            "`{}` is rejected but points at neither a fixture nor a reason",
+            row.id
+        );
+    }
+
+    for case in &case_ids {
+        assert!(referenced.contains(case), "catalog case `{case}` is not reachable from any rejection row");
     }
 }
 

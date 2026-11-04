@@ -9,6 +9,7 @@
 mod color;
 mod diagnostics;
 mod geometry;
+mod rejections;
 mod text_metrics;
 mod theme;
 mod transform;
@@ -19,6 +20,7 @@ pub use diagnostics::{
     codes, diagnostic, origin,
 };
 pub use geometry::{Bounds, Point, Rect, Size};
+pub use rejections::{CATALOG_JSON, CodeDoc, RejectionCase, cases, cases_for, code_docs};
 pub use text_metrics::{measure_line, wrap_label};
 pub use theme::{DIAGRAM_THEME, DiagramTheme, EDGE_LABEL_BG_OPACITY, ThemeTokens, contrast_ratio, relative_luminance};
 pub use transform::Transform;

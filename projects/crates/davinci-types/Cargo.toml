@@ -10,6 +10,8 @@ edition.workspace = true
 
 [dependencies]
 boost-diagnostic = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [[test]]
 name = "main"

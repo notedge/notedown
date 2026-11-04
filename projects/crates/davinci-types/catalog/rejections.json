@@ -1,0 +1,313 @@
+{
+  "contract": "/v0",
+  "namespace": "davinci",
+  "codes": [
+    {
+      "code": "davinci.scene.invalid-geometry",
+      "severity": "error",
+      "meaning": "The scene carries a non-finite or negative extent, so nothing can be rasterized.",
+      "trigger": "A rect, radius, or stroke width is NaN, infinite, or negative when a scene node is built.",
+      "span": "No authored text exists at scene construction, so the host reports the failing node."
+    },
+    {
+      "code": "davinci.scene.invalid-style",
+      "severity": "error",
+      "meaning": "A style value is outside the range the scene model accepts.",
+      "trigger": "An opacity outside 0..=1 or a font size at or below zero.",
+      "span": "No authored text exists at scene construction, so the host reports the failing node."
+    },
+    {
+      "code": "davinci.scene.invalid-transform",
+      "severity": "error",
+      "meaning": "A transform component is not finite.",
+      "trigger": "A translate, scale, rotate, or skew component is NaN or infinite.",
+      "span": "No authored text exists at scene construction, so the host reports the failing node."
+    },
+    {
+      "code": "davinci.scene.serialization-failed",
+      "severity": "error",
+      "meaning": "A complete scene could not be written to its vector output.",
+      "trigger": "An id or attribute collides after escaping, or an element the serializer cannot express.",
+      "span": "No authored text exists at serialization, so the host reports the failing element."
+    },
+    {
+      "code": "davinci.diagram.parse-failed",
+      "severity": "error",
+      "meaning": "The fence is not valid for the language it declares.",
+      "trigger": "A DOT or Mermaid statement the frontend cannot parse at all.",
+      "span": "The failing token when the parser reports one, otherwise the whole fence body."
+    },
+    {
+      "code": "davinci.diagram.ast-unavailable",
+      "severity": "error",
+      "meaning": "The frontend ran but produced no AST the lowering can walk.",
+      "trigger": "An Oak frontend returns an empty or unusable document tree.",
+      "span": "The whole fence body, because there is no construct to name."
+    },
+    {
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "meaning": "The source parsed, but this family or construct has no lowering into a DaVinci scene.",
+      "trigger": "A Mermaid family outside flowchart, sequence, class, or state, a second diagram header, an illegal orientation, a sequence block or note that would be dropped, a DOT HTML-like label, record shape, named port, `pos`, `splines`, `URL`, or a second graph, a PlantUML `skinparam`, missing terminator, or missing header.",
+      "span": "The rejected statement or attribute when the frontend can point at it, otherwise the whole fence body."
+    },
+    {
+      "code": "davinci.diagram.approximated",
+      "severity": "warning",
+      "meaning": "A construct is drawn with a different scene primitive than the one it names.",
+      "trigger": "A DOT node shape or arrowhead with no exact primitive, which is drawn as box or plain line.",
+      "span": "The attribute that names the approximated shape or arrowhead."
+    },
+    {
+      "code": "davinci.diagram.empty-diagram",
+      "severity": "error",
+      "meaning": "The fence declares a diagram with nothing to draw.",
+      "trigger": "A DOT or Mermaid body with no nodes and no edges.",
+      "span": "The whole fence body."
+    },
+    {
+      "code": "davinci.chart.empty-data",
+      "severity": "error",
+      "meaning": "The chart has no rows or no columns to encode.",
+      "trigger": "An empty `values` array, or an encoding that selects no field.",
+      "span": "The `data.values` node."
+    },
+    {
+      "code": "davinci.chart.ragged-column",
+      "severity": "error",
+      "meaning": "Two columns disagree on how many rows the snapshot holds.",
+      "trigger": "Inline rows with different key counts after projection.",
+      "span": "The `data.values` node."
+    },
+    {
+      "code": "davinci.chart.type-mismatch",
+      "severity": "error",
+      "meaning": "A value cannot be read as the kind its field declares.",
+      "trigger": "A string in a quantitative field, or an object in a nominal field.",
+      "span": "The offending value node inside `data.values`."
+    },
+    {
+      "code": "davinci.chart.missing-value",
+      "severity": "error",
+      "meaning": "A row has no value for a field the encoding needs.",
+      "trigger": "A row that omits an encoded field, or carries `null` for it.",
+      "span": "The row object inside `data.values`."
+    },
+    {
+      "code": "davinci.chart.non-finite-value",
+      "severity": "error",
+      "meaning": "A quantitative value is NaN or infinite.",
+      "trigger": "A literal `null` accepted as numeric, or a value the reader cannot keep finite.",
+      "span": "The offending value node inside `data.values`."
+    },
+    {
+      "code": "davinci.chart.duplicate-field",
+      "severity": "error",
+      "meaning": "Two columns or two channel bindings share one field name.",
+      "trigger": "The same field bound twice, or duplicate keys in one row.",
+      "span": "The `encoding` node that repeats the field."
+    },
+    {
+      "code": "davinci.chart.unknown-field",
+      "severity": "error",
+      "meaning": "An encoding points at a field the data does not carry.",
+      "trigger": "A `field` value absent from every row.",
+      "span": "The binding object that names the field."
+    },
+    {
+      "code": "davinci.chart.invalid-spec",
+      "severity": "error",
+      "meaning": "The specification parses but contradicts itself.",
+      "trigger": "A non-boolean `zero` or `nice`, a non-string title, a width or height that is not a number.",
+      "span": "The smallest JSON node that carries the contradiction."
+    },
+    {
+      "code": "davinci.chart.invalid-scale",
+      "severity": "error",
+      "meaning": "A scale declaration cannot be trained on the values its channel holds.",
+      "trigger": "Zero or negative values under `log` or `sqrt`, or an empty domain.",
+      "span": "The `scale` node of the channel."
+    },
+    {
+      "code": "davinci.chart.empty-domain",
+      "severity": "error",
+      "meaning": "A channel has no values to train its scale.",
+      "trigger": "Every row missing the encoded field.",
+      "span": "The binding object of the channel."
+    },
+    {
+      "code": "davinci.chart.degenerate-domain",
+      "severity": "warning",
+      "meaning": "A domain collapsed to one value and was expanded to stay drawable.",
+      "trigger": "Every value identical, or a zero-width quantitative range.",
+      "span": "The `scale` node of the channel."
+    },
+    {
+      "code": "davinci.chart.approximated",
+      "severity": "warning",
+      "meaning": "A mark or guide is drawn approximately, or not at all.",
+      "trigger": "A tick label that cannot fit, or a mark the author asked for but the plan drops.",
+      "span": "The `encoding` node that owns the approximated mark."
+    },
+    {
+      "code": "davinci.chart.invalid-json",
+      "severity": "error",
+      "meaning": "The authored fence is not valid JSON.",
+      "trigger": "A syntax error, or trailing content after the document.",
+      "span": "The failing byte range the JSON reader reports, otherwise the whole fence body."
+    },
+    {
+      "code": "davinci.chart.unknown-key",
+      "severity": "error",
+      "meaning": "The document carries a key outside the accepted subset.",
+      "trigger": "A top-level, `encoding`, `mark`, `scale`, or `data` key the subset does not name.",
+      "span": "The offending key's value node."
+    },
+    {
+      "code": "davinci.chart.unsupported-mark",
+      "severity": "error",
+      "meaning": "The document declares a mark outside the accepted subset.",
+      "trigger": "`rule`, `arc`, `area`, `tick`, `point`, or an object mark with an unaccepted type.",
+      "span": "The `mark` node."
+    },
+    {
+      "code": "davinci.chart.unsupported-channel",
+      "severity": "error",
+      "meaning": "The document binds a channel outside the accepted subset.",
+      "trigger": "A `shape`, `size`, `row`, `column`, `theta`, or `detail` binding.",
+      "span": "The binding value node."
+    },
+    {
+      "code": "davinci.chart.unsupported-encoding",
+      "severity": "error",
+      "meaning": "A channel key or statistic is outside the accepted subset.",
+      "trigger": "An aggregate or scale key the subset does not implement.",
+      "span": "The binding value node."
+    },
+    {
+      "code": "davinci.chart.unsupported-scale",
+      "severity": "error",
+      "meaning": "The document declares a scale outside the accepted subset.",
+      "trigger": "`pow`, `symlog`, `quantile`, or a scale with an unaccepted domain or range form.",
+      "span": "The `scale` node."
+    },
+    {
+      "code": "davinci.chart.unsupported-transform",
+      "severity": "error",
+      "meaning": "The document declares a data transform.",
+      "trigger": "Any `transform` array, including `filter`, `calculate`, and `timeUnit`.",
+      "span": "The `transform` array node."
+    },
+    {
+      "code": "davinci.chart.unsupported-view",
+      "severity": "error",
+      "meaning": "The document declares a composed view.",
+      "trigger": "`layer`, `hconcat`, `vconcat`, `concat`, `facet`, or `repeat`.",
+      "span": "The composed key's value node."
+    },
+    {
+      "code": "davinci.chart.unsupported-interaction",
+      "severity": "error",
+      "meaning": "The document declares interaction or selection state.",
+      "trigger": "`params`, `selection`, or `bind` on a mark.",
+      "span": "The offending key's value node."
+    },
+    {
+      "code": "davinci.chart.remote-data",
+      "severity": "error",
+      "meaning": "The document points at data that is not inline.",
+      "trigger": "`data.url`, `data.name`, or a dataset outside `data.values`.",
+      "span": "The `data` node."
+    }
+  ],
+  "cases": [
+    {
+      "id": "chart-unsupported-mark",
+      "language": "vega-lite",
+      "source": "{\"data\":{\"values\":[{\"c\":\"A\",\"v\":1}]},\"mark\":\"rule\",\"encoding\":{\"x\":{\"field\":\"c\",\"type\":\"nominal\"},\"y\":{\"field\":\"v\",\"type\":\"quantitative\"}}}",
+      "code": "davinci.chart.unsupported-mark",
+      "severity": "error",
+      "span_text": "\"rule\""
+    },
+    {
+      "id": "chart-unsupported-channel",
+      "language": "vega-lite",
+      "source": "{\"data\":{\"values\":[{\"c\":\"A\",\"v\":1,\"k\":\"red\"}]},\"mark\":\"bar\",\"encoding\":{\"x\":{\"field\":\"c\",\"type\":\"nominal\"},\"y\":{\"field\":\"v\",\"type\":\"quantitative\"},\"shape\":{\"field\":\"k\",\"type\":\"nominal\"}}}",
+      "code": "davinci.chart.unsupported-channel",
+      "severity": "error",
+      "span_text": "{\"field\":\"k\",\"type\":\"nominal\"}"
+    },
+    {
+      "id": "chart-unknown-key",
+      "language": "vega-lite",
+      "source": "{\"data\":{\"values\":[{\"c\":\"A\",\"v\":1}]},\"mark\":\"bar\",\"encoding\":{\"x\":{\"field\":\"c\",\"type\":\"nominal\"},\"y\":{\"field\":\"v\",\"type\":\"quantitative\"}},\"notAKey\":true}",
+      "code": "davinci.chart.unknown-key",
+      "severity": "error",
+      "span_text": "true"
+    },
+    {
+      "id": "chart-invalid-spec",
+      "language": "vega-lite",
+      "source": "{\"data\":{\"values\":[{\"c\":\"A\",\"v\":1}]},\"mark\":\"bar\",\"encoding\":{\"x\":{\"field\":\"c\",\"type\":\"nominal\"},\"y\":{\"field\":\"v\",\"type\":\"quantitative\",\"scale\":{\"nice\":\"yes\"}}}}",
+      "code": "davinci.chart.invalid-spec",
+      "severity": "error",
+      "span_text": "\"yes\""
+    },
+    {
+      "id": "chart-unsupported-transform",
+      "language": "vega-lite",
+      "source": "{\"data\":{\"values\":[{\"c\":\"A\",\"v\":1}]},\"mark\":\"bar\",\"transform\":[{\"filter\":\"datum.v > 0\"}],\"encoding\":{\"x\":{\"field\":\"c\",\"type\":\"nominal\"},\"y\":{\"field\":\"v\",\"type\":\"quantitative\"}}}",
+      "code": "davinci.chart.unsupported-transform",
+      "severity": "error",
+      "span_text": "[{\"filter\":\"datum.v > 0\"}]"
+    },
+    {
+      "id": "diagram-mermaid-note-over",
+      "language": "mermaid",
+      "source": "sequenceDiagram\n  participant Alice\n  participant Bob\n  Note over Alice,Bob: shared\n  Alice->>Bob: Hello\n",
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "span_text": "Note over Alice,Bob: shared"
+    },
+    {
+      "id": "diagram-mermaid-second-header",
+      "language": "mermaid",
+      "source": "graph LR\n    A --> B\ngraph LR\n    C --> D\n",
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "span_text": "graph LR"
+    },
+    {
+      "id": "diagram-dot-html-label",
+      "language": "dot",
+      "source": "digraph {\n  a [label=<b>bold</b>]\n}\n",
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "span_text": "<b>bold</b>"
+    },
+    {
+      "id": "diagram-dot-parse-failed",
+      "language": "dot",
+      "source": "digraph {\n  a ->\n}\n",
+      "code": "davinci.diagram.parse-failed",
+      "severity": "error",
+      "span_text": "a ->"
+    },
+    {
+      "id": "diagram-plantuml-skinparam",
+      "language": "plantuml",
+      "source": "@startuml\nskinparam monochrome true\nA -> B\n@enduml\n",
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "span_text": "skinparam monochrome true"
+    },
+    {
+      "id": "diagram-plantuml-missing-header",
+      "language": "plantuml",
+      "source": "A -> B\n@enduml\n",
+      "code": "davinci.diagram.unsupported",
+      "severity": "error",
+      "span_text": "A -> B"
+    }
+  ]
+}

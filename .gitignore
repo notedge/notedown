@@ -4,6 +4,8 @@
 *.iml
 *.log
 *.txt
+node_modules/
+test-results/
 
 # Rust
 target/

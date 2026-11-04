@@ -6,12 +6,16 @@
 //!    or routed point may leave the canvas, and no route may enter a
 //!    non-endpoint node (inflated by the label clearance), which is what
 //!    "nothing is clipped and nothing is hidden" means in numbers.
-//! 2. Pixels are captured by the pinned headless Chrome and compared against
-//!    the recorded digest, so a rendering change cannot pass unnoticed.
+//! 2. Pixels are captured by the bundled Playwright Chromium and compared
+//!    against the recorded digest, so a rendering change cannot pass unnoticed.
+//!
+//! `scripts/visual/capture.mjs` calls `chromium.launch()` with no `channel`
+//! and no `executablePath`: a system Chrome install is never touched. The
+//! browser comes from `npm ci` plus `npx playwright install chromium`.
 //!
 //! Re-record deliberately with `NOTEDOWN_VISUAL_RECORD=1 cargo test -p
-//! davinci-diagram --test main visual`. Bumping Chrome is a deliberate act: the
-//! version below is the identity of the recorded pixels.
+//! davinci-diagram --test main visual`. Bumping Playwright or Chromium is a
+//! deliberate act: the identity below is the identity of the recorded pixels.
 
 use std::{
     collections::BTreeSet,
@@ -26,8 +30,16 @@ use davinci_scene::{Point, Rect};
 /// One fixture and the frontend that lowers it.
 type Lower = fn(&str) -> Result<LoweredDiagram, DiagramError>;
 
-/// Rasterizer identity. A different host build must re-record on purpose.
-const CHROME_VERSION: &str = "156.0.8078.80";
+/// The `@playwright/test` version that owns the bundled browser.
+const PLAYWRIGHT_VERSION: &str = "1.64.1";
+/// The Playwright browser registry revision for the bundled Chromium.
+const CHROMIUM_REVISION: &str = "1248";
+/// The Chrome-for-Testing build inside that revision.
+const CHROMIUM_BUILD: &str = "156.0.8078.4";
+/// Screenshot scale factor.
+const DEVICE_SCALE_FACTOR: &str = "1";
+/// Emulated `prefers-color-scheme`.
+const COLOR_SCHEME: &str = "light";
 /// Inflate factor used when checking that a route clears a node's stroke.
 const NODE_CLEARANCE: f64 = 2.0;
 /// Padding around the canvas inside the screenshot window.
@@ -74,52 +86,51 @@ fn manifest_path() -> PathBuf {
     fixture_dir().join("manifest")
 }
 
-fn chrome() -> PathBuf {
-    std::env::var("NOTEDOWN_CHROME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("C:/Program Files/Google/Chrome/Application/chrome.exe"))
+fn capture_script() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../scripts/visual/capture.mjs")
 }
 
-/// An isolated profile per capture.
-///
-/// Chrome forwards a second invocation to a live instance that shares the same
-/// profile, so a screenshot can land on a blank page while the previous capture
-/// is still shutting down. One directory per fixture keeps every capture on its
-/// own browser.
-fn profile(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("notedown-visual-profile").join(tag);
-    fs::create_dir_all(&dir).expect("profile dir");
-    dir
-}
-
-/// Read the installed build from the version directory next to the executable.
-///
-/// `chrome --version` is unreliable on Windows: when a browser instance is
-/// already running the flag is forwarded to it and prints nothing, which is
-/// exactly how a pinned gate turns into a silent host dependency. Chrome keeps
-/// each build in `<Application>/<w.x.y.z>/`, so the sibling directory name is
-/// the build identity. `NOTEDOWN_CHROME_VERSION` overrides it for a custom
-/// launcher.
-fn chrome_version(executable: &Path) -> Option<String> {
-    if let Ok(version) = std::env::var("NOTEDOWN_CHROME_VERSION") {
-        return Some(version);
+/// Rasterize one page with the bundled Chromium and return the identity line.
+fn capture(html: &Path, png: &Path, width: u64, height: u64) -> String {
+    let output = Command::new("node")
+        .arg(capture_script())
+        .arg("--html")
+        .arg(html)
+        .arg("--png")
+        .arg(png)
+        .arg("--width")
+        .arg(width.to_string())
+        .arg("--height")
+        .arg(height.to_string())
+        .arg("--dpr")
+        .arg(DEVICE_SCALE_FACTOR)
+        .arg("--color-scheme")
+        .arg(COLOR_SCHEME)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!("browser tests must use the bundled Playwright Chromium: run `npm ci` then `npx playwright install chromium` before this gate: {error}")
+        });
+    assert!(
+        output.status.success(),
+        "`capture.mjs` failed; browser tests must use the bundled Playwright Chromium (run `npm ci` then `npx playwright install chromium`): {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let meta = stdout
+        .lines()
+        .find(|line| line.starts_with("META "))
+        .unwrap_or_else(|| panic!("`capture.mjs` printed no identity line: {stdout}"))
+        .to_string();
+    for expected in [
+        format!("playwright={PLAYWRIGHT_VERSION}"),
+        format!("chromium={CHROMIUM_BUILD}"),
+        format!("revision={CHROMIUM_REVISION}"),
+        format!("dpr={DEVICE_SCALE_FACTOR}"),
+        format!("color-scheme={COLOR_SCHEME}"),
+    ] {
+        assert!(meta.contains(&expected), "the rasterizer identity moved: `{meta}` lacks `{expected}`. Re-record deliberately");
     }
-    let root = executable.parent()?;
-    let mut installed: Vec<(Vec<u32>, String)> = fs::read_dir(root)
-        .ok()?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let parts: Vec<&str> = name.split('.').collect();
-            if parts.len() != 4 || !parts.iter().all(|part| part.chars().all(|c| c.is_ascii_digit())) {
-                return None;
-            }
-            let numbers = parts.iter().map(|part| part.parse::<u32>().ok()).collect::<Option<Vec<u32>>>()?;
-            Some((numbers, name))
-        })
-        .collect();
-    installed.sort();
-    installed.pop().map(|(_, version)| version)
+    meta
 }
 
 /// Stable 128-bit digest without pulling a hashing crate into the workspace.
@@ -197,11 +208,7 @@ fn no_construct_leaves_the_canvas_and_no_route_hides_behind_a_node() {
 }
 
 #[test]
-fn pinned_chrome_pixels_match_the_recorded_manifest() {
-    let executable = chrome();
-    let actual = chrome_version(&executable).unwrap_or_else(|| panic!("cannot read the installed build at {}", executable.display()));
-    assert_eq!(actual, CHROME_VERSION, "the rasterizer moved to {actual}. Re-record deliberately instead of mixing pixels from two builds");
-
+fn bundled_chromium_pixels_match_the_recorded_manifest() {
     let record = std::env::var("NOTEDOWN_VISUAL_RECORD").is_ok();
     let manifest = if record { String::new() } else { fs::read_to_string(manifest_path()).expect("record the visual manifest first") };
     let recorded: BTreeSet<String> =
@@ -228,29 +235,12 @@ fn pinned_chrome_pixels_match_the_recorded_manifest() {
         .expect("wrapper html");
 
         let png = work.join(format!("{id}.png"));
-        let url = format!("file:///{}", html.to_string_lossy().replace('\\', "/"));
-        // Headless Chrome paints nothing in a window below roughly 400x300,
-        // so a small diagram still gets a minimum window and settles in the
-        // top-left corner of a white frame.
+        // A minimum viewport keeps every fixture on the same recorded frame
+        // size the old gate used, so only the browser identity can change a
+        // digest.
         let window_width = (width.ceil() as u64).max(MIN_WINDOW.0);
         let window_height = (height.ceil() as u64).max(MIN_WINDOW.1);
-        let status = Command::new(&executable)
-            .args([
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--no-first-run",
-                "--force-device-scale-factor=1",
-                &format!("--user-data-dir={}", profile(id).to_string_lossy()),
-                &format!("--window-size={window_width},{window_height}"),
-                "--virtual-time-budget=2000",
-                &format!("--screenshot={}", png.to_string_lossy()),
-                &url,
-            ])
-            .status()
-            .expect("rasterizer should run");
-        assert!(status.success(), "{id}: rasterizer exited with {status}");
+        capture(&html, &png, window_width, window_height);
         let bytes = fs::read(&png).unwrap_or_else(|error| panic!("{id}: no screenshot: {error}"));
         assert!(bytes.len() > 1024, "{id}: screenshot is suspiciously small");
 
@@ -267,6 +257,13 @@ fn pinned_chrome_pixels_match_the_recorded_manifest() {
     }
 
     if record {
-        fs::write(manifest_path(), format!("# pinned headless-chrome {CHROME_VERSION}\n{}\n", current.join("\n"))).expect("write manifest");
+        fs::write(
+            manifest_path(),
+            format!(
+                "# playwright {PLAYWRIGHT_VERSION} chromium {CHROMIUM_BUILD} revision {CHROMIUM_REVISION} dpr {DEVICE_SCALE_FACTOR} color-scheme {COLOR_SCHEME}\n{}\n",
+                current.join("\n")
+            ),
+        )
+        .expect("write manifest");
     }
 }

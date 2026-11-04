@@ -4,6 +4,10 @@
     "scripts": {
         "build": "cargo build --release -p notedown-ir -p notedown-formats",
         "test": "cargo test -p notedown-ir -p notedown-formats --release",
-        "fmt": "cargo fmt --all"
+        "fmt": "cargo fmt --all",
+        "visual:install": "playwright install chromium"
+    },
+    "devDependencies": {
+        "@playwright/test": "1.64.1"
     }
 }

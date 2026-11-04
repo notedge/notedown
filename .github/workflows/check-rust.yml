@@ -21,3 +21,29 @@ jobs:
           components: rustfmt, clippy
       - name: Tests
         run: cargo test -p notedown-ir -p notedown-formats --release
+
+  # Browser-driven gates only ever use the Chromium that Playwright installs.
+  # Windows is the recorded identity: the scene asks for `Trebuchet MS` first,
+  # and that family is not present on the macOS runners.
+  browser-gates:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - name: Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Bundled Chromium
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Refuse a system browser launch
+        run: cargo test -p davinci-chart --test browser_toolchain
+      - name: Chart gate
+        run: cargo test -p davinci-chart --features vega-lite --test vega_lite playwright_gate
+      - name: Diagram pixels
+        run: cargo test -p davinci-diagram --test main visual

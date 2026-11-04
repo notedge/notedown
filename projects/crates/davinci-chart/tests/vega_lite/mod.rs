@@ -1,7 +1,7 @@
 //! Vega-Lite subset acceptance: strict lowering into the chart kernel and
 //! structured refusals with JSON paths.
 
-mod chrome_gate;
+mod playwright_gate;
 mod matrix;
 mod spans;
 mod transforms;

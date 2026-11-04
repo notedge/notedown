@@ -184,8 +184,8 @@ fn page_hooks_namespace_every_chart_id_and_keep_mark_colors() {
     }
     assert!(left.contains("style=\"fill: #3366cc;stroke: none\""), "the authored mark color must survive theming: {left}");
 
-    assert!(left.contains(".chart .chart-axis line { stroke:"), "the palette must own axis chrome: {left}");
-    assert!(left.contains(".chart .chart-tick text { fill:"), "the palette must own tick labels");
+    assert!(left.contains(".chart line.chart-axis { stroke:"), "the palette must own axis chrome: {left}");
+    assert!(left.contains(".chart text.chart-tick { fill:"), "the palette must own tick labels");
     assert!(left.contains(".chart .chart-mark { fill: none; stroke: none }"), "the palette must declare a neutral mark default");
 }
 

@@ -500,9 +500,11 @@ fn write_palette(out: &mut String, prefix: &str, tokens: &ThemeTokens, palette: 
     // Chart chrome. Marks carry authored colors as an inline `style`, so the
     // mark rule only supplies a neutral default and never repaints a datum.
     if palette == RolePalette::Chart {
-        let _ = write!(out, "{diagram}-axis line {{ stroke: {edge_stroke} }}");
-        let _ = write!(out, "{diagram}-tick line {{ stroke: {edge_stroke} }}");
-        let _ = write!(out, "{diagram}-tick text {{ fill: {node_text} }}");
+        // Role classes sit on the painted element itself, so the selector must
+        // qualify by tag: `line` for stroke-only chrome, `text` for labels.
+        let _ = write!(out, ".{prefix} line.{prefix}-axis {{ stroke: {edge_stroke} }}");
+        let _ = write!(out, ".{prefix} line.{prefix}-tick {{ stroke: {edge_stroke} }}");
+        let _ = write!(out, ".{prefix} text.{prefix}-tick {{ fill: {node_text} }}");
         let _ = write!(out, "{diagram}-mark {{ fill: none; stroke: none }}");
         let _ = write!(out, "{diagram}-legend {{ stroke: {edge_stroke} }}");
     }

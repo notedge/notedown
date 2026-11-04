@@ -160,13 +160,19 @@ fn write_list(
     image_urls: Option<&HashMap<String, String>>,
 ) -> Result<(), FormatError> {
     let prefix = " ".repeat(indent);
-    for (index, item) in items.iter().enumerate() {
+    let mut next_number = 1;
+    for item in items {
         out.push_str(&prefix);
         if ordered {
-            write!(out, "{}. ", index + 1).map_err(|error| FormatError::unsupported("markdown", error.to_string()))?;
+            let number = item.number.unwrap_or(next_number);
+            next_number = number.saturating_add(1);
+            write!(out, "{number}. ").map_err(|error| FormatError::unsupported("markdown", error.to_string()))?;
         }
         else {
             out.push_str("- ");
+        }
+        if item.is_task {
+            out.push_str(if item.is_checked.unwrap_or(false) { "[x] " } else { "[ ] " });
         }
         write_inlines(out, &item.content, image_urls)?;
         out.push('\n');

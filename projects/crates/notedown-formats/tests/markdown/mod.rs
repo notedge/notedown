@@ -698,6 +698,23 @@ fn markdown_setext_heading_is_not_a_thematic_break() {
 }
 
 #[test]
+fn markdown_ordered_list_numbers_and_task_markers_round_trip() {
+    let ordered_source = "3. three\n4. four\n";
+    let ordered_graph = import_markdown_bytes("ordered-start.md", ordered_source).expect("import ordered list");
+    let ordered_markdown = export_markdown(&ordered_graph).expect("export ordered list");
+    assert_eq!(ordered_markdown, "3. three\n4. four\n\n");
+    let ordered_reopened = import_markdown_bytes("ordered-start-roundtrip.md", &ordered_markdown).expect("reopen ordered list");
+    assert_eq!(ordered_reopened.blocks[0].block, ordered_graph.blocks[0].block);
+
+    let task_source = "- [x] done\n- [ ] pending\n- plain\n";
+    let task_graph = import_markdown_bytes("task-roundtrip-source.md", task_source).expect("import task list");
+    let task_markdown = export_markdown(&task_graph).expect("export task list");
+    assert_eq!(task_markdown, "- [x] done\n- [ ] pending\n- plain\n\n");
+    let task_reopened = import_markdown_bytes("task-roundtrip.md", &task_markdown).expect("reopen task list");
+    assert_eq!(task_reopened.blocks[0].block, task_graph.blocks[0].block);
+}
+
+#[test]
 fn markdown_task_list_lowers_checkbox_state() {
     let source = "- [x] done\n- [ ] pending\n- normal item\n";
     let graph = import_markdown_bytes("task-list.md", source).expect("import task list");
